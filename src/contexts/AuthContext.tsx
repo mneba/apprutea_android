@@ -1,7 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { createContext, ReactNode, useContext, useEffect, useState } from 'react';
 import { supabase } from '../services/supabase';
-import { Vendedor, Rota } from '../types';
 
 interface VendedorAuth {
   id: string;
@@ -19,6 +18,8 @@ interface AuthContextType {
   vendedor: VendedorAuth | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  idioma: 'pt-BR' | 'es';
+  setIdioma: (idioma: 'pt-BR' | 'es') => void;
   signIn: (codigo: string) => Promise<{ success: boolean; error?: string }>;
   signOut: () => Promise<void>;
 }
@@ -42,28 +43,46 @@ const errorTexts = {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [vendedor, setVendedor] = useState<VendedorAuth | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [idioma, setIdiomaState] = useState<'pt-BR' | 'es'>('pt-BR');
 
-  // Carregar vendedor salvo ao iniciar
+  // Carregar vendedor e idioma salvos ao iniciar
   useEffect(() => {
-    loadStoredVendedor();
+    loadStoredData();
   }, []);
 
-  const loadStoredVendedor = async () => {
+  const loadStoredData = async () => {
     try {
-      const storedVendedor = await AsyncStorage.getItem('vendedor_data');
+      const [storedVendedor, storedIdioma] = await Promise.all([
+        AsyncStorage.getItem('vendedor_data'),
+        AsyncStorage.getItem('app_idioma'),
+      ]);
+      
       if (storedVendedor) {
         setVendedor(JSON.parse(storedVendedor));
       }
+      
+      if (storedIdioma === 'pt-BR' || storedIdioma === 'es') {
+        setIdiomaState(storedIdioma);
+      }
     } catch (error) {
-      console.error('Erro ao carregar vendedor:', error);
+      console.error('Erro ao carregar dados:', error);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const signIn = async (codigo: string): Promise<{ success: boolean; error?: string }> => {
-    const t = errorTexts['pt-BR']; // TODO: implementar seleção de idioma
+  const setIdioma = async (novoIdioma: 'pt-BR' | 'es') => {
+    try {
+      await AsyncStorage.setItem('app_idioma', novoIdioma);
+      setIdiomaState(novoIdioma);
+    } catch (error) {
+      console.error('Erro ao salvar idioma:', error);
+    }
+  };
 
+  const signIn = async (codigo: string): Promise<{ success: boolean; error?: string }> => {
+    const t = errorTexts[idioma];
+    
     try {
       // Buscar vendedor pelo código
       const { data: vendedorData, error: vendedorError } = await supabase
@@ -107,10 +126,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Salvar no AsyncStorage
       await AsyncStorage.setItem('vendedor_data', JSON.stringify(vendedorAuth));
-      
       setVendedor(vendedorAuth);
-      return { success: true };
 
+      return { success: true };
     } catch (error: any) {
       console.error('Erro no login:', error);
       return { success: false, error: error.message || t.invalidCode };
@@ -131,6 +149,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       vendedor,
       isLoading,
       isAuthenticated: !!vendedor,
+      idioma,
+      setIdioma,
       signIn,
       signOut,
     }}>

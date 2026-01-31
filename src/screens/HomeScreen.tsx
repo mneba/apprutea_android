@@ -260,9 +260,9 @@ export default function HomeScreen({ navigation }: any) {
   };
 
   const handleAbrirCalendario = () => {
-  Alert.alert('TESTE', 'Botão clicado!');
-  setMostrarCalendario(true);
-};
+    console.log('Abrindo calendário...');
+    setMostrarCalendario(true);
+  };
 
   const handleFecharCalendario = () => {
     const liqAberta = obterLiquidacaoAberta(todasLiquidacoes);
@@ -561,7 +561,8 @@ export default function HomeScreen({ navigation }: any) {
           {/* Botão Ver Outras Datas */}
           <TouchableOpacity 
             style={styles.verOutrasDatasBtn} 
-            onPress={handleAbrirCalendario}
+              onPress={() => alert('TESTE')}
+            /*onPress={handleAbrirCalendario}*/
             activeOpacity={0.7}
           >
             <Text style={styles.verOutrasDatasText}>{t.verOutrasDatas}</Text>

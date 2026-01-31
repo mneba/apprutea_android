@@ -1,15 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  RefreshControl,
   ActivityIndicator,
   Alert,
+  Dimensions,
   Modal,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
   TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
@@ -17,12 +18,22 @@ import { LiquidacaoDiaria } from '../types';
 
 type Language = 'pt-BR' | 'es';
 
+interface DiaCalendario {
+  data: Date;
+  diaNumero: number;
+  mesAtual: boolean;
+  ehHoje: boolean;
+  ehFuturo: boolean;
+  liquidacao: LiquidacaoDiaria | null;
+}
+
 const textos = {
   'pt-BR': {
     titulo: 'Liquidação Diária',
     aberto: 'ABERTO',
     fechado: 'FECHADO',
     verOutrasDatas: 'Ver Outras Datas',
+    voltarHoje: 'Voltar para Hoje',
     meta: 'META',
     atual: 'ATUAL',
     progresso: 'PROGRESSO',
@@ -56,12 +67,23 @@ const textos = {
     atencao: 'Atenção: Você não poderá mais adicionar movimentos nesta data após encerrar.',
     cancelar: 'Cancelar',
     confirmar: 'Confirmar',
+    selecioneData: 'Selecione uma Data',
+    semLiquidacaoCalendario: 'Não há liquidação aberta para hoje. Selecione uma data no calendário abaixo para visualizar os dados.',
+    legenda: 'Legenda:',
+    legendaAberto: 'Aberto',
+    legendaFechado: 'Fechado',
+    legendaAprovado: 'Aprovado',
+    legendaSemRegistro: 'Sem registro',
+    visualizando: 'Visualizando:',
+    meses: ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'],
+    diasSemana: ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'],
   },
   'es': {
     titulo: 'Liquidación Diaria',
     aberto: 'ABIERTO',
     fechado: 'CERRADO',
     verOutrasDatas: 'Ver Otras Fechas',
+    voltarHoje: 'Volver a Hoy',
     meta: 'META',
     atual: 'ACTUAL',
     progresso: 'PROGRESO',
@@ -95,12 +117,23 @@ const textos = {
     atencao: 'Atención: No podrá agregar más movimientos después de cerrar.',
     cancelar: 'Cancelar',
     confirmar: 'Confirmar',
+    selecioneData: 'Seleccione una Fecha',
+    semLiquidacaoCalendario: 'No hay liquidación abierta para hoy. Seleccione una fecha en el calendario a continuación.',
+    legenda: 'Leyenda:',
+    legendaAberto: 'Abierto',
+    legendaFechado: 'Cerrado',
+    legendaAprovado: 'Aprobado',
+    legendaSemRegistro: 'Sin registro',
+    visualizando: 'Visualizando:',
+    meses: ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'],
+    diasSemana: ['D', 'L', 'M', 'M', 'J', 'V', 'S'],
   }
 };
 
 export default function LiquidacaoScreen({ navigation }: any) {
   const { vendedor } = useAuth();
   const [liquidacao, setLiquidacao] = useState<LiquidacaoDiaria | null>(null);
+  const [todasLiquidacoes, setTodasLiquidacoes] = useState<LiquidacaoDiaria[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [language, setLanguage] = useState<Language>('pt-BR');
@@ -109,33 +142,52 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const [modalFecharVisible, setModalFecharVisible] = useState(false);
   const [caixaInicial, setCaixaInicial] = useState('');
   const [salvando, setSalvando] = useState(false);
+  
+  // Estados do Calendário
+  const [mostrarCalendario, setMostrarCalendario] = useState(false);
+  const [modoVisualizacao, setModoVisualizacao] = useState(false);
+  const [dataVisualizacao, setDataVisualizacao] = useState<Date | null>(null);
+  const [mesAtual, setMesAtual] = useState(new Date().getMonth());
+  const [anoAtual, setAnoAtual] = useState(new Date().getFullYear());
 
   const t = textos[language];
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
 
   useEffect(() => {
-    carregarLiquidacao();
+    carregarLiquidacoes();
   }, []);
 
-  const carregarLiquidacao = async () => {
+  const carregarLiquidacoes = async () => {
     if (!vendedor) return;
 
     try {
+      // Buscar todas liquidações dos últimos 60 dias
+      const dataInicio = new Date();
+      dataInicio.setDate(dataInicio.getDate() - 60);
+      
       const { data, error } = await supabase
         .from('liquidacoes_diarias')
         .select('*')
         .eq('rota_id', vendedor.rota_id)
-        .in('status', ['ABERTA', 'ABERTO'])
-        .order('data_abertura', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .gte('data_abertura', dataInicio.toISOString())
+        .order('data_abertura', { ascending: false });
 
       if (!error && data) {
-        setLiquidacao(data);
+        setTodasLiquidacoes(data);
+        // Encontrar liquidação aberta
+        const aberta = data.find(l => l.status === 'ABERTO' || l.status === 'ABERTA');
+        setLiquidacao(aberta || null);
+        
+        // Se não tem liquidação aberta, mostrar calendário
+        if (!aberta && !modoVisualizacao) {
+          setMostrarCalendario(true);
+        }
       } else {
         setLiquidacao(null);
       }
     } catch (error) {
-      console.error('Erro ao carregar liquidação:', error);
+      console.error('Erro ao carregar liquidações:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -144,13 +196,114 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
   const onRefresh = () => {
     setRefreshing(true);
-    carregarLiquidacao();
+    carregarLiquidacoes();
   };
 
   const toggleLanguage = () => {
     setLanguage(language === 'pt-BR' ? 'es' : 'pt-BR');
   };
 
+  // ==================== CALENDÁRIO ====================
+  const gerarDiasDoMes = (): DiaCalendario[] => {
+    const dias: DiaCalendario[] = [];
+    const primeiroDia = new Date(anoAtual, mesAtual, 1);
+    const diaSemanaInicio = primeiroDia.getDay();
+    const ultimoDia = new Date(anoAtual, mesAtual + 1, 0);
+    const totalDias = ultimoDia.getDate();
+
+    // Dias do mês anterior
+    const ultimoDiaMesAnterior = new Date(anoAtual, mesAtual, 0).getDate();
+    for (let i = diaSemanaInicio - 1; i >= 0; i--) {
+      const dia = ultimoDiaMesAnterior - i;
+      const data = new Date(anoAtual, mesAtual - 1, dia);
+      dias.push({ data, diaNumero: dia, mesAtual: false, ehHoje: false, ehFuturo: data > hoje, liquidacao: null });
+    }
+
+    // Dias do mês atual
+    for (let dia = 1; dia <= totalDias; dia++) {
+      const data = new Date(anoAtual, mesAtual, dia);
+      data.setHours(0, 0, 0, 0);
+      const ehHoje = data.getTime() === hoje.getTime();
+      const ehFuturo = data > hoje;
+      const liq = todasLiquidacoes.find(l => {
+        const dataLiq = new Date(l.data_abertura);
+        dataLiq.setHours(0, 0, 0, 0);
+        return dataLiq.getTime() === data.getTime();
+      }) || null;
+      dias.push({ data, diaNumero: dia, mesAtual: true, ehHoje, ehFuturo, liquidacao: liq });
+    }
+
+    // Dias do próximo mês
+    const diasRestantes = 42 - dias.length;
+    for (let dia = 1; dia <= diasRestantes; dia++) {
+      const data = new Date(anoAtual, mesAtual + 1, dia);
+      dias.push({ data, diaNumero: dia, mesAtual: false, ehHoje: false, ehFuturo: data > hoje, liquidacao: null });
+    }
+
+    return dias;
+  };
+
+  const irMesAnterior = () => {
+    if (mesAtual === 0) { setMesAtual(11); setAnoAtual(anoAtual - 1); }
+    else { setMesAtual(mesAtual - 1); }
+  };
+
+  const irProximoMes = () => {
+    if (mesAtual === 11) { setMesAtual(0); setAnoAtual(anoAtual + 1); }
+    else { setMesAtual(mesAtual + 1); }
+  };
+
+  const handleClickDia = (dia: DiaCalendario) => {
+    if (!dia.mesAtual) return;
+    
+    if (dia.liquidacao) {
+      setLiquidacao(dia.liquidacao);
+      setModoVisualizacao(dia.liquidacao.status !== 'ABERTO' && dia.liquidacao.status !== 'ABERTA');
+      setDataVisualizacao(dia.data);
+      setMostrarCalendario(false);
+    } else if (dia.ehHoje) {
+      // Hoje sem liquidação - abrir modal
+      setModalIniciarVisible(true);
+      setMostrarCalendario(false);
+    } else {
+      // Dia passado/futuro sem liquidação
+      setLiquidacao(null);
+      setModoVisualizacao(true);
+      setDataVisualizacao(dia.data);
+      setMostrarCalendario(false);
+    }
+  };
+
+  const handleAbrirCalendario = () => {
+    console.log('Abrindo calendário...');
+    setMostrarCalendario(true);
+  };
+
+  const handleVoltarHoje = () => {
+    setModoVisualizacao(false);
+    setDataVisualizacao(null);
+    const aberta = todasLiquidacoes.find(l => l.status === 'ABERTO' || l.status === 'ABERTA');
+    setLiquidacao(aberta || null);
+    if (!aberta) setMostrarCalendario(true);
+  };
+
+  const getCorDia = (dia: DiaCalendario) => {
+    if (!dia.mesAtual || !dia.liquidacao) return styles.diaSemRegistro;
+    const status = dia.liquidacao.status?.toUpperCase();
+    if (status === 'ABERTO' || status === 'ABERTA') return styles.diaAberto;
+    if (status === 'FECHADO' || status === 'FECHADA') return styles.diaFechado;
+    if (status === 'APROVADO' || status === 'APROVADA') return styles.diaAprovado;
+    return styles.diaSemRegistro;
+  };
+
+  const getIconeDia = (dia: DiaCalendario) => {
+    if (!dia.mesAtual || !dia.liquidacao) return '⊘';
+    const status = dia.liquidacao.status?.toUpperCase();
+    if (status === 'ABERTO' || status === 'ABERTA') return '○';
+    return '✓';
+  };
+
+  // ==================== FORMATADORES ====================
   const formatarMoeda = (valor: number | null) => {
     if (valor === null || valor === undefined) return 'R$ 0,00';
     return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -158,15 +311,14 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
   const formatarMoedaCompacta = (valor: number | null) => {
     if (valor === null || valor === undefined) return 'R$0';
-    if (valor >= 1000) {
-      return `R$${(valor / 1000).toFixed(1)}k`;
-    }
+    if (valor >= 1000) return `R$${(valor / 1000).toFixed(1)}k`;
     return `R$${valor.toFixed(0)}`;
   };
 
-  const formatarData = (data: string | null) => {
+  const formatarData = (data: string | Date | null) => {
     if (!data) return '-';
-    return new Date(data).toLocaleDateString('pt-BR');
+    const d = typeof data === 'string' ? new Date(data) : data;
+    return d.toLocaleDateString('pt-BR');
   };
 
   const calcularEfetividade = () => {
@@ -185,6 +337,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
            (liquidacao.clientes_cancelados || 0);
   };
 
+  // ==================== HANDLERS ====================
   const handleIniciarDia = async () => {
     if (!vendedor) return;
     
@@ -201,7 +354,9 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
       setModalIniciarVisible(false);
       setCaixaInicial('');
-      carregarLiquidacao();
+      setMostrarCalendario(false);
+      setModoVisualizacao(false);
+      carregarLiquidacoes();
       Alert.alert('Sucesso', 'Dia iniciado com sucesso!');
     } catch (error: any) {
       Alert.alert('Erro', error.message || 'Não foi possível iniciar o dia');
@@ -231,7 +386,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
       setModalFecharVisible(false);
       Alert.alert('Sucesso', `Liquidação fechada! Recebido: ${formatarMoeda(resultado.valor_recebido_dia)}`);
-      carregarLiquidacao();
+      carregarLiquidacoes();
     } catch (error: any) {
       Alert.alert('Erro', error.message || 'Não foi possível encerrar o dia');
     } finally {
@@ -239,8 +394,9 @@ export default function LiquidacaoScreen({ navigation }: any) {
     }
   };
 
-  const isAberto = liquidacao?.status?.toLowerCase() === 'aberto' || liquidacao?.status?.toLowerCase() === 'aberta';
+  const isAberto = liquidacao?.status?.toUpperCase() === 'ABERTO' || liquidacao?.status?.toUpperCase() === 'ABERTA';
 
+  // ==================== LOADING ====================
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -249,6 +405,134 @@ export default function LiquidacaoScreen({ navigation }: any) {
     );
   }
 
+  // ==================== RENDER CALENDÁRIO ====================
+  if (mostrarCalendario) {
+    const diasDoMes = gerarDiasDoMes();
+    
+    return (
+      <View style={styles.container}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>{t.titulo}</Text>
+          <View style={styles.headerActions}>
+            <View style={[styles.statusDot, { backgroundColor: '#EF4444' }]} />
+            <TouchableOpacity onPress={toggleLanguage} style={styles.langButton}>
+              <Text style={styles.langText}>🌐 {language === 'pt-BR' ? 'PT' : 'ES'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+          {/* Info Card */}
+          <View style={styles.infoCard}>
+            <Text style={styles.infoTitulo}>📅 {t.selecioneData}</Text>
+            <Text style={styles.infoTexto}>{t.semLiquidacaoCalendario}</Text>
+          </View>
+
+          {/* Calendário */}
+          <View style={styles.calendarioCard}>
+            <View style={styles.mesHeader}>
+              <TouchableOpacity onPress={irMesAnterior} style={styles.mesNavBtn}>
+                <Text style={styles.mesNavText}>‹</Text>
+              </TouchableOpacity>
+              <Text style={styles.mesTitulo}>{t.meses[mesAtual]} {anoAtual}</Text>
+              <TouchableOpacity onPress={irProximoMes} style={styles.mesNavBtn}>
+                <Text style={styles.mesNavText}>›</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.diasSemanaRow}>
+              {t.diasSemana.map((dia, index) => (
+                <View key={index} style={styles.diaSemanaCell}>
+                  <Text style={styles.diaSemanaText}>{dia}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={styles.diasGrid}>
+              {diasDoMes.map((dia, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={[styles.diaCell, dia.ehHoje && styles.diaCellHoje]}
+                  onPress={() => handleClickDia(dia)}
+                  disabled={!dia.mesAtual}
+                >
+                  <Text style={[
+                    styles.diaNumero,
+                    !dia.mesAtual && styles.diaNumeroOutroMes,
+                    dia.ehHoje && styles.diaNumeroHoje,
+                  ]}>
+                    {dia.diaNumero}
+                  </Text>
+                  
+                  {dia.mesAtual && (
+                    <View style={[styles.diaIndicador, getCorDia(dia)]}>
+                      <Text style={[
+                        styles.diaIcone,
+                        dia.liquidacao?.status?.toUpperCase() === 'ABERTO' && styles.iconeAberto,
+                        (dia.liquidacao?.status?.toUpperCase() === 'FECHADO' || dia.liquidacao?.status?.toUpperCase() === 'APROVADO') && styles.iconeFechado,
+                      ]}>
+                        {getIconeDia(dia)}
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Legenda */}
+            <View style={styles.legenda}>
+              <Text style={styles.legendaTitulo}>{t.legenda}</Text>
+              <View style={styles.legendaItens}>
+                <View style={styles.legendaItem}>
+                  <View style={[styles.legendaCor, styles.legendaCorAberto]} />
+                  <Text style={styles.legendaTexto}>{t.legendaAberto}</Text>
+                </View>
+                <View style={styles.legendaItem}>
+                  <View style={[styles.legendaCor, styles.legendaCorFechado]} />
+                  <Text style={styles.legendaTexto}>{t.legendaFechado}</Text>
+                </View>
+                <View style={styles.legendaItem}>
+                  <View style={[styles.legendaCor, styles.legendaCorAprovado]} />
+                  <Text style={styles.legendaTexto}>{t.legendaAprovado}</Text>
+                </View>
+                <View style={styles.legendaItem}>
+                  <View style={[styles.legendaCor, styles.legendaCorSemRegistro]} />
+                  <Text style={styles.legendaTexto}>{t.legendaSemRegistro}</Text>
+                </View>
+              </View>
+            </View>
+          </View>
+
+          <View style={{ height: 100 }} />
+        </ScrollView>
+
+        {/* Modal Iniciar */}
+        <Modal visible={modalIniciarVisible} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>{t.iniciarDia}</Text>
+              <Text style={styles.modalLabel}>{t.caixa} {t.inicial}</Text>
+              <View style={styles.modalInputContainer}>
+                <Text style={styles.modalInputPrefix}>R$</Text>
+                <TextInput style={styles.modalInput} value={caixaInicial} onChangeText={setCaixaInicial} keyboardType="decimal-pad" placeholder="0,00" />
+              </View>
+              <View style={styles.modalButtons}>
+                <TouchableOpacity style={styles.modalButtonCancel} onPress={() => setModalIniciarVisible(false)}>
+                  <Text style={styles.modalButtonCancelText}>{t.cancelar}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.modalButtonConfirm} onPress={handleIniciarDia} disabled={salvando}>
+                  {salvando ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalButtonConfirmText}>{t.confirmar}</Text>}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      </View>
+    );
+  }
+
+  // ==================== RENDER PRINCIPAL ====================
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -259,17 +543,21 @@ export default function LiquidacaoScreen({ navigation }: any) {
           <TouchableOpacity onPress={toggleLanguage} style={styles.langButton}>
             <Text style={styles.langText}>🌐 {language === 'pt-BR' ? 'PT' : 'ES'}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton}>
-            <Text style={styles.iconText}>👤</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton}>
-            <Text style={styles.iconText}>📤</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton}>
-            <Text style={styles.iconText}>⚙️</Text>
-          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconButton}><Text style={styles.iconText}>👤</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.iconButton}><Text style={styles.iconText}>📤</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.iconButton}><Text style={styles.iconText}>⚙️</Text></TouchableOpacity>
         </View>
       </View>
+
+      {/* Banner Visualização */}
+      {modoVisualizacao && (
+        <View style={styles.bannerVisualizacao}>
+          <Text style={styles.bannerTexto}>{t.visualizando} {dataVisualizacao ? formatarData(dataVisualizacao) : ''}</Text>
+          <TouchableOpacity style={styles.bannerBtn} onPress={handleVoltarHoje}>
+            <Text style={styles.bannerBtnText}>{t.voltarHoje}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       <ScrollView
         style={styles.content}
@@ -281,9 +569,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
             {/* Card Vendedor + Status */}
             <View style={[styles.card, styles.cardVendedor, { borderTopColor: isAberto ? '#10B981' : '#EF4444' }]}>
               <View style={styles.vendedorRow}>
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>👤</Text>
-                </View>
+                <View style={styles.avatar}><Text style={styles.avatarText}>👤</Text></View>
                 <Text style={styles.vendedorNome}>{vendedor?.nome}</Text>
               </View>
               
@@ -299,7 +585,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
                 </View>
               </View>
 
-              <TouchableOpacity style={styles.verDatasButton}>
+              {/* BOTÃO VER OUTRAS DATAS - AGORA COM onPress! */}
+              <TouchableOpacity style={styles.verDatasButton} onPress={handleAbrirCalendario}>
                 <Text style={styles.verDatasText}>{t.verOutrasDatas}</Text>
               </TouchableOpacity>
             </View>
@@ -320,7 +607,6 @@ export default function LiquidacaoScreen({ navigation }: any) {
                   <Text style={[styles.metaValue, styles.metaProgresso]}>{liquidacao.percentual_recebimento || 0}%</Text>
                 </View>
               </View>
-              {/* Progress Bar */}
               <View style={styles.progressBar}>
                 <View style={[styles.progressFill, { width: `${Math.min(liquidacao.percentual_recebimento || 0, 100)}%` }]} />
               </View>
@@ -407,7 +693,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
             <TouchableOpacity
               style={[styles.encerrarButton, !isAberto && styles.encerrarButtonDisabled]}
               onPress={() => setModalFecharVisible(true)}
-              disabled={!isAberto || fechando}
+              disabled={!isAberto || fechando || modoVisualizacao}
             >
               {fechando ? (
                 <ActivityIndicator color="#fff" />
@@ -475,6 +761,9 @@ export default function LiquidacaoScreen({ navigation }: any) {
   );
 }
 
+const { width } = Dimensions.get('window');
+const cellSize = (width - 64) / 7;
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#EEF2FF' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EEF2FF' },
@@ -487,6 +776,55 @@ const styles = StyleSheet.create({
   iconButton: { padding: 6 },
   iconText: { fontSize: 16 },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 16 },
+  
+  // Banner Visualização
+  bannerVisualizacao: { backgroundColor: '#FEF3C7', paddingVertical: 10, paddingHorizontal: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  bannerTexto: { color: '#92400E', fontSize: 14, fontWeight: '500' },
+  bannerBtn: { backgroundColor: '#F59E0B', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
+  bannerBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  
+  // Info Card (Calendário)
+  infoCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 12, borderLeftWidth: 4, borderLeftColor: '#3B82F6' },
+  infoTitulo: { fontSize: 16, fontWeight: '700', color: '#1F2937', marginBottom: 8 },
+  infoTexto: { fontSize: 14, color: '#6B7280', lineHeight: 20 },
+  
+  // Calendário
+  calendarioCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 12 },
+  mesHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  mesNavBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  mesNavText: { fontSize: 28, color: '#6B7280', fontWeight: '300' },
+  mesTitulo: { fontSize: 16, fontWeight: '600', color: '#1F2937' },
+  diasSemanaRow: { flexDirection: 'row', marginBottom: 8 },
+  diaSemanaCell: { width: cellSize, alignItems: 'center', paddingVertical: 8 },
+  diaSemanaText: { fontSize: 12, fontWeight: '600', color: '#9CA3AF' },
+  diasGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  diaCell: { width: cellSize, height: cellSize + 12, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 4 },
+  diaCellHoje: { backgroundColor: '#EFF6FF', borderRadius: 8 },
+  diaNumero: { fontSize: 14, fontWeight: '500', color: '#1F2937' },
+  diaNumeroOutroMes: { color: '#D1D5DB' },
+  diaNumeroHoje: { color: '#3B82F6', fontWeight: '700' },
+  diaIndicador: { width: 20, height: 20, borderRadius: 10, marginTop: 2, justifyContent: 'center', alignItems: 'center' },
+  diaIcone: { fontSize: 10, color: '#9CA3AF' },
+  diaAberto: { backgroundColor: '#D1FAE5', borderWidth: 2, borderColor: '#10B981' },
+  diaFechado: { backgroundColor: '#DBEAFE', borderWidth: 2, borderColor: '#3B82F6' },
+  diaAprovado: { backgroundColor: '#E9D5FF', borderWidth: 2, borderColor: '#8B5CF6' },
+  diaSemRegistro: { backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#D1D5DB' },
+  iconeAberto: { color: '#10B981' },
+  iconeFechado: { color: '#3B82F6' },
+  
+  // Legenda
+  legenda: { marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
+  legendaTitulo: { fontSize: 12, fontWeight: '600', color: '#6B7280', marginBottom: 12 },
+  legendaItens: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
+  legendaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  legendaCor: { width: 16, height: 16, borderRadius: 8 },
+  legendaCorAberto: { backgroundColor: '#D1FAE5', borderWidth: 2, borderColor: '#10B981' },
+  legendaCorFechado: { backgroundColor: '#DBEAFE', borderWidth: 2, borderColor: '#3B82F6' },
+  legendaCorAprovado: { backgroundColor: '#E9D5FF', borderWidth: 2, borderColor: '#8B5CF6' },
+  legendaCorSemRegistro: { backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#D1D5DB' },
+  legendaTexto: { fontSize: 12, color: '#6B7280' },
+  
+  // Cards originais
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 4, elevation: 3 },
   cardVendedor: { borderTopWidth: 4 },
   vendedorRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
@@ -499,7 +837,7 @@ const styles = StyleSheet.create({
   dataText: { fontSize: 12, color: '#6B7280', fontWeight: '500' },
   statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   statusText: { fontSize: 11, fontWeight: '700' },
-  verDatasButton: { marginTop: 12, borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 8, paddingVertical: 10, alignItems: 'center' },
+  verDatasButton: { marginTop: 12, borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 8, paddingVertical: 10, alignItems: 'center', backgroundColor: '#F0F9FF' },
   verDatasText: { color: '#3B82F6', fontSize: 13, fontWeight: '500' },
   metaRow: { flexDirection: 'row', marginBottom: 12 },
   metaItem: { flex: 1, alignItems: 'center' },
