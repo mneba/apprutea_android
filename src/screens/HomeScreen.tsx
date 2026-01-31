@@ -1,7 +1,16 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl,
-  Alert, Modal, TextInput, ActivityIndicator, Dimensions,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  Modal,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
@@ -251,9 +260,9 @@ export default function HomeScreen({ navigation }: any) {
   };
 
   const handleAbrirCalendario = () => {
-    console.log('Abrindo calendário...');
-    setMostrarCalendario(true);
-  };
+  Alert.alert('TESTE', 'Botão clicado!');
+  setMostrarCalendario(true);
+};
 
   const handleFecharCalendario = () => {
     const liqAberta = obterLiquidacaoAberta(todasLiquidacoes);
