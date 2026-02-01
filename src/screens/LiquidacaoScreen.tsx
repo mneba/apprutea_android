@@ -149,6 +149,15 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const [dataVisualizacao, setDataVisualizacao] = useState<Date | null>(null);
   const [mesAtual, setMesAtual] = useState(new Date().getMonth());
   const [anoAtual, setAnoAtual] = useState(new Date().getFullYear());
+  
+  // Dados do modo visualização (dias sem liquidação)
+  const [dadosVisualizacao, setDadosVisualizacao] = useState<{
+    totalClientes: number;
+    clientesAtivos: number;
+    clientesInativos: number;
+    clientesList: any[];
+  } | null>(null);
+  const [loadingVisualizacao, setLoadingVisualizacao] = useState(false);
 
   const t = textos[language];
   const hoje = new Date();
@@ -264,16 +273,27 @@ export default function LiquidacaoScreen({ navigation }: any) {
         setLiquidacao(dia.liquidacao);
         setModoVisualizacao(true); // SEMPRE visualização - não permite movimentos
         setDataVisualizacao(dia.data);
+        setDadosVisualizacao(null); // Tem liquidação, não precisa de dados dinâmicos
         setMostrarCalendario(false);
         Alert.alert('Dia Reaberto', 'Esta liquidação foi reaberta pelo administrador. Visualização apenas - novos movimentos vão para a liquidação aberta atual.');
         return;
       }
       
       // ABERTO/ABERTA: pode editar
-      // FECHADO/APROVADO: apenas visualização
+      if (status === 'ABERTO' || status === 'ABERTA') {
+        setLiquidacao(dia.liquidacao);
+        setModoVisualizacao(false);
+        setDataVisualizacao(null);
+        setDadosVisualizacao(null);
+        setMostrarCalendario(false);
+        return;
+      }
+      
+      // FECHADO/APROVADO: visualização com dados da liquidação
       setLiquidacao(dia.liquidacao);
-      setModoVisualizacao(status !== 'ABERTO' && status !== 'ABERTA');
+      setModoVisualizacao(true);
       setDataVisualizacao(dia.data);
+      setDadosVisualizacao(null); // Tem liquidação, dados vêm dela
       setMostrarCalendario(false);
     } else if (dia.ehHoje) {
       // Hoje sem liquidação - verificar se já existe ABERTA em outro dia
@@ -286,18 +306,10 @@ export default function LiquidacaoScreen({ navigation }: any) {
         return;
       }
       setModalIniciarVisible(true);
-    } else if (dia.ehFuturo) {
-      // Dia futuro: modo visualização sem criar liquidação
-      setLiquidacao(null);
-      setModoVisualizacao(true);
-      setDataVisualizacao(dia.data);
-      setMostrarCalendario(false);
     } else {
-      // Dia passado sem liquidação: modo visualização
+      // Dia futuro ou passado sem liquidação → enterFutureView
       setLiquidacao(null);
-      setModoVisualizacao(true);
-      setDataVisualizacao(dia.data);
-      setMostrarCalendario(false);
+      enterFutureView(dia.data);
     }
   };
 
@@ -306,9 +318,54 @@ export default function LiquidacaoScreen({ navigation }: any) {
     setMostrarCalendario(true);
   };
 
+  // === FutureRouteView Functions ===
+  const enterFutureView = async (data: Date) => {
+    setModoVisualizacao(true);
+    setDataVisualizacao(data);
+    setMostrarCalendario(false);
+    
+    // Buscar dados da rota para a data selecionada
+    if (!vendedor) return;
+    setLoadingVisualizacao(true);
+    try {
+      const dataFiltro = data.toISOString().split('T')[0];
+      const { data: clientesDia, error } = await supabase
+        .from('vw_clientes_rota_dia')
+        .select('*')
+        .eq('rota_id', vendedor.rota_id)
+        .eq('data_vencimento', dataFiltro);
+
+      if (!error && clientesDia) {
+        const total = clientesDia.length;
+        const ativos = clientesDia.filter((c: any) => c.status_dia !== 'PAGO').length;
+        setDadosVisualizacao({
+          totalClientes: total,
+          clientesAtivos: ativos,
+          clientesInativos: total - ativos,
+          clientesList: clientesDia,
+        });
+      } else {
+        setDadosVisualizacao({ totalClientes: 0, clientesAtivos: 0, clientesInativos: 0, clientesList: [] });
+      }
+    } catch (err) {
+      console.error('Erro ao buscar dados de visualização:', err);
+      setDadosVisualizacao({ totalClientes: 0, clientesAtivos: 0, clientesInativos: 0, clientesList: [] });
+    } finally {
+      setLoadingVisualizacao(false);
+    }
+  };
+
+  const exitFutureView = () => {
+    setModoVisualizacao(false);
+    setDataVisualizacao(null);
+    setDadosVisualizacao(null);
+    setMostrarCalendario(true); // Volta ao calendário, NÃO para hoje
+  };
+
   const handleVoltarHoje = () => {
     setModoVisualizacao(false);
     setDataVisualizacao(null);
+    setDadosVisualizacao(null);
     const aberta = todasLiquidacoes.find(l => l.status === 'ABERTO' || l.status === 'ABERTA');
     setLiquidacao(aberta || null);
     if (!aberta) setMostrarCalendario(true);
@@ -592,10 +649,23 @@ export default function LiquidacaoScreen({ navigation }: any) {
       {/* Banner Visualização */}
       {modoVisualizacao && (
         <View style={styles.bannerVisualizacao}>
-          <Text style={styles.bannerTexto}>{t.visualizando} {dataVisualizacao ? formatarData(dataVisualizacao) : ''}</Text>
-          <TouchableOpacity style={styles.bannerBtn} onPress={handleVoltarHoje}>
-            <Text style={styles.bannerBtnText}>{t.voltarHoje}</Text>
-          </TouchableOpacity>
+          <View style={styles.bannerConteudo}>
+            <Text style={styles.bannerIcone}>⚠️</Text>
+            <View style={styles.bannerTextos}>
+              <Text style={styles.bannerTitulo}>{language === 'pt-BR' ? 'Modo Visualização' : 'Modo Visualización'}</Text>
+              <Text style={styles.bannerSubtexto}>
+                {t.visualizando} {dataVisualizacao ? formatarData(dataVisualizacao) : ''}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.bannerBotoes}>
+            <TouchableOpacity style={styles.bannerBtnSair} onPress={exitFutureView}>
+              <Text style={styles.bannerBtnSairText}>{language === 'pt-BR' ? 'Sair' : 'Salir'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.bannerBtnHoje} onPress={handleVoltarHoje}>
+              <Text style={styles.bannerBtnHojeText}>{t.voltarHoje}</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
@@ -752,6 +822,87 @@ export default function LiquidacaoScreen({ navigation }: any) {
               )}
             </TouchableOpacity>
           </>
+        ) : modoVisualizacao ? (
+          /* === MODO VISUALIZAÇÃO SEM LIQUIDAÇÃO === */
+          <>
+            {/* Card Info Visualização */}
+            <View style={styles.cardVisualizacao}>
+              <View style={styles.cardVisualizacaoHeader}>
+                <Text style={styles.cardVisualizacaoIcone}>👁️</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cardVisualizacaoTitulo}>
+                    {language === 'pt-BR' ? 'Visualização de Rota' : 'Visualización de Ruta'}
+                  </Text>
+                  <Text style={styles.cardVisualizacaoData}>
+                    {dataVisualizacao ? dataVisualizacao.toLocaleDateString(language === 'pt-BR' ? 'pt-BR' : 'es', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }) : ''}
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.cardVisualizacaoAviso}>
+                {language === 'pt-BR' 
+                  ? 'Nenhuma liquidação para esta data. Visualizando clientes e parcelas previstas.'
+                  : 'Ninguna liquidación para esta fecha. Visualizando clientes y parcelas previstas.'}
+              </Text>
+            </View>
+
+            {/* Totalizadores Dinâmicos */}
+            {loadingVisualizacao ? (
+              <View style={styles.loadingVisualizacao}>
+                <ActivityIndicator size="small" color="#3B82F6" />
+                <Text style={styles.loadingVisualizacaoText}>
+                  {language === 'pt-BR' ? 'Carregando dados...' : 'Cargando datos...'}
+                </Text>
+              </View>
+            ) : dadosVisualizacao ? (
+              <>
+                <View style={styles.totalizadoresRow}>
+                  <View style={[styles.totalizadorCard, styles.totalizadorTotal]}>
+                    <Text style={styles.totalizadorValor}>{dadosVisualizacao.totalClientes}</Text>
+                    <Text style={styles.totalizadorLabel}>{language === 'pt-BR' ? 'Total' : 'Total'}</Text>
+                  </View>
+                  <View style={[styles.totalizadorCard, styles.totalizadorAtivo]}>
+                    <Text style={[styles.totalizadorValor, { color: '#059669' }]}>{dadosVisualizacao.clientesAtivos}</Text>
+                    <Text style={styles.totalizadorLabel}>{language === 'pt-BR' ? 'Ativos' : 'Activos'}</Text>
+                  </View>
+                  <View style={[styles.totalizadorCard, styles.totalizadorInativo]}>
+                    <Text style={[styles.totalizadorValor, { color: '#DC2626' }]}>{dadosVisualizacao.clientesInativos}</Text>
+                    <Text style={styles.totalizadorLabel}>{language === 'pt-BR' ? 'Inativos' : 'Inactivos'}</Text>
+                  </View>
+                </View>
+
+                {/* Botão ver clientes */}
+                <TouchableOpacity 
+                  style={styles.verClientesBtn}
+                  onPress={() => navigation.navigate('Clientes', { 
+                    dataVisualizacao: dataVisualizacao?.toISOString(),
+                    modoVisualizacao: true 
+                  })}
+                >
+                  <Text style={styles.verClientesBtnIcon}>👥</Text>
+                  <Text style={styles.verClientesBtnText}>
+                    {language === 'pt-BR' ? 'Ver Clientes do Dia' : 'Ver Clientes del Día'}
+                  </Text>
+                  <Text style={styles.verClientesBtnArrow}>›</Text>
+                </TouchableOpacity>
+
+                {dadosVisualizacao.totalClientes === 0 && (
+                  <View style={styles.semClientesCard}>
+                    <Text style={styles.semClientesIcone}>📋</Text>
+                    <Text style={styles.semClientesTexto}>
+                      {language === 'pt-BR' 
+                        ? 'Nenhum cliente com parcela prevista para esta data.'
+                        : 'Ningún cliente con parcela prevista para esta fecha.'}
+                    </Text>
+                  </View>
+                )}
+              </>
+            ) : null}
+
+            {/* Botão Ver Outras Datas */}
+            <TouchableOpacity style={[styles.verDatasButton, { marginTop: 12 }]} onPress={handleAbrirCalendario}>
+              <Text style={styles.verDatasText}>{t.verOutrasDatas}</Text>
+            </TouchableOpacity>
+          </>
         ) : (
           <View style={styles.semLiquidacao}>
             <Text style={styles.semLiquidacaoIcon}>📅</Text>
@@ -825,10 +976,49 @@ const styles = StyleSheet.create({
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 16 },
   
   // Banner Visualização
-  bannerVisualizacao: { backgroundColor: '#FEF3C7', paddingVertical: 10, paddingHorizontal: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  bannerTexto: { color: '#92400E', fontSize: 14, fontWeight: '500' },
-  bannerBtn: { backgroundColor: '#F59E0B', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
-  bannerBtnText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  bannerVisualizacao: { backgroundColor: '#FEF3C7', paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#FDE68A' },
+  bannerConteudo: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  bannerIcone: { fontSize: 18, marginRight: 10 },
+  bannerTextos: { flex: 1 },
+  bannerTitulo: { fontSize: 14, fontWeight: '700', color: '#92400E' },
+  bannerSubtexto: { fontSize: 12, color: '#A16207', marginTop: 2 },
+  bannerBotoes: { flexDirection: 'row', gap: 8 },
+  bannerBtnSair: { flex: 1, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: '#F59E0B', alignItems: 'center' },
+  bannerBtnSairText: { color: '#D97706', fontSize: 13, fontWeight: '600' },
+  bannerBtnHoje: { flex: 1, backgroundColor: '#F59E0B', paddingVertical: 8, borderRadius: 6, alignItems: 'center' },
+  bannerBtnHojeText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  
+  // Card Visualização (sem liquidação)
+  cardVisualizacao: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 12, borderLeftWidth: 4, borderLeftColor: '#F59E0B' },
+  cardVisualizacaoHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  cardVisualizacaoIcone: { fontSize: 24, marginRight: 12 },
+  cardVisualizacaoTitulo: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
+  cardVisualizacaoData: { fontSize: 13, color: '#6B7280', marginTop: 2 },
+  cardVisualizacaoAviso: { fontSize: 13, color: '#6B7280', lineHeight: 20, backgroundColor: '#F9FAFB', padding: 12, borderRadius: 8 },
+  
+  // Loading Visualização
+  loadingVisualizacao: { alignItems: 'center', paddingVertical: 40 },
+  loadingVisualizacaoText: { fontSize: 13, color: '#6B7280', marginTop: 8 },
+  
+  // Totalizadores
+  totalizadoresRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  totalizadorCard: { flex: 1, backgroundColor: '#fff', borderRadius: 12, padding: 16, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 2 },
+  totalizadorTotal: { borderTopWidth: 3, borderTopColor: '#3B82F6' },
+  totalizadorAtivo: { borderTopWidth: 3, borderTopColor: '#10B981' },
+  totalizadorInativo: { borderTopWidth: 3, borderTopColor: '#EF4444' },
+  totalizadorValor: { fontSize: 28, fontWeight: '700', color: '#1F2937' },
+  totalizadorLabel: { fontSize: 11, fontWeight: '500', color: '#6B7280', marginTop: 4, textTransform: 'uppercase' },
+  
+  // Ver Clientes
+  verClientesBtn: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 12, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
+  verClientesBtnIcon: { fontSize: 20, marginRight: 12 },
+  verClientesBtnText: { flex: 1, fontSize: 15, fontWeight: '600', color: '#3B82F6' },
+  verClientesBtnArrow: { fontSize: 24, color: '#9CA3AF' },
+  
+  // Sem Clientes
+  semClientesCard: { backgroundColor: '#F9FAFB', borderRadius: 12, padding: 24, alignItems: 'center', marginBottom: 12 },
+  semClientesIcone: { fontSize: 32, marginBottom: 8 },
+  semClientesTexto: { fontSize: 14, color: '#6B7280', textAlign: 'center' },
   
   // Info Card (Calendário)
   infoCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 12, borderLeftWidth: 4, borderLeftColor: '#3B82F6' },
