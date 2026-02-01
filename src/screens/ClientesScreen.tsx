@@ -1,875 +1,423 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  RefreshControl,
-  ActivityIndicator,
-  TextInput,
-  Linking,
-  Platform,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl,
+  ActivityIndicator, TextInput, Linking, Platform,
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
 
-// ============================================================
-// TYPES
-// ============================================================
-
 type Language = 'pt-BR' | 'es';
 type TabAtiva = 'liquidacao' | 'todos';
-type FiltroLiquidacao = 'todos' | 'atrasados' | 'perto' | 'pagas';
-type OrdenacaoLiquidacao = 'rota' | 'nome' | 'proximos';
+type FiltroLiquidacao = 'todos' | 'atrasados';
+type OrdenacaoLiquidacao = 'rota' | 'nome';
 
 interface ClienteRotaDia {
-  cliente_id: string;
-  consecutivo: number | null;
-  nome: string;
-  telefone_celular: string | null;
-  endereco: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  emprestimo_id: string;
-  saldo_emprestimo: number;
-  valor_principal: number;
-  numero_parcelas: number;
-  status_emprestimo: string;
-  rota_id: string;
-  frequencia_pagamento: string;
-  parcela_id: string;
-  numero_parcela: number;
-  valor_parcela: number;
-  valor_pago_parcela: number;
-  saldo_parcela: number;
-  status_parcela: string;
-  data_vencimento: string;
-  ordem_visita_dia: number | null;
-  liquidacao_id: string | null;
-  tem_parcelas_vencidas: boolean;
-  total_parcelas_vencidas: number;
-  valor_total_vencido: number;
+  cliente_id: string; consecutivo: number | null; nome: string;
+  telefone_celular: string | null; endereco: string | null;
+  latitude: number | null; longitude: number | null;
+  emprestimo_id: string; saldo_emprestimo: number; valor_principal: number;
+  numero_parcelas: number; status_emprestimo: string; rota_id: string;
+  frequencia_pagamento: string; parcela_id: string; numero_parcela: number;
+  valor_parcela: number; valor_pago_parcela: number; saldo_parcela: number;
+  status_parcela: string; data_vencimento: string; ordem_visita_dia: number | null;
+  liquidacao_id: string | null; tem_parcelas_vencidas: boolean;
+  total_parcelas_vencidas: number; valor_total_vencido: number;
   status_dia: 'PAGO' | 'PARCIAL' | 'EM_ATRASO' | 'PENDENTE';
-  permite_emprestimo_adicional: boolean;
-  is_parcela_atrasada?: boolean;
+  permite_emprestimo_adicional: boolean; is_parcela_atrasada?: boolean;
 }
 
 interface EmprestimoData {
-  emprestimo_id: string;
-  saldo_emprestimo: number;
-  valor_principal: number;
-  numero_parcelas: number;
-  status_emprestimo: string;
-  frequencia_pagamento: string;
-  parcela_id: string;
-  numero_parcela: number;
-  valor_parcela: number;
-  valor_pago_parcela: number;
-  saldo_parcela: number;
-  status_parcela: string;
-  data_vencimento: string;
-  ordem_visita_dia: number | null;
-  tem_parcelas_vencidas: boolean;
-  total_parcelas_vencidas: number;
-  valor_total_vencido: number;
-  status_dia: 'PAGO' | 'PARCIAL' | 'EM_ATRASO' | 'PENDENTE';
+  emprestimo_id: string; saldo_emprestimo: number; valor_principal: number;
+  numero_parcelas: number; status_emprestimo: string; frequencia_pagamento: string;
+  parcela_id: string; numero_parcela: number; valor_parcela: number;
+  valor_pago_parcela: number; saldo_parcela: number; status_parcela: string;
+  data_vencimento: string; ordem_visita_dia: number | null;
+  tem_parcelas_vencidas: boolean; total_parcelas_vencidas: number;
+  valor_total_vencido: number; status_dia: 'PAGO' | 'PARCIAL' | 'EM_ATRASO' | 'PENDENTE';
   is_parcela_atrasada?: boolean;
-  pagamento_info?: {
-    valorPago: number;
-    creditoGerado: number;
-    valorParcela: number;
-  };
+  pagamento_info?: { valorPago: number; creditoGerado: number; valorParcela: number };
 }
 
 interface ClienteAgrupado {
-  cliente_id: string;
-  consecutivo: number | null;
-  nome: string;
-  telefone_celular: string | null;
-  endereco: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  rota_id: string;
-  emprestimos: EmprestimoData[];
-  qtd_emprestimos: number;
-  tem_multiplos_vencimentos: boolean;
+  cliente_id: string; consecutivo: number | null; nome: string;
+  telefone_celular: string | null; endereco: string | null;
+  latitude: number | null; longitude: number | null; rota_id: string;
+  emprestimos: EmprestimoData[]; qtd_emprestimos: number; tem_multiplos_vencimentos: boolean;
 }
 
 interface ClienteTodos {
-  id: string;
-  consecutivo: number | null;
-  nome: string;
-  telefone_celular: string | null;
-  status: string;
-  status_emprestimo?: string;
-  tem_atraso?: boolean;
+  id: string; consecutivo: number | null; nome: string;
+  telefone_celular: string | null; status: string; tem_atraso?: boolean;
 }
 
 interface PagamentoParcela {
-  parcela_id: string;
-  cliente_id: string;
-  valor_pago_atual: number;
-  valor_credito_gerado: number;
-  valor_parcela: number;
-  data_pagamento: string;
+  parcela_id: string; cliente_id: string; valor_pago_atual: number;
+  valor_credito_gerado: number; valor_parcela: number; data_pagamento: string;
 }
 
-// ============================================================
-// TEXTOS i18n
-// ============================================================
-
+// ── i18n ──
 const textos = {
   'pt-BR': {
-    titulo: 'Meus Clientes',
-    hoje: 'Hoje',
-    clientes: 'clientes',
-    liquidacao: 'Liquidação',
-    todosList: 'Todos',
-    buscar: 'Buscar...',
-    ordemRota: 'Ordem rota',
-    ordemNome: 'Nome A-Z',
-    ordemProximos: 'Próximos',
-    filtroTodos: 'Todos',
-    filtroAtrasados: 'Atrasados',
-    filtroPerto: 'Perto',
-    filtroPagas: 'Pagas',
-    parcela: 'Parcela',
-    saldoEmprestimo: 'Saldo Empréstimo',
-    parcelasVencidas: 'parcela(s) vencida(s)',
-    totalAtraso: 'Total em atraso:',
-    emprestimo: 'Empréstimo',
-    principal: 'Principal',
-    juros: 'Juros',
-    total: 'Total',
-    jaPago: 'Já Pago',
-    saldo: 'Saldo',
-    parcelas: 'Parcelas',
-    progresso: 'Progresso',
-    restantes: 'restante(s)',
-    pagar: 'Pagar',
-    verParcelas: 'Parcelas',
-    contato: 'Contato',
-    ir: 'IR',
-    semClientes: 'Nenhum cliente encontrado',
-    carregando: 'Carregando clientes...',
-    erroCarregar: 'Erro ao carregar clientes',
-    statusAtraso: 'Atraso',
-    statusInativo: 'Inativo',
-    statusAtivo: 'Ativo',
-    tipoFiltro: 'Tipo:...',
-    statusFiltro: 'Status:...',
-    // Frequências
-    freqDiario: 'Diário',
-    freqSemanal: 'Semanal',
-    freqQuinzenal: 'Quinzenal',
-    freqMensal: 'Mensal',
-    freqFlexivel: 'Flexível',
+    titulo: 'Meus Clientes', hoje: 'Hoje', clientes: 'clientes',
+    liquidacao: 'Liquidação', todosList: 'Todos', buscar: 'Buscar...',
+    ordemRota: 'Ordem rota', ordemNome: 'Nome A-Z',
+    filtroTodos: 'Todos', filtroAtrasados: 'Atrasados', filtroPagas: 'Pagas',
+    parcela: 'Parcela', saldoEmprestimo: 'Saldo Empréstimo',
+    parcelasVencidas: 'parcela(s) vencida(s)', totalAtraso: 'Total em atraso:',
+    emprestimo: 'Empréstimo', principal: 'Principal', juros: 'Juros',
+    total: 'Total', jaPago: 'Já Pago', saldo: 'Saldo', parcelas: 'Parcelas',
+    progresso: 'Progresso', restantes: 'restante(s)',
+    pagar: 'Pagar', verParcelas: 'Parcelas', contato: 'Contato', ir: 'IR',
+    semClientes: 'Nenhum cliente encontrado', carregando: 'Carregando clientes...',
+    statusAtraso: 'Atraso', statusInativo: 'Inativo',
+    tipoFiltro: 'Tipo:...', statusFiltro: 'Status:...',
+    pago: 'Pago:', original: 'Original:', credito: 'Crédito:',
   },
   'es': {
-    titulo: 'Mis Clientes',
-    hoje: 'Hoy',
-    clientes: 'clientes',
-    liquidacao: 'Liquidación',
-    todosList: 'Todos',
-    buscar: 'Buscar...',
-    ordemRota: 'Orden ruta',
-    ordemNome: 'Nombre A-Z',
-    ordemProximos: 'Próximos',
-    filtroTodos: 'Todos',
-    filtroAtrasados: 'Atrasados',
-    filtroPerto: 'Cerca',
-    filtroPagas: 'Pagados',
-    parcela: 'Cuota',
-    saldoEmprestimo: 'Saldo Préstamo',
-    parcelasVencidas: 'cuota(s) vencida(s)',
-    totalAtraso: 'Total en atraso:',
-    emprestimo: 'Préstamo',
-    principal: 'Principal',
-    juros: 'Intereses',
-    total: 'Total',
-    jaPago: 'Ya Pagó',
-    saldo: 'Saldo',
-    parcelas: 'Cuotas',
-    progresso: 'Progreso',
-    restantes: 'restante(s)',
-    pagar: 'Pagar',
-    verParcelas: 'Cuotas',
-    contato: 'Contacto',
-    ir: 'IR',
-    semClientes: 'Ningún cliente encontrado',
-    carregando: 'Cargando clientes...',
-    erroCarregar: 'Error al cargar clientes',
-    statusAtraso: 'Atraso',
-    statusInativo: 'Inactivo',
-    statusAtivo: 'Activo',
-    tipoFiltro: 'Tipo:...',
-    statusFiltro: 'Estado:...',
-    freqDiario: 'Diario',
-    freqSemanal: 'Semanal',
-    freqQuinzenal: 'Quincenal',
-    freqMensal: 'Mensual',
-    freqFlexivel: 'Flexible',
+    titulo: 'Mis Clientes', hoje: 'Hoy', clientes: 'clientes',
+    liquidacao: 'Liquidación', todosList: 'Todos', buscar: 'Buscar...',
+    ordemRota: 'Orden ruta', ordemNome: 'Nombre A-Z',
+    filtroTodos: 'Todos', filtroAtrasados: 'Atrasados', filtroPagas: 'Pagados',
+    parcela: 'Cuota', saldoEmprestimo: 'Saldo Préstamo',
+    parcelasVencidas: 'cuota(s) vencida(s)', totalAtraso: 'Total en atraso:',
+    emprestimo: 'Préstamo', principal: 'Principal', juros: 'Intereses',
+    total: 'Total', jaPago: 'Ya Pagó', saldo: 'Saldo', parcelas: 'Cuotas',
+    progresso: 'Progreso', restantes: 'restante(s)',
+    pagar: 'Pagar', verParcelas: 'Cuotas', contato: 'Contacto', ir: 'IR',
+    semClientes: 'Ningún cliente encontrado', carregando: 'Cargando clientes...',
+    statusAtraso: 'Atraso', statusInativo: 'Inactivo',
+    tipoFiltro: 'Tipo:...', statusFiltro: 'Estado:...',
+    pago: 'Pagado:', original: 'Original:', credito: 'Crédito:',
   }
 };
 
-// ============================================================
-// HELPERS
-// ============================================================
-
-const formatarMoeda = (valor: number | null | undefined): string => {
-  if (valor === null || valor === undefined) return '$ 0,00';
-  return `$ ${valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// ── Helpers ──
+const fmt = (v: number | null | undefined) => {
+  if (v == null) return '$ 0,00';
+  return `$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
-const getIniciais = (nome: string): string => {
+const getIni = (nome: string) => {
   if (!nome) return '??';
-  const partes = nome.trim().split(/\s+/);
-  if (partes.length === 1) return partes[0].substring(0, 2).toUpperCase();
-  return (partes[0][0] + partes[partes.length - 1][0]).toUpperCase();
+  const p = nome.trim().split(/\s+/);
+  return p.length === 1 ? p[0].substring(0, 2).toUpperCase() : (p[0][0] + p[p.length - 1][0]).toUpperCase();
 };
 
-const formatarFrequenciaBadge = (freq: string): string => {
-  const map: Record<string, string> = {
-    'DIARIO': 'D',
-    'SEMANAL': 'S',
-    'QUINZENAL': 'Q',
-    'MENSAL': 'M',
-    'FLEXIVEL': 'F',
-  };
-  return map[freq] || freq.charAt(0);
+const fmtTel = (tel: string | null) => {
+  if (!tel) return '';
+  const n = tel.replace(/\D/g, '');
+  if (n.length === 13 && n.startsWith('55')) return `(${n.slice(2, 4)}) ${n.slice(4, 9)}-${n.slice(9)}`;
+  if (n.length === 11) return `(${n.slice(0, 2)}) ${n.slice(2, 7)}-${n.slice(7)}`;
+  if (n.length === 10) return `(${n.slice(0, 2)}) ${n.slice(2, 6)}-${n.slice(6)}`;
+  return tel;
 };
 
-const formatarFrequenciaLabel = (freq: string, t: any): string => {
-  const map: Record<string, string> = {
-    'DIARIO': t.freqDiario,
-    'SEMANAL': t.freqSemanal,
-    'QUINZENAL': t.freqQuinzenal,
-    'MENSAL': t.freqMensal,
-    'FLEXIVEL': t.freqFlexivel,
-  };
-  return map[freq] || freq;
+const FREQ: Record<string, string> = { DIARIO: 'Diário', SEMANAL: 'Semanal', QUINZENAL: 'Quinzenal', MENSAL: 'Mensal', FLEXIVEL: 'Flexível' };
+
+const borderOf = (e: EmprestimoData, paga: boolean) => {
+  if (paga) return '#10B981';
+  if (e.is_parcela_atrasada) return '#EF4444';
+  return ({ PAGO: '#10B981', EM_ATRASO: '#EF4444', PARCIAL: '#F59E0B', PENDENTE: '#D1D5DB' } as any)[e.status_dia] || '#D1D5DB';
 };
 
-const getStatusBorderColor = (emprestimo: EmprestimoData): string => {
-  if (emprestimo.is_parcela_atrasada) return '#EF4444';
-  switch (emprestimo.status_dia) {
-    case 'PAGO': return '#10B981';
-    case 'EM_ATRASO': return '#EF4444';
-    case 'PARCIAL': return '#F59E0B';
-    case 'PENDENTE': default: return '#D1D5DB';
-  }
-};
+const bgOf = (_e: EmprestimoData, paga: boolean) => paga ? 'rgba(16,185,129,0.07)' : '#fff';
 
-const getStatusBackgroundColor = (emprestimo: EmprestimoData): string => {
-  if (emprestimo.is_parcela_atrasada) return 'rgba(239, 68, 68, 0.04)';
-  switch (emprestimo.status_dia) {
-    case 'PAGO': return 'rgba(16, 185, 129, 0.06)';
-    case 'EM_ATRASO': return '#fff';
-    case 'PARCIAL': return '#fff';
-    case 'PENDENTE': default: return '#fff';
-  }
-};
+const isPaga = (pid: string, sd: string, set: Set<string>) => set.has(pid) || sd === 'PAGO';
 
-// ============================================================
-// COMPONENT
-// ============================================================
-
+// ── Component ──
 export default function ClientesScreen({ navigation, route }: any) {
   const { vendedor } = useAuth();
-
-  // Parâmetros recebidos da LiquidacaoScreen
   const rotaId = route?.params?.rotaId || vendedor?.rota_id;
-  const dataLiquidacao = route?.params?.dataLiquidacao || new Date().toISOString().split('T')[0];
-  const liquidacaoId = route?.params?.liquidacaoId;
-  const isVisualizacao = route?.params?.isVisualizacao || false;
+  const dataLiq = route?.params?.dataLiquidacao || new Date().toISOString().split('T')[0];
+  const liqId = route?.params?.liquidacaoId;
+  const isViz = route?.params?.isVisualizacao || false;
 
-  // Estado geral
-  const [language, setLanguage] = useState<Language>('pt-BR');
-  const [tabAtiva, setTabAtiva] = useState<TabAtiva>('liquidacao');
+  const [lang] = useState<Language>('pt-BR');
+  const [tab, setTab] = useState<TabAtiva>('liquidacao');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busca, setBusca] = useState('');
 
-  // Aba Liquidação
-  const [clientesRaw, setClientesRaw] = useState<ClienteRotaDia[]>([]);
-  const [pagamentosDia, setPagamentosDia] = useState<Map<string, PagamentoParcela>>(new Map());
-  const [filtroLiquidacao, setFiltroLiquidacao] = useState<FiltroLiquidacao>('todos');
-  const [ordenacao, setOrdenacao] = useState<OrdenacaoLiquidacao>('rota');
-  const [showOrdenacao, setShowOrdenacao] = useState(false);
-  const [expandedCliente, setExpandedCliente] = useState<string | null>(null);
-  const [empIndexMap, setEmpIndexMap] = useState<Record<string, number>>({});
+  const [raw, setRaw] = useState<ClienteRotaDia[]>([]);
+  const [pagasSet, setPagasSet] = useState<Set<string>>(new Set());
+  const [pagMap, setPagMap] = useState<Map<string, PagamentoParcela>>(new Map());
+  const [mostrarPagas, setMostrarPagas] = useState(false);
+  const [filtro, setFiltro] = useState<FiltroLiquidacao>('todos');
+  const [ord, setOrd] = useState<OrdenacaoLiquidacao>('rota');
+  const [showOrd, setShowOrd] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [empIdxMap, setEmpIdxMap] = useState<Record<string, number>>({});
 
-  // Aba Todos
-  const [clientesTodos, setClientesTodos] = useState<ClienteTodos[]>([]);
-  const [loadingTodos, setLoadingTodos] = useState(false);
+  const [todosList, setTodosList] = useState<ClienteTodos[]>([]);
+  const [loadTodos, setLoadTodos] = useState(false);
 
-  const t = textos[language];
+  const t = textos[lang];
 
-  // ============================================================
-  // DATA LOADING
-  // ============================================================
-
-  const carregarClientesLiquidacao = useCallback(async () => {
-    if (!rotaId || !dataLiquidacao) return;
-
+  // ── Load ──
+  const loadLiq = useCallback(async () => {
+    if (!rotaId || !dataLiq) return;
     try {
-      // 1. Buscar clientes do dia
-      const { data: clientesDia, error: errDia } = await supabase
-        .from('vw_clientes_rota_dia')
-        .select('*')
-        .eq('rota_id', rotaId)
-        .eq('data_vencimento', dataLiquidacao)
-        .order('ordem_visita_dia', { ascending: true, nullsFirst: false });
+      const [{ data: d1, error: e1 }, { data: d2, error: e2 }] = await Promise.all([
+        supabase.from('vw_clientes_rota_dia').select('*').eq('rota_id', rotaId).eq('data_vencimento', dataLiq).order('ordem_visita_dia', { ascending: true, nullsFirst: false }),
+        supabase.from('pagamentos_parcelas').select('parcela_id, cliente_id, valor_pago_atual, valor_credito_gerado, valor_parcela, data_pagamento').eq('rota_id', rotaId).eq('estornado', false).gte('data_pagamento', dataLiq),
+      ]);
+      if (e1) throw e1;
+      if (e2) throw e2;
+      const ps = new Set<string>();
+      const pm = new Map<string, PagamentoParcela>();
+      (d2 || []).forEach((p: PagamentoParcela) => { ps.add(p.parcela_id); pm.set(p.parcela_id, p); });
+      setRaw(d1 || []);
+      setPagasSet(ps);
+      setPagMap(pm);
+    } catch (err) { console.error('Erro load liq:', err); }
+  }, [rotaId, dataLiq]);
 
-      if (errDia) throw errDia;
-
-      // 2. Buscar pagamentos do dia
-      const { data: pagamentos, error: errPag } = await supabase
-        .from('pagamentos_parcelas')
-        .select('parcela_id, cliente_id, valor_pago_atual, valor_credito_gerado, valor_parcela, data_pagamento')
-        .eq('rota_id', rotaId)
-        .eq('estornado', false)
-        .gte('data_pagamento', dataLiquidacao);
-
-      if (errPag) throw errPag;
-
-      // Montar mapa de pagamentos
-      const mapPag = new Map<string, PagamentoParcela>();
-      (pagamentos || []).forEach((p: PagamentoParcela) => {
-        mapPag.set(p.parcela_id, p);
-      });
-
-      setClientesRaw(clientesDia || []);
-      setPagamentosDia(mapPag);
-    } catch (error) {
-      console.error('Erro ao carregar clientes liquidação:', error);
-    }
-  }, [rotaId, dataLiquidacao]);
-
-  const carregarClientesTodos = useCallback(async () => {
+  const loadTodosF = useCallback(async () => {
     if (!rotaId) return;
-    setLoadingTodos(true);
-
+    setLoadTodos(true);
     try {
-      // Buscar todos os clientes da rota via empréstimos (ATIVO/VENCIDO)
-      const { data, error } = await supabase
-        .from('emprestimos')
-        .select(`
-          id,
-          status,
-          cliente_id,
-          clientes!inner (
-            id,
-            consecutivo,
-            nome,
-            telefone_celular,
-            status
-          )
-        `)
+      // 1. Buscar IDs dos clientes da rota
+      const { data: rcData, error: rcErr } = await supabase
+        .from('rota_clientes')
+        .select('cliente_id')
         .eq('rota_id', rotaId)
-        .in('status', ['ATIVO', 'VENCIDO']);
+        .eq('status', 'ATIVO');
+      if (rcErr) throw rcErr;
+      const ids = (rcData || []).map((r: any) => r.cliente_id);
+      if (ids.length === 0) { setTodosList([]); return; }
 
-      if (error) throw error;
+      // 2. Buscar dados dos clientes
+      const { data: cliData, error: cliErr } = await supabase
+        .from('clientes')
+        .select('id, consecutivo, nome, telefone_celular, status')
+        .in('id', ids);
+      if (cliErr) throw cliErr;
 
-      // Agrupar por cliente (um cliente pode ter múltiplos empréstimos)
-      const clienteMap = new Map<string, ClienteTodos>();
-      (data || []).forEach((emp: any) => {
-        const c = emp.clientes;
-        if (!c) return;
-        const existing = clienteMap.get(c.id);
-        if (!existing) {
-          clienteMap.set(c.id, {
-            id: c.id,
-            consecutivo: c.consecutivo,
-            nome: c.nome,
-            telefone_celular: c.telefone_celular,
-            status: c.status,
-            status_emprestimo: emp.status,
-            tem_atraso: emp.status === 'VENCIDO',
-          });
-        } else if (emp.status === 'VENCIDO') {
-          existing.tem_atraso = true;
-        }
-      });
+      // 3. Verificar quais têm empréstimo VENCIDO
+      let vencSet = new Set<string>();
+      const { data: ve } = await supabase
+        .from('emprestimos')
+        .select('cliente_id')
+        .eq('rota_id', rotaId)
+        .eq('status', 'VENCIDO')
+        .in('cliente_id', ids);
+      (ve || []).forEach((e: any) => vencSet.add(e.cliente_id));
 
-      setClientesTodos(
-        Array.from(clienteMap.values()).sort((a, b) => a.nome.localeCompare(b.nome))
+      setTodosList(
+        (cliData || []).map((c: any) => ({
+          id: c.id, consecutivo: c.consecutivo, nome: c.nome,
+          telefone_celular: c.telefone_celular, status: c.status,
+          tem_atraso: vencSet.has(c.id),
+        })).sort((a: any, b: any) => a.nome.localeCompare(b.nome))
       );
-    } catch (error) {
-      console.error('Erro ao carregar todos clientes:', error);
-    } finally {
-      setLoadingTodos(false);
-    }
+    } catch (err) { console.error('Erro load todos:', err); }
+    finally { setLoadTodos(false); }
   }, [rotaId]);
 
-  const carregarDados = useCallback(async () => {
+  const loadAll = useCallback(async () => {
     setLoading(true);
-    await Promise.all([
-      carregarClientesLiquidacao(),
-      carregarClientesTodos(),
-    ]);
+    await Promise.all([loadLiq(), loadTodosF()]);
     setLoading(false);
-  }, [carregarClientesLiquidacao, carregarClientesTodos]);
+  }, [loadLiq, loadTodosF]);
 
-  useEffect(() => {
-    carregarDados();
-  }, [carregarDados]);
+  useEffect(() => { loadAll(); }, [loadAll]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    carregarDados().finally(() => setRefreshing(false));
-  }, [carregarDados]);
+    loadAll().finally(() => setRefreshing(false));
+  }, [loadAll]);
 
-  // ============================================================
-  // AGRUPAMENTO E FILTROS — ABA LIQUIDAÇÃO
-  // ============================================================
-
-  const clientesAgrupados = useMemo((): ClienteAgrupado[] => {
-    const mapa = new Map<string, ClienteAgrupado>();
-
-    clientesRaw.forEach((row) => {
-      let grupo = mapa.get(row.cliente_id);
-      if (!grupo) {
-        grupo = {
-          cliente_id: row.cliente_id,
-          consecutivo: row.consecutivo,
-          nome: row.nome,
-          telefone_celular: row.telefone_celular,
-          endereco: row.endereco,
-          latitude: row.latitude,
-          longitude: row.longitude,
-          rota_id: row.rota_id,
-          emprestimos: [],
-          qtd_emprestimos: 0,
-          tem_multiplos_vencimentos: false,
+  // ── Agrupamento ──
+  const grouped = useMemo((): ClienteAgrupado[] => {
+    const m = new Map<string, ClienteAgrupado>();
+    raw.forEach(r => {
+      let g = m.get(r.cliente_id);
+      if (!g) {
+        g = {
+          cliente_id: r.cliente_id, consecutivo: r.consecutivo, nome: r.nome,
+          telefone_celular: r.telefone_celular, endereco: r.endereco,
+          latitude: r.latitude, longitude: r.longitude, rota_id: r.rota_id,
+          emprestimos: [], qtd_emprestimos: 0, tem_multiplos_vencimentos: false,
         };
-        mapa.set(row.cliente_id, grupo);
+        m.set(r.cliente_id, g);
       }
-
-      // Evitar duplicatas de parcela
-      const jaExiste = grupo.emprestimos.some(e => e.parcela_id === row.parcela_id);
-      if (!jaExiste) {
-        const pagInfo = pagamentosDia.get(row.parcela_id);
-        grupo.emprestimos.push({
-          emprestimo_id: row.emprestimo_id,
-          saldo_emprestimo: row.saldo_emprestimo,
-          valor_principal: row.valor_principal,
-          numero_parcelas: row.numero_parcelas,
-          status_emprestimo: row.status_emprestimo,
-          frequencia_pagamento: row.frequencia_pagamento,
-          parcela_id: row.parcela_id,
-          numero_parcela: row.numero_parcela,
-          valor_parcela: row.valor_parcela,
-          valor_pago_parcela: row.valor_pago_parcela,
-          saldo_parcela: row.saldo_parcela,
-          status_parcela: row.status_parcela,
-          data_vencimento: row.data_vencimento,
-          ordem_visita_dia: row.ordem_visita_dia,
-          tem_parcelas_vencidas: row.tem_parcelas_vencidas,
-          total_parcelas_vencidas: row.total_parcelas_vencidas,
-          valor_total_vencido: row.valor_total_vencido,
-          status_dia: pagInfo ? 'PAGO' : row.status_dia,
-          is_parcela_atrasada: row.is_parcela_atrasada,
-          pagamento_info: pagInfo ? {
-            valorPago: pagInfo.valor_pago_atual,
-            creditoGerado: pagInfo.valor_credito_gerado,
-            valorParcela: pagInfo.valor_parcela,
-          } : undefined,
+      if (!g.emprestimos.some(e => e.parcela_id === r.parcela_id)) {
+        const pi = pagMap.get(r.parcela_id);
+        g.emprestimos.push({
+          emprestimo_id: r.emprestimo_id, saldo_emprestimo: r.saldo_emprestimo,
+          valor_principal: r.valor_principal, numero_parcelas: r.numero_parcelas,
+          status_emprestimo: r.status_emprestimo, frequencia_pagamento: r.frequencia_pagamento,
+          parcela_id: r.parcela_id, numero_parcela: r.numero_parcela,
+          valor_parcela: r.valor_parcela, valor_pago_parcela: r.valor_pago_parcela,
+          saldo_parcela: r.saldo_parcela, status_parcela: r.status_parcela,
+          data_vencimento: r.data_vencimento, ordem_visita_dia: r.ordem_visita_dia,
+          tem_parcelas_vencidas: r.tem_parcelas_vencidas,
+          total_parcelas_vencidas: r.total_parcelas_vencidas,
+          valor_total_vencido: r.valor_total_vencido,
+          status_dia: r.status_dia, is_parcela_atrasada: r.is_parcela_atrasada,
+          pagamento_info: pi ? { valorPago: pi.valor_pago_atual, creditoGerado: pi.valor_credito_gerado, valorParcela: pi.valor_parcela } : undefined,
         });
       }
     });
+    m.forEach(g => { g.qtd_emprestimos = g.emprestimos.length; g.tem_multiplos_vencimentos = g.emprestimos.length > 1; });
+    return Array.from(m.values());
+  }, [raw, pagMap]);
 
-    // Finalizar agrupamento
-    mapa.forEach((grupo) => {
-      grupo.qtd_emprestimos = grupo.emprestimos.length;
-      grupo.tem_multiplos_vencimentos = grupo.emprestimos.length > 1;
-    });
+  const isCliPago = useCallback((c: ClienteAgrupado) =>
+    c.emprestimos.every(e => isPaga(e.parcela_id, e.status_dia, pagasSet)), [pagasSet]);
 
-    return Array.from(mapa.values());
-  }, [clientesRaw, pagamentosDia]);
-
-  const clientesFiltrados = useMemo((): ClienteAgrupado[] => {
-    let resultado = [...clientesAgrupados];
-
-    // Filtro de busca
+  const filtered = useMemo(() => {
+    let r = [...grouped];
+    // Toggle pagas: por padrão oculta pagos
+    if (!mostrarPagas) r = r.filter(c => !isCliPago(c));
+    // Busca
     if (busca.trim()) {
-      const termoLower = busca.toLowerCase().trim();
-      resultado = resultado.filter(c =>
-        c.nome.toLowerCase().includes(termoLower) ||
-        (c.telefone_celular && c.telefone_celular.includes(termoLower)) ||
-        (c.endereco && c.endereco.toLowerCase().includes(termoLower))
-      );
+      const b = busca.toLowerCase().trim();
+      r = r.filter(c => c.nome.toLowerCase().includes(b) || (c.telefone_celular && c.telefone_celular.includes(b)) || (c.endereco && c.endereco.toLowerCase().includes(b)));
     }
-
-    // Filtros de status
-    switch (filtroLiquidacao) {
-      case 'atrasados':
-        resultado = resultado.filter(c =>
-          c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas)
-        );
-        break;
-      case 'pagas':
-        resultado = resultado.filter(c =>
-          c.emprestimos.every(e => e.status_dia === 'PAGO')
-        );
-        break;
-      case 'perto':
-        // TODO: filtro por proximidade GPS
-        break;
-    }
-
+    // Filtro chip
+    if (filtro === 'atrasados') r = r.filter(c => c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas));
     // Ordenação
-    switch (ordenacao) {
-      case 'rota':
-        resultado.sort((a, b) => {
-          const ordemA = a.emprestimos[0]?.ordem_visita_dia ?? 9999;
-          const ordemB = b.emprestimos[0]?.ordem_visita_dia ?? 9999;
-          return ordemA - ordemB;
-        });
-        break;
-      case 'nome':
-        resultado.sort((a, b) => a.nome.localeCompare(b.nome));
-        break;
-      case 'proximos':
-        // TODO: ordenar por GPS
-        break;
-    }
+    r.sort(ord === 'rota'
+      ? (a, b) => (a.emprestimos[0]?.ordem_visita_dia ?? 9999) - (b.emprestimos[0]?.ordem_visita_dia ?? 9999)
+      : (a, b) => a.nome.localeCompare(b.nome));
+    return r;
+  }, [grouped, busca, filtro, ord, mostrarPagas, isCliPago]);
 
-    return resultado;
-  }, [clientesAgrupados, busca, filtroLiquidacao, ordenacao]);
+  const cntTotal = grouped.length;
+  const cntAtraso = grouped.filter(c => c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas)).length;
+  const cntPagas = grouped.filter(c => isCliPago(c)).length;
 
-  // Contadores
-  const totalClientesLiquidacao = clientesAgrupados.length;
-  const totalAtrasados = clientesAgrupados.filter(c =>
-    c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas)
-  ).length;
-  const totalPagas = clientesAgrupados.filter(c =>
-    c.emprestimos.every(e => e.status_dia === 'PAGO')
-  ).length;
+  const eIdx = (cid: string) => empIdxMap[cid] || 0;
+  const eSet = (cid: string, i: number) => setEmpIdxMap(p => ({ ...p, [cid]: i }));
+  const eAtual = (c: ClienteAgrupado) => c.emprestimos[Math.min(eIdx(c.cliente_id), c.emprestimos.length - 1)];
 
-  // ============================================================
-  // EMPRÉSTIMO NAVIGATION (múltiplos empréstimos)
-  // ============================================================
-
-  const getEmprestimoIndex = (clienteId: string): number => {
-    return empIndexMap[clienteId] || 0;
-  };
-
-  const setEmprestimoIndex = (clienteId: string, idx: number) => {
-    setEmpIndexMap(prev => ({ ...prev, [clienteId]: idx }));
-  };
-
-  const getEmprestimoAtual = (cliente: ClienteAgrupado): EmprestimoData => {
-    const idx = getEmprestimoIndex(cliente.cliente_id);
-    return cliente.emprestimos[Math.min(idx, cliente.emprestimos.length - 1)];
-  };
-
-  // ============================================================
-  // ACTIONS
-  // ============================================================
-
-  const handlePagar = (cliente: ClienteAgrupado, emprestimo: EmprestimoData) => {
-    if (isVisualizacao) return;
-    navigation.navigate('Pagamento', {
-      clienteId: cliente.cliente_id,
-      clienteNome: cliente.nome,
-      parcelaId: emprestimo.parcela_id,
-      emprestimoId: emprestimo.emprestimo_id,
-      valorParcela: emprestimo.valor_parcela,
-      saldoParcela: emprestimo.saldo_parcela,
-      numeroParcela: emprestimo.numero_parcela,
-      totalParcelas: emprestimo.numero_parcelas,
-      liquidacaoId: liquidacaoId,
-      rotaId: rotaId,
-    });
-  };
-
-  const handleContato = (cliente: ClienteAgrupado) => {
-    if (cliente.telefone_celular) {
-      const tel = cliente.telefone_celular.replace(/\D/g, '');
-      Linking.openURL(`tel:${tel}`);
-    }
-  };
-
-  const handleIR = (cliente: ClienteAgrupado) => {
-    if (cliente.latitude && cliente.longitude) {
-      const url = Platform.OS === 'ios'
-        ? `maps:?daddr=${cliente.latitude},${cliente.longitude}`
-        : `google.navigation:q=${cliente.latitude},${cliente.longitude}`;
-      Linking.openURL(url);
-    }
-  };
-
-  const handleVerParcelas = (cliente: ClienteAgrupado, emprestimo: EmprestimoData) => {
-    navigation.navigate('Parcelas', {
-      emprestimoId: emprestimo.emprestimo_id,
-      clienteNome: cliente.nome,
-    });
-  };
-
-  const toggleExpand = (clienteId: string) => {
-    setExpandedCliente(prev => prev === clienteId ? null : clienteId);
-  };
-
-  // ============================================================
-  // RENDER — CARD CLIENTE LIQUIDAÇÃO
-  // ============================================================
-
-  const renderCardLiquidacao = (cliente: ClienteAgrupado) => {
-    const emp = getEmprestimoAtual(cliente);
-    const isExpanded = expandedCliente === cliente.cliente_id;
-    const borderColor = getStatusBorderColor(emp);
-    const bgColor = getStatusBackgroundColor(emp);
-    const empIdx = getEmprestimoIndex(cliente.cliente_id);
-
-    // Calcular juros
-    const juros = emp.valor_parcela * emp.numero_parcelas - emp.valor_principal;
-    const totalEmprestimo = emp.valor_principal + juros;
-
-    // Parcelas pagas (estimativa via numero_parcela e status)
-    const parcelasPagas = emp.numero_parcela - 1 + (emp.status_dia === 'PAGO' ? 1 : 0);
-    const totalPago = emp.valor_pago_parcela + (emp.valor_principal - emp.saldo_emprestimo);
-    const parcelasRestantes = emp.numero_parcelas - parcelasPagas;
-    const progressoPct = emp.numero_parcelas > 0
-      ? Math.min(100, Math.round((parcelasPagas / emp.numero_parcelas) * 100))
-      : 0;
+  // ── Card Liquidação ──
+  const renderCard = (c: ClienteAgrupado) => {
+    const e = eAtual(c);
+    const ex = expanded === c.cliente_id;
+    const ei = eIdx(c.cliente_id);
+    const pg = isPaga(e.parcela_id, e.status_dia, pagasSet);
+    const bc = borderOf(e, pg);
+    const bg = bgOf(e, pg);
+    const pi = e.pagamento_info;
+    const juros = e.valor_parcela * e.numero_parcelas - e.valor_principal;
+    const totalE = e.valor_principal + juros;
+    const pp = e.numero_parcela - 1 + (pg ? 1 : 0);
+    const pr = e.numero_parcelas - pp;
+    const pct = e.numero_parcelas > 0 ? Math.min(100, Math.round((pp / e.numero_parcelas) * 100)) : 0;
 
     return (
       <TouchableOpacity
-        key={cliente.cliente_id}
-        activeOpacity={0.7}
-        onPress={() => toggleExpand(cliente.cliente_id)}
-        style={[
-          styles.clienteCard,
-          { borderLeftColor: borderColor, backgroundColor: bgColor },
-        ]}
+        key={c.cliente_id} activeOpacity={0.7}
+        onPress={() => setExpanded(p => p === c.cliente_id ? null : c.cliente_id)}
+        style={[S.card, { borderLeftColor: bc, backgroundColor: bg }]}
       >
-        {/* ===== HEADER DO CARD ===== */}
-        <View style={styles.cardHeader}>
-          {/* Avatar */}
-          <View style={[styles.avatar, { backgroundColor: borderColor === '#D1D5DB' ? '#3B82F6' : borderColor }]}>
-            <Text style={styles.avatarText}>{getIniciais(cliente.nome)}</Text>
+        {/* Header */}
+        <View style={S.cardRow}>
+          <View style={[S.av, { backgroundColor: bc === '#D1D5DB' ? '#3B82F6' : bc }]}>
+            <Text style={S.avTx}>{getIni(c.nome)}</Text>
           </View>
-
-          {/* Info principal */}
-          <View style={styles.cardHeaderInfo}>
-            <View style={styles.cardHeaderTopRow}>
-              <Text style={styles.clienteNome} numberOfLines={1}>
-                {cliente.nome.toLowerCase()}
-              </Text>
-              {/* Badge vencidas */}
-              {emp.tem_parcelas_vencidas && emp.total_parcelas_vencidas > 0 && (
-                <View style={styles.badgeVencidas}>
-                  <Text style={styles.badgeVencidasIcon}>⚠️</Text>
-                  <Text style={styles.badgeVencidasText}>{emp.total_parcelas_vencidas}</Text>
+          <View style={S.cardInfo}>
+            <View style={S.nameRow}>
+              <Text style={S.nome} numberOfLines={1}>{c.nome.toLowerCase()}</Text>
+              {e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && (
+                <View style={S.bWarn}>
+                  <Text style={S.bWarnI}>⚠</Text>
+                  <Text style={S.bWarnT}>{e.total_parcelas_vencidas}</Text>
                 </View>
               )}
-              {/* Badge múltiplos */}
-              {cliente.tem_multiplos_vencimentos && (
-                <View style={styles.badgeMultiplos}>
-                  <Text style={styles.badgeMultiplosText}>{cliente.qtd_emprestimos}</Text>
-                </View>
+              {c.tem_multiplos_vencimentos && (
+                <View style={S.bMul}><Text style={S.bMulT}>{c.qtd_emprestimos}</Text></View>
               )}
-              {/* Menu 3 pontos */}
-              <TouchableOpacity style={styles.menuDots} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                <Text style={styles.menuDotsText}>⋮</Text>
-              </TouchableOpacity>
+              <Text style={S.dots}>⋮</Text>
             </View>
-
-            {/* Telefone */}
-            {cliente.telefone_celular && (
-              <View style={styles.infoRow}>
-                <Text style={styles.infoIcon}>📞</Text>
-                <Text style={styles.infoText}>{cliente.telefone_celular}</Text>
-              </View>
-            )}
-
-            {/* Endereço */}
-            {cliente.endereco && (
-              <View style={styles.infoRow}>
-                <Text style={styles.infoIcon}>📍</Text>
-                <Text style={styles.infoText} numberOfLines={1}>{cliente.endereco}</Text>
-              </View>
-            )}
+            {c.telefone_celular ? <Text style={S.sub}>📞 {fmtTel(c.telefone_celular)}</Text> : null}
+            {c.endereco ? <Text style={S.sub} numberOfLines={1}>📍 {c.endereco}</Text> : null}
           </View>
         </View>
 
-        {/* ===== PARCELA + SALDO ===== */}
-        <View style={styles.parcelaSaldoRow}>
+        {/* Parcela + Saldo */}
+        <View style={S.pRow}>
           <View>
-            <Text style={styles.parcelaLabel}>
-              {t.parcela} {emp.numero_parcela}/{emp.numero_parcelas}
-              {'  '}
-              <View style={styles.freqBadge}>
-                <Text style={styles.freqBadgeText}>
-                  {formatarFrequenciaLabel(emp.frequencia_pagamento, t)}
-                </Text>
-              </View>
-            </Text>
-            <Text style={styles.parcelaValor}>{formatarMoeda(emp.valor_parcela)}</Text>
+            <View style={S.pLblR}>
+              <Text style={S.pLbl}>{t.parcela} {e.numero_parcela}/{e.numero_parcelas}</Text>
+              <View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[e.frequencia_pagamento] || e.frequencia_pagamento}</Text></View>
+            </View>
+            {pg && pi ? (
+              <>
+                <Text style={S.pgVal}>{t.pago} {fmt(pi.valorPago)}</Text>
+                <Text style={S.pgOrig}>{t.original} {fmt(pi.valorParcela)}</Text>
+                {pi.creditoGerado > 0 && <Text style={S.pgCred}>{t.credito} {fmt(pi.creditoGerado)}</Text>}
+              </>
+            ) : (
+              <Text style={S.pVal}>{fmt(e.valor_parcela)}</Text>
+            )}
           </View>
-          <View style={styles.saldoContainer}>
-            <Text style={styles.saldoLabel}>{t.saldoEmprestimo}</Text>
-            <Text style={styles.saldoValor}>{formatarMoeda(emp.saldo_emprestimo)}</Text>
+          <View style={S.sCol}>
+            <Text style={S.sLbl}>{t.saldoEmprestimo}</Text>
+            <Text style={S.sVal}>{fmt(e.saldo_emprestimo)}</Text>
           </View>
         </View>
 
-        {/* ===== ÁREA EXPANDIDA ===== */}
-        {isExpanded && (
-          <View style={styles.expandedArea}>
-            {/* Alerta parcelas vencidas */}
-            {emp.tem_parcelas_vencidas && emp.total_parcelas_vencidas > 0 && (
-              <View style={styles.alertaVencidas}>
-                <Text style={styles.alertaVencidasText}>
-                  ⚠️ {emp.total_parcelas_vencidas} {t.parcelasVencidas}
-                </Text>
-                <Text style={styles.alertaVencidasValor}>
-                  {t.totalAtraso} {formatarMoeda(emp.valor_total_vencido)}
-                </Text>
+        {/* Expanded */}
+        {ex && (
+          <View style={S.exp}>
+            {e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && (
+              <View style={S.aR}>
+                <Text style={S.aRT}>⚠ {e.total_parcelas_vencidas} {t.parcelasVencidas}</Text>
+                <Text style={S.aRS}>{t.totalAtraso} {fmt(e.valor_total_vencido)}</Text>
               </View>
             )}
-
-            {/* Pagamento parcial */}
-            {emp.status_parcela === 'PARCIAL' && (
-              <View style={styles.alertaParcial}>
-                <Text style={styles.alertaParcialText}>
-                  Pagamento parcial: {formatarMoeda(emp.valor_pago_parcela)} / {formatarMoeda(emp.valor_parcela)}
-                </Text>
-                <Text style={styles.alertaParcialSaldo}>
-                  Restante: {formatarMoeda(emp.saldo_parcela)}
-                </Text>
+            {e.status_parcela === 'PARCIAL' && !pg && (
+              <View style={S.aY}>
+                <Text style={S.aYT}>Parcial: {fmt(e.valor_pago_parcela)} / {fmt(e.valor_parcela)}</Text>
+                <Text style={S.aYS}>Restante: {fmt(e.saldo_parcela)}</Text>
               </View>
             )}
-
-            {/* Navegação múltiplos empréstimos */}
-            {cliente.tem_multiplos_vencimentos && (
-              <View style={styles.empNavRow}>
-                <TouchableOpacity
-                  onPress={() => setEmprestimoIndex(cliente.cliente_id, Math.max(0, empIdx - 1))}
-                  disabled={empIdx === 0}
-                  style={[styles.empNavButton, empIdx === 0 && styles.empNavButtonDisabled]}
-                >
-                  <Text style={styles.empNavButtonText}>◀</Text>
-                </TouchableOpacity>
-                <View style={styles.empNavDots}>
-                  {cliente.emprestimos.map((_, i) => (
-                    <View key={i} style={[styles.empNavDot, i === empIdx && styles.empNavDotActive]} />
-                  ))}
-                </View>
-                <TouchableOpacity
-                  onPress={() => setEmprestimoIndex(cliente.cliente_id, Math.min(cliente.emprestimos.length - 1, empIdx + 1))}
-                  disabled={empIdx >= cliente.emprestimos.length - 1}
-                  style={[styles.empNavButton, empIdx >= cliente.emprestimos.length - 1 && styles.empNavButtonDisabled]}
-                >
-                  <Text style={styles.empNavButtonText}>▶</Text>
-                </TouchableOpacity>
-                <Text style={styles.empNavLabel}>
-                  {t.emprestimo} {empIdx + 1}/{cliente.qtd_emprestimos}
-                </Text>
+            {c.tem_multiplos_vencimentos && (
+              <View style={S.eNav}>
+                <TouchableOpacity onPress={() => eSet(c.cliente_id, Math.max(0, ei - 1))} disabled={ei === 0} style={[S.eNBtn, ei === 0 && S.eNOff]}><Text style={S.eNBTx}>◀</Text></TouchableOpacity>
+                {c.emprestimos.map((_, i) => <View key={i} style={[S.eDot, i === ei && S.eDotOn]} />)}
+                <TouchableOpacity onPress={() => eSet(c.cliente_id, Math.min(c.emprestimos.length - 1, ei + 1))} disabled={ei >= c.emprestimos.length - 1} style={[S.eNBtn, ei >= c.emprestimos.length - 1 && S.eNOff]}><Text style={S.eNBTx}>▶</Text></TouchableOpacity>
+                <Text style={S.eNLbl}> {t.emprestimo} {ei + 1}/{c.qtd_emprestimos}</Text>
               </View>
             )}
-
-            {/* Resumo empréstimo */}
-            <View style={styles.resumoEmprestimo}>
-              <View style={styles.resumoHeader}>
-                <Text style={styles.resumoTitle}>
-                  {t.emprestimo} {empIdx + 1}/{cliente.qtd_emprestimos}
-                </Text>
-                <View style={[
-                  styles.statusEmpBadge,
-                  { backgroundColor: emp.status_dia === 'EM_ATRASO' ? '#FEE2E2' : emp.status_dia === 'PAGO' ? '#D1FAE5' : '#F3F4F6' }
-                ]}>
-                  <Text style={[
-                    styles.statusEmpText,
-                    { color: emp.status_dia === 'EM_ATRASO' ? '#DC2626' : emp.status_dia === 'PAGO' ? '#059669' : '#6B7280' }
-                  ]}>
-                    {emp.status_dia}
-                  </Text>
+            <View style={S.res}>
+              <View style={S.resH}>
+                <Text style={S.resT}>{t.emprestimo} {ei + 1}/{c.qtd_emprestimos}</Text>
+                <View style={[S.stB, { backgroundColor: e.status_dia === 'EM_ATRASO' ? '#FEE2E2' : pg ? '#D1FAE5' : '#F3F4F6' }]}>
+                  <Text style={[S.stBT, { color: e.status_dia === 'EM_ATRASO' ? '#DC2626' : pg ? '#059669' : '#6B7280' }]}>{pg ? 'PAGO' : e.status_dia}</Text>
                 </View>
               </View>
-
-              {/* Linha 1: Principal / Juros / Total */}
-              <View style={styles.resumoGrid}>
-                <View style={styles.resumoGridItem}>
-                  <Text style={styles.resumoGridLabel}>{t.principal}</Text>
-                  <Text style={styles.resumoGridValue}>{formatarMoeda(emp.valor_principal)}</Text>
-                </View>
-                <View style={styles.resumoGridItem}>
-                  <Text style={styles.resumoGridLabel}>{t.juros}</Text>
-                  <Text style={[styles.resumoGridValue, { color: '#F59E0B' }]}>{formatarMoeda(juros)}</Text>
-                </View>
-                <View style={styles.resumoGridItem}>
-                  <Text style={styles.resumoGridLabel}>{t.total}</Text>
-                  <Text style={styles.resumoGridValue}>{formatarMoeda(totalEmprestimo)}</Text>
-                </View>
+              <View style={S.g3}>
+                <View style={S.gi}><Text style={S.gl}>{t.principal}</Text><Text style={S.gv}>{fmt(e.valor_principal)}</Text></View>
+                <View style={S.gi}><Text style={S.gl}>{t.juros}</Text><Text style={[S.gv, { color: '#F59E0B' }]}>{fmt(juros)}</Text></View>
+                <View style={S.gi}><Text style={S.gl}>{t.total}</Text><Text style={S.gv}>{fmt(totalE)}</Text></View>
               </View>
-
-              {/* Linha 2: Já Pago / Saldo / Parcelas */}
-              <View style={styles.resumoGrid}>
-                <View style={styles.resumoGridItem}>
-                  <Text style={styles.resumoGridLabel}>{t.jaPago}</Text>
-                  <Text style={[styles.resumoGridValue, { color: '#10B981' }]}>
-                    {formatarMoeda(totalEmprestimo - emp.saldo_emprestimo)}
-                  </Text>
-                </View>
-                <View style={styles.resumoGridItem}>
-                  <Text style={styles.resumoGridLabel}>{t.saldo}</Text>
-                  <Text style={[styles.resumoGridValue, { color: '#EF4444' }]}>{formatarMoeda(emp.saldo_emprestimo)}</Text>
-                </View>
-                <View style={styles.resumoGridItem}>
-                  <Text style={styles.resumoGridLabel}>{t.parcelas}</Text>
-                  <Text style={styles.resumoGridValue}>{parcelasPagas}/{emp.numero_parcelas}</Text>
-                </View>
+              <View style={S.g3}>
+                <View style={S.gi}><Text style={S.gl}>{t.jaPago}</Text><Text style={[S.gv, { color: '#10B981' }]}>{fmt(totalE - e.saldo_emprestimo)}</Text></View>
+                <View style={S.gi}><Text style={S.gl}>{t.saldo}</Text><Text style={[S.gv, { color: '#EF4444' }]}>{fmt(e.saldo_emprestimo)}</Text></View>
+                <View style={S.gi}><Text style={S.gl}>{t.parcelas}</Text><Text style={S.gv}>{pp}/{e.numero_parcelas}</Text></View>
               </View>
-
-              {/* Progresso */}
-              <View style={styles.progressoContainer}>
-                <Text style={styles.progressoLabel}>{t.progresso}</Text>
-                <View style={styles.progressoBarOuter}>
-                  <View style={[styles.progressoBarInner, { width: `${progressoPct}%` }]} />
-                </View>
-                <Text style={styles.progressoRestantes}>{parcelasRestantes} {t.restantes}</Text>
-              </View>
+              <Text style={S.prL}>{t.progresso}</Text>
+              <View style={S.prB}><View style={[S.prF, { width: `${pct}%` }]} /></View>
+              <Text style={S.prR}>{pr} {t.restantes}</Text>
             </View>
-
-            {/* Botões de ação */}
-            <View style={styles.acoesBotoes}>
-              <TouchableOpacity
-                style={[styles.botaoAcao, styles.botaoPagar, isVisualizacao && styles.botaoDisabled]}
-                onPress={() => handlePagar(cliente, emp)}
-                disabled={isVisualizacao || emp.status_dia === 'PAGO'}
-              >
-                <Text style={styles.botaoAcaoIcon}>💰</Text>
-                <Text style={styles.botaoAcaoTextBranco}>{t.pagar}</Text>
+            <View style={S.btR}>
+              <TouchableOpacity style={[S.bt, S.btG, (isViz || pg) && S.btOff]} onPress={() => { if (!isViz) navigation.navigate('Pagamento', { clienteId: c.cliente_id, clienteNome: c.nome, parcelaId: e.parcela_id, emprestimoId: e.emprestimo_id, valorParcela: e.valor_parcela, saldoParcela: e.saldo_parcela, numeroParcela: e.numero_parcela, totalParcelas: e.numero_parcelas, liquidacaoId: liqId, rotaId }); }} disabled={isViz || pg}>
+                <Text style={S.btI}>💰</Text><Text style={S.btW}>{t.pagar}</Text>
               </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.botaoAcao, styles.botaoParcelas]}
-                onPress={() => handleVerParcelas(cliente, emp)}
-              >
-                <Text style={styles.botaoAcaoIcon}>👁</Text>
-                <Text style={styles.botaoAcaoTextBranco}>{t.verParcelas}</Text>
+              <TouchableOpacity style={[S.bt, S.btBl]} onPress={() => navigation.navigate('Parcelas', { emprestimoId: e.emprestimo_id })}>
+                <Text style={S.btI}>👁</Text><Text style={S.btW}>{t.verParcelas}</Text>
               </TouchableOpacity>
             </View>
-
-            <View style={styles.acoesBotoes}>
-              <TouchableOpacity
-                style={[styles.botaoAcao, styles.botaoContato]}
-                onPress={() => handleContato(cliente)}
-                disabled={!cliente.telefone_celular}
-              >
-                <Text style={styles.botaoAcaoIcon}>📱</Text>
-                <Text style={styles.botaoAcaoTextVerde}>{t.contato}</Text>
+            <View style={S.btR}>
+              <TouchableOpacity style={[S.bt, S.btOG]} onPress={() => c.telefone_celular && Linking.openURL(`tel:${c.telefone_celular.replace(/\D/g, '')}`)} disabled={!c.telefone_celular}>
+                <Text style={S.btI}>📱</Text><Text style={S.btTG}>{t.contato}</Text>
               </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.botaoAcao, styles.botaoIR]}
-                onPress={() => handleIR(cliente)}
-                disabled={!cliente.latitude || !cliente.longitude}
-              >
-                <Text style={styles.botaoAcaoIcon}>🧭</Text>
-                <Text style={styles.botaoAcaoTextAzul}>{t.ir}</Text>
+              <TouchableOpacity style={[S.bt, S.btOB]} onPress={() => { if (c.latitude && c.longitude) Linking.openURL(Platform.OS === 'ios' ? `maps:?daddr=${c.latitude},${c.longitude}` : `google.navigation:q=${c.latitude},${c.longitude}`); }} disabled={!c.latitude}>
+                <Text style={S.btI}>🧭</Text><Text style={S.btTB}>{t.ir}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -878,451 +426,251 @@ export default function ClientesScreen({ navigation, route }: any) {
     );
   };
 
-  // ============================================================
-  // RENDER — CARD CLIENTE TODOS
-  // ============================================================
+  // ── Todos ──
+  const todosFilt = useMemo(() => {
+    if (!busca.trim()) return todosList;
+    const b = busca.toLowerCase().trim();
+    return todosList.filter(c => c.nome.toLowerCase().includes(b) || (c.telefone_celular && c.telefone_celular.includes(b)));
+  }, [todosList, busca]);
 
-  const renderCardTodos = (cliente: ClienteTodos) => {
-    const isAtraso = cliente.tem_atraso;
-    const isInativo = cliente.status !== 'ATIVO';
-    const corBorda = isAtraso ? '#EF4444' : isInativo ? '#9CA3AF' : '#3B82F6';
-    const statusLabel = isAtraso ? t.statusAtraso : isInativo ? t.statusInativo : '';
-    const statusCor = isAtraso ? '#EF4444' : '#9CA3AF';
-
+  const renderTodos = (c: ClienteTodos) => {
+    const a = c.tem_atraso;
+    const inativo = c.status !== 'ATIVO';
+    const cor = a ? '#EF4444' : inativo ? '#9CA3AF' : '#3B82F6';
     return (
-      <TouchableOpacity
-        key={cliente.id}
-        activeOpacity={0.7}
-        style={[styles.todosCard, { borderLeftColor: corBorda }]}
-        onPress={() => {
-          // TODO: navegar para detalhes do cliente
-        }}
-      >
-        <View style={[styles.todosAvatar, { backgroundColor: corBorda }]}>
-          <Text style={styles.todosAvatarText}>{getIniciais(cliente.nome)}</Text>
+      <TouchableOpacity key={c.id} activeOpacity={0.7} style={[S.tC, { borderLeftColor: cor }]}>
+        <View style={[S.tAv, { backgroundColor: cor }]}>
+          <Text style={S.tAvT}>{getIni(c.nome)}</Text>
         </View>
-        <Text style={styles.todosNome} numberOfLines={1}>{cliente.nome.toLowerCase()}</Text>
-        {statusLabel ? (
-          <Text style={[styles.todosStatus, { color: statusCor }]}>{statusLabel}</Text>
-        ) : null}
+        <Text style={S.tNm} numberOfLines={1}>{c.nome.toLowerCase()}</Text>
+        {(a || inativo) && <Text style={[S.tSt, { color: cor }]}>{a ? t.statusAtraso : t.statusInativo}</Text>}
       </TouchableOpacity>
     );
   };
 
-  // ============================================================
-  // FILTROS ABA TODOS
-  // ============================================================
-
-  const clientesTodosFiltrados = useMemo(() => {
-    if (!busca.trim()) return clientesTodos;
-    const termo = busca.toLowerCase().trim();
-    return clientesTodos.filter(c =>
-      c.nome.toLowerCase().includes(termo) ||
-      (c.telefone_celular && c.telefone_celular.includes(termo))
-    );
-  }, [clientesTodos, busca]);
-
-  // ============================================================
-  // RENDER PRINCIPAL
-  // ============================================================
-
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#3B82F6" />
-        <Text style={styles.loadingText}>{t.carregando}</Text>
-      </View>
-    );
-  }
+  // ── Main render ──
+  if (loading) return (
+    <View style={S.lW}>
+      <ActivityIndicator size="large" color="#3B82F6" />
+      <Text style={S.lT}>{t.carregando}</Text>
+    </View>
+  );
 
   return (
-    <View style={styles.container}>
-      {/* ===== HEADER ===== */}
-      <View style={styles.header}>
+    <View style={S.c}>
+      {/* Header */}
+      <View style={S.hd}>
         <View>
-          <Text style={styles.headerTitle}>{t.titulo}</Text>
-          <Text style={styles.headerSubtitle}>
-            {t.hoje} - {tabAtiva === 'liquidacao' ? totalClientesLiquidacao : clientesTodos.length} {t.clientes}
-          </Text>
+          <Text style={S.hdT}>{t.titulo}</Text>
+          <Text style={S.hdS}>{t.hoje} - {tab === 'liquidacao' ? filtered.length : todosList.length} {t.clientes}</Text>
         </View>
-        <View style={styles.headerActions}>
-          <View style={styles.headerDot} />
-          <TouchableOpacity style={styles.headerIcon}>
-            <Text style={styles.headerIconText}>🔔</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerIcon}>
-            <Text style={styles.headerIconText}>⚙️</Text>
-          </TouchableOpacity>
+        <View style={S.hdR}>
+          <View style={S.hdDot} />
+          <Text style={S.hdI}>🔔</Text>
+          <Text style={S.hdI}>⚙️</Text>
         </View>
       </View>
 
-      {/* ===== TABS ===== */}
-      <View style={styles.tabsContainer}>
-        <TouchableOpacity
-          style={[styles.tabButton, tabAtiva === 'liquidacao' && styles.tabButtonActive]}
-          onPress={() => setTabAtiva('liquidacao')}
-        >
-          <Text style={styles.tabIcon}>📅</Text>
-          <Text style={[styles.tabText, tabAtiva === 'liquidacao' && styles.tabTextActive]}>
-            {t.liquidacao} ({totalClientesLiquidacao})
-          </Text>
+      {/* Tabs */}
+      <View style={S.tabs}>
+        <TouchableOpacity style={[S.tb, tab === 'liquidacao' && S.tbOn]} onPress={() => setTab('liquidacao')}>
+          <Text style={S.tbI}>📅</Text>
+          <Text style={[S.tbTx, tab === 'liquidacao' && S.tbTxOn]}>{t.liquidacao} ({cntTotal})</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tabButton, tabAtiva === 'todos' && styles.tabButtonActive]}
-          onPress={() => setTabAtiva('todos')}
-        >
-          <Text style={styles.tabIcon}>👥</Text>
-          <Text style={[styles.tabText, tabAtiva === 'todos' && styles.tabTextActive]}>
-            {t.todosList} ({clientesTodos.length})
-          </Text>
+        <TouchableOpacity style={[S.tb, tab === 'todos' && S.tbOn]} onPress={() => setTab('todos')}>
+          <Text style={S.tbI}>👥</Text>
+          <Text style={[S.tbTx, tab === 'todos' && S.tbTxOn]}>{t.todosList} ({todosList.length})</Text>
         </TouchableOpacity>
       </View>
 
-      {/* ===== BUSCA ===== */}
-      <View style={styles.buscaContainer}>
-        <View style={styles.buscaInputWrapper}>
-          <Text style={styles.buscaIcon}>🔍</Text>
-          <TextInput
-            style={styles.buscaInput}
-            placeholder={t.buscar}
-            placeholderTextColor="#9CA3AF"
-            value={busca}
-            onChangeText={setBusca}
-          />
+      {/* Search + Sort */}
+      <View style={S.srR}>
+        <View style={S.srB}>
+          <Text style={S.srI}>🔍</Text>
+          <TextInput style={S.srIn} placeholder={t.buscar} placeholderTextColor="#9CA3AF" value={busca} onChangeText={setBusca} />
         </View>
-
-        {tabAtiva === 'liquidacao' && (
-          <TouchableOpacity
-            style={styles.ordenacaoButton}
-            onPress={() => setShowOrdenacao(!showOrdenacao)}
-          >
-            <Text style={styles.ordenacaoIcon}>↕️</Text>
-            <Text style={styles.ordenacaoText}>
-              {ordenacao === 'rota' ? t.ordemRota : ordenacao === 'nome' ? t.ordemNome : t.ordemProximos}
-            </Text>
-            <Text style={styles.ordenacaoChevron}>▼</Text>
+        {tab === 'liquidacao' && (
+          <TouchableOpacity style={S.orB} onPress={() => setShowOrd(!showOrd)}>
+            <Text style={S.orI}>↕️</Text>
+            <Text style={S.orTx}>{ord === 'rota' ? t.ordemRota : t.ordemNome}</Text>
+            <Text style={S.orCh}>▼</Text>
           </TouchableOpacity>
         )}
       </View>
 
-      {/* Dropdown ordenação */}
-      {showOrdenacao && tabAtiva === 'liquidacao' && (
-        <View style={styles.ordenacaoDropdown}>
-          {(['rota', 'nome', 'proximos'] as OrdenacaoLiquidacao[]).map((op) => (
-            <TouchableOpacity
-              key={op}
-              style={[styles.ordenacaoOption, ordenacao === op && styles.ordenacaoOptionActive]}
-              onPress={() => { setOrdenacao(op); setShowOrdenacao(false); }}
-            >
-              <Text style={[styles.ordenacaoOptionText, ordenacao === op && styles.ordenacaoOptionTextActive]}>
-                {op === 'rota' ? t.ordemRota : op === 'nome' ? t.ordemNome : t.ordemProximos}
-              </Text>
+      {showOrd && tab === 'liquidacao' && (
+        <View style={S.orDr}>
+          {(['rota', 'nome'] as OrdenacaoLiquidacao[]).map(o => (
+            <TouchableOpacity key={o} style={[S.orOp, ord === o && S.orOpOn]} onPress={() => { setOrd(o); setShowOrd(false); }}>
+              <Text style={[S.orOpTx, ord === o && S.orOpTxOn]}>{o === 'rota' ? t.ordemRota : t.ordemNome}</Text>
             </TouchableOpacity>
           ))}
         </View>
       )}
 
-      {/* ===== SUB-FILTROS LIQUIDAÇÃO ===== */}
-      {tabAtiva === 'liquidacao' && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filtrosScroll}>
-          <View style={styles.filtrosRow}>
-            {([
-              { key: 'todos', label: `${t.filtroTodos} ${totalClientesLiquidacao}` },
-              { key: 'atrasados', label: `${t.filtroAtrasados} ${totalAtrasados}` },
-              { key: 'perto', label: t.filtroPerto },
-              { key: 'pagas', label: `${t.filtroPagas} ${totalPagas}` },
-            ] as { key: FiltroLiquidacao; label: string }[]).map((f) => (
-              <TouchableOpacity
-                key={f.key}
-                style={[styles.filtroChip, filtroLiquidacao === f.key && styles.filtroChipActive]}
-                onPress={() => setFiltroLiquidacao(f.key)}
-              >
-                <Text style={[styles.filtroChipText, filtroLiquidacao === f.key && styles.filtroChipTextActive]}>
-                  {f.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-            <Text style={styles.filtroChevron}>▼</Text>
-          </View>
-        </ScrollView>
-      )}
-
-      {/* ===== SUB-FILTROS TODOS ===== */}
-      {tabAtiva === 'todos' && (
-        <View style={styles.todosFiltros}>
-          <TouchableOpacity style={styles.todosFiltroButton}>
-            <Text style={styles.todosFiltroText}>{t.tipoFiltro}</Text>
-            <Text style={styles.todosFiltroChevron}>▼</Text>
+      {/* Chips — Liquidação */}
+      {tab === 'liquidacao' && (
+        <View style={S.chs}>
+          <TouchableOpacity style={[S.ch, filtro === 'todos' && S.chOn]} onPress={() => setFiltro('todos')}>
+            <Text style={[S.chTx, filtro === 'todos' && S.chTxOn]}>{t.filtroTodos} {filtered.length}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.todosFiltroButton}>
-            <Text style={styles.todosFiltroText}>{t.statusFiltro}</Text>
-            <Text style={styles.todosFiltroChevron}>▼</Text>
+          <TouchableOpacity style={[S.ch, filtro === 'atrasados' && S.chOn]} onPress={() => setFiltro('atrasados')}>
+            <Text style={[S.chTx, filtro === 'atrasados' && S.chTxOn]}>{t.filtroAtrasados} {cntAtraso}</Text>
           </TouchableOpacity>
-          <Text style={styles.todosCounter}>{clientesTodosFiltrados.length} {t.clientes}</Text>
-          <Text style={styles.todosChevron}>▼</Text>
+          <TouchableOpacity style={[S.ch, mostrarPagas ? S.chPOn : S.chPOff]} onPress={() => setMostrarPagas(!mostrarPagas)}>
+            <Text style={[S.chTx, mostrarPagas ? S.chPTxOn : S.chPTxOff]}>{t.filtroPagas} {cntPagas}</Text>
+          </TouchableOpacity>
+          <Text style={S.chCh}>▼</Text>
         </View>
       )}
 
-      {/* ===== LISTA ===== */}
-      <ScrollView
-        style={styles.lista}
-        contentContainerStyle={styles.listaContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        showsVerticalScrollIndicator={false}
-      >
-        {tabAtiva === 'liquidacao' ? (
-          clientesFiltrados.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyIcon}>📋</Text>
-              <Text style={styles.emptyText}>{t.semClientes}</Text>
-            </View>
-          ) : (
-            clientesFiltrados.map(renderCardLiquidacao)
-          )
-        ) : (
-          loadingTodos ? (
-            <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
-          ) : clientesTodosFiltrados.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyIcon}>📋</Text>
-              <Text style={styles.emptyText}>{t.semClientes}</Text>
-            </View>
-          ) : (
-            clientesTodosFiltrados.map(renderCardTodos)
-          )
-        )}
+      {/* Filtros Todos */}
+      {tab === 'todos' && (
+        <View style={S.tF}>
+          <TouchableOpacity style={S.tFB}><Text style={S.tFBT}>{t.tipoFiltro}</Text><Text style={S.tFC}>▼</Text></TouchableOpacity>
+          <TouchableOpacity style={S.tFB}><Text style={S.tFBT}>{t.statusFiltro}</Text><Text style={S.tFC}>▼</Text></TouchableOpacity>
+          <Text style={S.tCnt}>{todosFilt.length} {t.clientes}</Text>
+          <Text style={S.tChv}>▼</Text>
+        </View>
+      )}
 
-        {/* Spacer para bottom nav */}
-        <View style={{ height: 80 }} />
+      {/* List */}
+      <ScrollView style={S.ls} contentContainerStyle={S.lsI} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />} showsVerticalScrollIndicator={false}>
+        {tab === 'liquidacao' ? (
+          filtered.length === 0
+            ? <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View>
+            : filtered.map(renderCard)
+        ) : (
+          loadTodos
+            ? <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
+            : todosFilt.length === 0
+              ? <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View>
+              : todosFilt.map(renderTodos)
+        )}
+        <View style={{ height: 90 }} />
       </ScrollView>
     </View>
   );
 }
 
-// ============================================================
-// STYLES
-// ============================================================
-
-const styles = StyleSheet.create({
-  // Layout geral
-  container: { flex: 1, backgroundColor: '#EEF2FF' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EEF2FF' },
-  loadingText: { marginTop: 12, color: '#6B7280', fontSize: 14 },
-
-  // Header
-  header: {
-    backgroundColor: '#3B82F6', paddingTop: 50, paddingBottom: 16, paddingHorizontal: 16,
-    borderBottomLeftRadius: 24, borderBottomRightRadius: 24,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-  },
-  headerTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  headerSubtitle: { color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 2 },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  headerDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#10B981' },
-  headerIcon: { padding: 4 },
-  headerIconText: { fontSize: 18 },
-
-  // Tabs
-  tabsContainer: {
-    flexDirection: 'row', marginHorizontal: 16, marginTop: 16, backgroundColor: '#F3F4F6',
-    borderRadius: 12, padding: 4,
-  },
-  tabButton: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 12, borderRadius: 10, gap: 6,
-  },
-  tabButtonActive: { backgroundColor: '#3B82F6' },
-  tabIcon: { fontSize: 14 },
-  tabText: { fontSize: 13, fontWeight: '600', color: '#6B7280' },
-  tabTextActive: { color: '#fff' },
-
-  // Busca
-  buscaContainer: { flexDirection: 'row', marginHorizontal: 16, marginTop: 12, gap: 8 },
-  buscaInputWrapper: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
-    borderRadius: 10, paddingHorizontal: 12, height: 42,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1,
-  },
-  buscaIcon: { fontSize: 14, marginRight: 8 },
-  buscaInput: { flex: 1, fontSize: 14, color: '#1F2937', padding: 0 },
-  ordenacaoButton: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
-    borderRadius: 10, paddingHorizontal: 12, height: 42, gap: 4,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1,
-  },
-  ordenacaoIcon: { fontSize: 12 },
-  ordenacaoText: { fontSize: 12, color: '#6B7280', fontWeight: '500' },
-  ordenacaoChevron: { fontSize: 8, color: '#9CA3AF' },
-  ordenacaoDropdown: {
-    position: 'absolute', top: 185, right: 16, zIndex: 100,
-    backgroundColor: '#fff', borderRadius: 10, padding: 4,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 8,
-  },
-  ordenacaoOption: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8 },
-  ordenacaoOptionActive: { backgroundColor: '#EFF6FF' },
-  ordenacaoOptionText: { fontSize: 13, color: '#6B7280' },
-  ordenacaoOptionTextActive: { color: '#3B82F6', fontWeight: '600' },
-
-  // Filtros Liquidação
-  filtrosScroll: { marginTop: 10, paddingLeft: 16 },
-  filtrosRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 16 },
-  filtroChip: {
-    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
-    backgroundColor: '#fff', borderWidth: 1, borderColor: '#E5E7EB',
-  },
-  filtroChipActive: { backgroundColor: '#1F2937', borderColor: '#1F2937' },
-  filtroChipText: { fontSize: 12, fontWeight: '500', color: '#6B7280' },
-  filtroChipTextActive: { color: '#fff' },
-  filtroChevron: { fontSize: 10, color: '#9CA3AF', marginLeft: 4 },
-
-  // Filtros Todos
-  todosFiltros: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginTop: 10, gap: 8 },
-  todosFiltroButton: {
-    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8,
-    borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#fff', gap: 4,
-  },
-  todosFiltroText: { fontSize: 12, color: '#6B7280' },
-  todosFiltroChevron: { fontSize: 8, color: '#9CA3AF' },
-  todosCounter: { flex: 1, textAlign: 'right', fontSize: 12, color: '#6B7280' },
-  todosChevron: { fontSize: 10, color: '#9CA3AF' },
-
-  // Lista
-  lista: { flex: 1, marginTop: 12 },
-  listaContent: { paddingHorizontal: 16 },
-
-  // Empty
-  emptyState: { alignItems: 'center', paddingTop: 60 },
-  emptyIcon: { fontSize: 48, marginBottom: 12 },
-  emptyText: { fontSize: 14, color: '#9CA3AF' },
-
-  // ===== CARD LIQUIDAÇÃO =====
-  clienteCard: {
-    backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 10,
-    borderLeftWidth: 4,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 4, elevation: 2,
-  },
-  cardHeader: { flexDirection: 'row', alignItems: 'flex-start' },
-  avatar: {
-    width: 42, height: 42, borderRadius: 21, justifyContent: 'center', alignItems: 'center', marginRight: 10,
-  },
-  avatarText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  cardHeaderInfo: { flex: 1 },
-  cardHeaderTopRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
-  clienteNome: { flex: 1, fontSize: 15, fontWeight: '600', color: '#1F2937' },
-  badgeVencidas: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEE2E2',
-    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10, marginLeft: 6,
-  },
-  badgeVencidasIcon: { fontSize: 10, marginRight: 2 },
-  badgeVencidasText: { fontSize: 11, fontWeight: '700', color: '#DC2626' },
-  badgeMultiplos: {
-    backgroundColor: '#FED7AA', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10, marginLeft: 4,
-  },
-  badgeMultiplosText: { fontSize: 11, fontWeight: '700', color: '#C2410C' },
-  menuDots: { marginLeft: 6, padding: 2 },
-  menuDotsText: { fontSize: 18, color: '#9CA3AF', fontWeight: '700' },
-  infoRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
-  infoIcon: { fontSize: 11, marginRight: 4, opacity: 0.6 },
-  infoText: { fontSize: 12, color: '#6B7280', flex: 1 },
-
-  // Parcela + Saldo
-  parcelaSaldoRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end',
-    marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6',
-  },
-  parcelaLabel: { fontSize: 12, color: '#6B7280', marginBottom: 2 },
-  parcelaValor: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
-  saldoContainer: { alignItems: 'flex-end' },
-  saldoLabel: { fontSize: 12, color: '#6B7280', marginBottom: 2 },
-  saldoValor: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
-  freqBadge: {
-    backgroundColor: '#EDE9FE', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4,
-  },
-  freqBadgeText: { fontSize: 10, fontWeight: '600', color: '#7C3AED' },
-
-  // ===== EXPANDED AREA =====
-  expandedArea: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
-
-  // Alerta vencidas
-  alertaVencidas: {
-    backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA',
-    borderRadius: 8, padding: 10, marginBottom: 12,
-  },
-  alertaVencidasText: { fontSize: 13, fontWeight: '600', color: '#DC2626' },
-  alertaVencidasValor: { fontSize: 12, color: '#B91C1C', marginTop: 2 },
-
-  // Alerta parcial
-  alertaParcial: {
-    backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A',
-    borderRadius: 8, padding: 10, marginBottom: 12,
-  },
-  alertaParcialText: { fontSize: 13, fontWeight: '600', color: '#D97706' },
-  alertaParcialSaldo: { fontSize: 12, color: '#B45309', marginTop: 2 },
-
-  // Navegação empréstimos
-  empNavRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 12, gap: 8 },
-  empNavButton: {
-    width: 28, height: 28, borderRadius: 14, backgroundColor: '#F3F4F6',
-    justifyContent: 'center', alignItems: 'center',
-  },
-  empNavButtonDisabled: { opacity: 0.3 },
-  empNavButtonText: { fontSize: 12, color: '#6B7280' },
-  empNavDots: { flexDirection: 'row', gap: 4 },
-  empNavDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#D1D5DB' },
-  empNavDotActive: { backgroundColor: '#3B82F6' },
-  empNavLabel: { fontSize: 11, color: '#6B7280', fontWeight: '500' },
-
-  // Resumo empréstimo
-  resumoEmprestimo: {
-    backgroundColor: '#FAFAFA', borderRadius: 10, padding: 12, marginBottom: 12,
-    borderWidth: 1, borderColor: '#F3F4F6',
-  },
-  resumoHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12,
-  },
-  resumoTitle: { fontSize: 13, fontWeight: '600', color: '#1F2937' },
-  statusEmpBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  statusEmpText: { fontSize: 10, fontWeight: '700' },
-  resumoGrid: { flexDirection: 'row', marginBottom: 8 },
-  resumoGridItem: { flex: 1 },
-  resumoGridLabel: { fontSize: 10, color: '#9CA3AF', marginBottom: 2 },
-  resumoGridValue: { fontSize: 13, fontWeight: '700', color: '#1F2937' },
-
-  // Progresso
-  progressoContainer: { marginTop: 4 },
-  progressoLabel: { fontSize: 10, color: '#9CA3AF', marginBottom: 4 },
-  progressoBarOuter: {
-    height: 6, backgroundColor: '#E5E7EB', borderRadius: 3, overflow: 'hidden',
-  },
-  progressoBarInner: { height: '100%', backgroundColor: '#3B82F6', borderRadius: 3 },
-  progressoRestantes: { fontSize: 10, color: '#9CA3AF', marginTop: 3, textAlign: 'right' },
-
-  // Botões de ação
-  acoesBotoes: { flexDirection: 'row', gap: 8, marginBottom: 8 },
-  botaoAcao: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 12, borderRadius: 10, gap: 6,
-  },
-  botaoPagar: { backgroundColor: '#10B981' },
-  botaoParcelas: { backgroundColor: '#3B82F6' },
-  botaoContato: { backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' },
-  botaoIR: { backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE' },
-  botaoDisabled: { opacity: 0.5 },
-  botaoAcaoIcon: { fontSize: 14 },
-  botaoAcaoTextBranco: { color: '#fff', fontSize: 13, fontWeight: '600' },
-  botaoAcaoTextVerde: { color: '#059669', fontSize: 13, fontWeight: '600' },
-  botaoAcaoTextAzul: { color: '#2563EB', fontSize: 13, fontWeight: '600' },
-
-  // ===== CARD TODOS =====
-  todosCard: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',
-    borderRadius: 12, padding: 14, marginBottom: 8, borderLeftWidth: 4,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 2, elevation: 1,
-  },
-  todosAvatar: {
-    width: 38, height: 38, borderRadius: 19, justifyContent: 'center', alignItems: 'center', marginRight: 12,
-  },
-  todosAvatarText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  todosNome: { flex: 1, fontSize: 14, fontWeight: '500', color: '#1F2937' },
-  todosStatus: { fontSize: 12, fontWeight: '500', marginLeft: 8 },
+// ── Styles ──
+const S = StyleSheet.create({
+  c: { flex: 1, backgroundColor: '#EEF2FF' },
+  lW: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EEF2FF' },
+  lT: { marginTop: 12, color: '#6B7280', fontSize: 14 },
+  hd: { backgroundColor: '#3B82F6', paddingTop: 48, paddingBottom: 14, paddingHorizontal: 16, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  hdT: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  hdS: { color: 'rgba(255,255,255,0.75)', fontSize: 12, marginTop: 1 },
+  hdR: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  hdDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#10B981' },
+  hdI: { fontSize: 18 },
+  tabs: { flexDirection: 'row', marginHorizontal: 16, marginTop: 14, backgroundColor: '#E8EBF7', borderRadius: 12, padding: 3 },
+  tb: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 11, borderRadius: 10, gap: 5 },
+  tbOn: { backgroundColor: '#3B82F6' },
+  tbI: { fontSize: 13 },
+  tbTx: { fontSize: 13, fontWeight: '600', color: '#6B7280' },
+  tbTxOn: { color: '#fff' },
+  srR: { flexDirection: 'row', marginHorizontal: 16, marginTop: 10, gap: 8 },
+  srB: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 10, height: 40, borderWidth: 1, borderColor: '#E5E7EB' },
+  srI: { fontSize: 13, marginRight: 6, opacity: 0.5 },
+  srIn: { flex: 1, fontSize: 13, color: '#1F2937', padding: 0 },
+  orB: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 10, height: 40, gap: 4, borderWidth: 1, borderColor: '#E5E7EB' },
+  orI: { fontSize: 11 },
+  orTx: { fontSize: 12, color: '#6B7280' },
+  orCh: { fontSize: 8, color: '#9CA3AF' },
+  orDr: { position: 'absolute', top: 175, right: 16, zIndex: 100, backgroundColor: '#fff', borderRadius: 10, padding: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 8, elevation: 8 },
+  orOp: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8 },
+  orOpOn: { backgroundColor: '#EFF6FF' },
+  orOpTx: { fontSize: 13, color: '#6B7280' },
+  orOpTxOn: { color: '#3B82F6', fontWeight: '600' },
+  chs: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginTop: 10, gap: 8 },
+  ch: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#fff' },
+  chOn: { backgroundColor: '#1F2937', borderColor: '#1F2937' },
+  chTx: { fontSize: 12, fontWeight: '500', color: '#6B7280' },
+  chTxOn: { color: '#fff' },
+  chPOn: { backgroundColor: '#059669', borderColor: '#059669' },
+  chPOff: { backgroundColor: '#F3F4F6', borderColor: '#E5E7EB' },
+  chPTxOn: { color: '#fff' },
+  chPTxOff: { color: '#6B7280' },
+  chCh: { fontSize: 10, color: '#9CA3AF' },
+  tF: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginTop: 10, gap: 8 },
+  tFB: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#fff', gap: 4 },
+  tFBT: { fontSize: 12, color: '#6B7280' },
+  tFC: { fontSize: 8, color: '#9CA3AF' },
+  tCnt: { flex: 1, textAlign: 'right', fontSize: 12, color: '#6B7280' },
+  tChv: { fontSize: 10, color: '#9CA3AF' },
+  ls: { flex: 1, marginTop: 10 },
+  lsI: { paddingHorizontal: 16 },
+  em: { alignItems: 'center', paddingTop: 60 },
+  emI: { fontSize: 48, marginBottom: 12 },
+  emT: { fontSize: 14, color: '#9CA3AF' },
+  card: { backgroundColor: '#fff', borderRadius: 12, padding: 12, marginBottom: 8, borderLeftWidth: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 2 },
+  cardRow: { flexDirection: 'row' },
+  av: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+  avTx: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  cardInfo: { flex: 1 },
+  nameRow: { flexDirection: 'row', alignItems: 'center' },
+  nome: { flex: 1, fontSize: 14, fontWeight: '600', color: '#1F2937' },
+  bWarn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF2F2', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 10, marginLeft: 4, borderWidth: 1, borderColor: '#FECACA' },
+  bWarnI: { fontSize: 10, color: '#F59E0B', marginRight: 2 },
+  bWarnT: { fontSize: 10, fontWeight: '700', color: '#DC2626' },
+  bMul: { backgroundColor: '#FED7AA', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 10, marginLeft: 3 },
+  bMulT: { fontSize: 10, fontWeight: '700', color: '#C2410C' },
+  dots: { fontSize: 18, color: '#9CA3AF', marginLeft: 4, fontWeight: '700' },
+  sub: { fontSize: 11, color: '#6B7280', marginTop: 2 },
+  pRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+  pLblR: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
+  pLbl: { fontSize: 11, color: '#6B7280' },
+  fBdg: { backgroundColor: '#EDE9FE', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 },
+  fBdgT: { fontSize: 9, fontWeight: '600', color: '#7C3AED' },
+  pVal: { fontSize: 15, fontWeight: '700', color: '#1F2937' },
+  sCol: { alignItems: 'flex-end' },
+  sLbl: { fontSize: 11, color: '#6B7280', marginBottom: 2 },
+  sVal: { fontSize: 15, fontWeight: '700', color: '#1F2937' },
+  pgVal: { fontSize: 14, fontWeight: '700', color: '#059669' },
+  pgOrig: { fontSize: 10, color: '#9CA3AF' },
+  pgCred: { fontSize: 10, color: '#2563EB' },
+  exp: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+  aR: { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', borderRadius: 8, padding: 10, marginBottom: 10 },
+  aRT: { fontSize: 12, fontWeight: '600', color: '#DC2626' },
+  aRS: { fontSize: 11, color: '#B91C1C', marginTop: 2 },
+  aY: { backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 8, padding: 10, marginBottom: 10 },
+  aYT: { fontSize: 12, fontWeight: '600', color: '#D97706' },
+  aYS: { fontSize: 11, color: '#B45309', marginTop: 2 },
+  eNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 10, gap: 6 },
+  eNBtn: { width: 26, height: 26, borderRadius: 13, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
+  eNOff: { opacity: 0.3 },
+  eNBTx: { fontSize: 11, color: '#6B7280' },
+  eDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#D1D5DB' },
+  eDotOn: { backgroundColor: '#3B82F6' },
+  eNLbl: { fontSize: 10, color: '#6B7280' },
+  res: { backgroundColor: '#FAFAFA', borderRadius: 10, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: '#F3F4F6' },
+  resH: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  resT: { fontSize: 12, fontWeight: '600', color: '#1F2937' },
+  stB: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+  stBT: { fontSize: 9, fontWeight: '700' },
+  g3: { flexDirection: 'row', marginBottom: 6 },
+  gi: { flex: 1 },
+  gl: { fontSize: 9, color: '#9CA3AF', marginBottom: 1 },
+  gv: { fontSize: 12, fontWeight: '700', color: '#1F2937' },
+  prL: { fontSize: 9, color: '#9CA3AF', marginTop: 4, marginBottom: 3 },
+  prB: { height: 5, backgroundColor: '#E5E7EB', borderRadius: 3, overflow: 'hidden' },
+  prF: { height: '100%', backgroundColor: '#3B82F6', borderRadius: 3 },
+  prR: { fontSize: 9, color: '#9CA3AF', marginTop: 2, textAlign: 'right' },
+  btR: { flexDirection: 'row', gap: 8, marginBottom: 6 },
+  bt: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 11, borderRadius: 10, gap: 5 },
+  btG: { backgroundColor: '#10B981' },
+  btBl: { backgroundColor: '#3B82F6' },
+  btOG: { backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' },
+  btOB: { backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE' },
+  btOff: { opacity: 0.4 },
+  btI: { fontSize: 13 },
+  btW: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  btTG: { color: '#059669', fontSize: 12, fontWeight: '600' },
+  btTB: { color: '#2563EB', fontSize: 12, fontWeight: '600' },
+  tC: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 12, padding: 12, marginBottom: 6, borderLeftWidth: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.03, shadowRadius: 2, elevation: 1 },
+  tAv: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+  tAvT: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  tNm: { flex: 1, fontSize: 13, fontWeight: '500', color: '#1F2937' },
+  tSt: { fontSize: 11, fontWeight: '500', marginLeft: 8 },
 });
