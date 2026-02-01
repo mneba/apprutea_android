@@ -1,16 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  RefreshControl,
   ActivityIndicator,
   Alert,
-  Dimensions,
   Modal,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
   TextInput,
-  TouchableOpacity,
-  View,
+  Dimensions,
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
@@ -257,16 +257,43 @@ export default function LiquidacaoScreen({ navigation }: any) {
     if (!dia.mesAtual) return;
     
     if (dia.liquidacao) {
+      const status = dia.liquidacao.status?.toUpperCase();
+      
+      // REABERTO: apenas visualização, sem movimentos (reabertura só via webapp)
+      if (status === 'REABERTO' || status === 'REABERTA') {
+        setLiquidacao(dia.liquidacao);
+        setModoVisualizacao(true); // SEMPRE visualização - não permite movimentos
+        setDataVisualizacao(dia.data);
+        setMostrarCalendario(false);
+        Alert.alert('Dia Reaberto', 'Esta liquidação foi reaberta pelo administrador. Visualização apenas - novos movimentos vão para a liquidação aberta atual.');
+        return;
+      }
+      
+      // ABERTO/ABERTA: pode editar
+      // FECHADO/APROVADO: apenas visualização
       setLiquidacao(dia.liquidacao);
-      setModoVisualizacao(dia.liquidacao.status !== 'ABERTO' && dia.liquidacao.status !== 'ABERTA');
+      setModoVisualizacao(status !== 'ABERTO' && status !== 'ABERTA');
       setDataVisualizacao(dia.data);
       setMostrarCalendario(false);
     } else if (dia.ehHoje) {
-      // Hoje sem liquidação - abrir modal
+      // Hoje sem liquidação - verificar se já existe ABERTA em outro dia
+      const temAberta = todasLiquidacoes.some(l => {
+        const s = l.status?.toUpperCase();
+        return s === 'ABERTO' || s === 'ABERTA';
+      });
+      if (temAberta) {
+        Alert.alert('Atenção', 'Já existe uma liquidação aberta. Feche-a antes de abrir outra.');
+        return;
+      }
       setModalIniciarVisible(true);
+    } else if (dia.ehFuturo) {
+      // Dia futuro: modo visualização sem criar liquidação
+      setLiquidacao(null);
+      setModoVisualizacao(true);
+      setDataVisualizacao(dia.data);
       setMostrarCalendario(false);
     } else {
-      // Dia passado/futuro sem liquidação
+      // Dia passado sem liquidação: modo visualização
       setLiquidacao(null);
       setModoVisualizacao(true);
       setDataVisualizacao(dia.data);
@@ -291,6 +318,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
     if (!dia.mesAtual || !dia.liquidacao) return styles.diaSemRegistro;
     const status = dia.liquidacao.status?.toUpperCase();
     if (status === 'ABERTO' || status === 'ABERTA') return styles.diaAberto;
+    if (status === 'REABERTO' || status === 'REABERTA') return styles.diaReaberto;
     if (status === 'FECHADO' || status === 'FECHADA') return styles.diaFechado;
     if (status === 'APROVADO' || status === 'APROVADA') return styles.diaAprovado;
     return styles.diaSemRegistro;
@@ -300,6 +328,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
     if (!dia.mesAtual || !dia.liquidacao) return '⊘';
     const status = dia.liquidacao.status?.toUpperCase();
     if (status === 'ABERTO' || status === 'ABERTA') return '○';
+    if (status === 'REABERTO' || status === 'REABERTA') return '⟳';
     return '✓';
   };
 
@@ -394,7 +423,13 @@ export default function LiquidacaoScreen({ navigation }: any) {
     }
   };
 
+  // REABERTO NÃO é considerado "aberto" para movimentos no mobile
+  // Reaberturas são apenas para correções via webapp
   const isAberto = liquidacao?.status?.toUpperCase() === 'ABERTO' || liquidacao?.status?.toUpperCase() === 'ABERTA';
+  const isReaberto = liquidacao?.status?.toUpperCase() === 'REABERTO' || liquidacao?.status?.toUpperCase() === 'REABERTA';
+  
+  // Pode editar: apenas ABERTO (não REABERTO) e não está em modo visualização
+  const podeEditar = isAberto && !modoVisualizacao && !isReaberto;
 
   // ==================== LOADING ====================
   if (loading) {
@@ -470,6 +505,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
                       <Text style={[
                         styles.diaIcone,
                         dia.liquidacao?.status?.toUpperCase() === 'ABERTO' && styles.iconeAberto,
+                        (dia.liquidacao?.status?.toUpperCase() === 'REABERTO' || dia.liquidacao?.status?.toUpperCase() === 'REABERTA') && styles.iconeReaberto,
                         (dia.liquidacao?.status?.toUpperCase() === 'FECHADO' || dia.liquidacao?.status?.toUpperCase() === 'APROVADO') && styles.iconeFechado,
                       ]}>
                         {getIconeDia(dia)}
@@ -495,6 +531,10 @@ export default function LiquidacaoScreen({ navigation }: any) {
                 <View style={styles.legendaItem}>
                   <View style={[styles.legendaCor, styles.legendaCorAprovado]} />
                   <Text style={styles.legendaTexto}>{t.legendaAprovado}</Text>
+                </View>
+                <View style={styles.legendaItem}>
+                  <View style={[styles.legendaCor, styles.legendaCorReaberto]} />
+                  <Text style={styles.legendaTexto}>{language === 'pt-BR' ? 'Reaberto' : 'Reabierto'}</Text>
                 </View>
                 <View style={styles.legendaItem}>
                   <View style={[styles.legendaCor, styles.legendaCorSemRegistro]} />
@@ -567,7 +607,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
         {liquidacao ? (
           <>
             {/* Card Vendedor + Status */}
-            <View style={[styles.card, styles.cardVendedor, { borderTopColor: isAberto ? '#10B981' : '#EF4444' }]}>
+            <View style={[styles.card, styles.cardVendedor, { borderTopColor: isReaberto ? '#F59E0B' : isAberto ? '#10B981' : '#EF4444' }]}>
               <View style={styles.vendedorRow}>
                 <View style={styles.avatar}><Text style={styles.avatarText}>👤</Text></View>
                 <Text style={styles.vendedorNome}>{vendedor?.nome}</Text>
@@ -575,15 +615,22 @@ export default function LiquidacaoScreen({ navigation }: any) {
               
               <View style={styles.statusRow}>
                 <View style={styles.dataContainer}>
-                  <Text style={styles.statusIcon}>{isAberto ? '🔓' : '🔒'}</Text>
+                  <Text style={styles.statusIcon}>{isAberto ? '🔓' : isReaberto ? '🔄' : '🔒'}</Text>
                   <Text style={styles.dataText}>{formatarData(liquidacao.data_abertura)}</Text>
                 </View>
-                <View style={[styles.statusBadge, { backgroundColor: isAberto ? '#D1FAE5' : '#FEE2E2' }]}>
-                  <Text style={[styles.statusText, { color: isAberto ? '#047857' : '#DC2626' }]}>
-                    {isAberto ? t.aberto : t.fechado}
+                <View style={[styles.statusBadge, { backgroundColor: isReaberto ? '#FEF3C7' : isAberto ? '#D1FAE5' : '#FEE2E2' }]}>
+                  <Text style={[styles.statusText, { color: isReaberto ? '#D97706' : isAberto ? '#047857' : '#DC2626' }]}>
+                    {isReaberto ? 'REABERTO' : isAberto ? t.aberto : t.fechado}
                   </Text>
                 </View>
               </View>
+
+              {/* Aviso REABERTO */}
+              {isReaberto && (
+                <View style={styles.avisoReaberto}>
+                  <Text style={styles.avisoReabertoText}>⚠️ Dia reaberto pelo admin. Apenas visualização - novos movimentos vão para a liquidação aberta.</Text>
+                </View>
+              )}
 
               {/* BOTÃO VER OUTRAS DATAS - AGORA COM onPress! */}
               <TouchableOpacity style={styles.verDatasButton} onPress={handleAbrirCalendario}>
@@ -691,16 +738,16 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
             {/* Botão Encerrar Dia */}
             <TouchableOpacity
-              style={[styles.encerrarButton, !isAberto && styles.encerrarButtonDisabled]}
-              onPress={() => setModalFecharVisible(true)}
-              disabled={!isAberto || fechando || modoVisualizacao}
+              style={[styles.encerrarButton, (!podeEditar) && styles.encerrarButtonDisabled]}
+              onPress={() => podeEditar && setModalFecharVisible(true)}
+              disabled={!podeEditar || fechando}
             >
               {fechando ? (
                 <ActivityIndicator color="#fff" />
               ) : (
                 <>
-                  <Text style={styles.encerrarIcon}>{isAberto ? '↩️' : '🔒'}</Text>
-                  <Text style={styles.encerrarText}>{isAberto ? t.encerrarDia : t.diaEncerrado}</Text>
+                  <Text style={styles.encerrarIcon}>{podeEditar ? '↩️' : '🔒'}</Text>
+                  <Text style={styles.encerrarText}>{podeEditar ? t.encerrarDia : isReaberto ? 'REABERTO (Admin)' : t.diaEncerrado}</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -808,9 +855,11 @@ const styles = StyleSheet.create({
   diaAberto: { backgroundColor: '#D1FAE5', borderWidth: 2, borderColor: '#10B981' },
   diaFechado: { backgroundColor: '#DBEAFE', borderWidth: 2, borderColor: '#3B82F6' },
   diaAprovado: { backgroundColor: '#E9D5FF', borderWidth: 2, borderColor: '#8B5CF6' },
+  diaReaberto: { backgroundColor: '#FEF3C7', borderWidth: 2, borderColor: '#F59E0B' },
   diaSemRegistro: { backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#D1D5DB' },
   iconeAberto: { color: '#10B981' },
   iconeFechado: { color: '#3B82F6' },
+  iconeReaberto: { color: '#F59E0B' },
   
   // Legenda
   legenda: { marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
@@ -821,8 +870,13 @@ const styles = StyleSheet.create({
   legendaCorAberto: { backgroundColor: '#D1FAE5', borderWidth: 2, borderColor: '#10B981' },
   legendaCorFechado: { backgroundColor: '#DBEAFE', borderWidth: 2, borderColor: '#3B82F6' },
   legendaCorAprovado: { backgroundColor: '#E9D5FF', borderWidth: 2, borderColor: '#8B5CF6' },
+  legendaCorReaberto: { backgroundColor: '#FEF3C7', borderWidth: 2, borderColor: '#F59E0B' },
   legendaCorSemRegistro: { backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#D1D5DB' },
   legendaTexto: { fontSize: 12, color: '#6B7280' },
+  
+  // Aviso Reaberto
+  avisoReaberto: { marginTop: 12, backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 8, padding: 10 },
+  avisoReabertoText: { fontSize: 12, color: '#92400E', lineHeight: 18 },
   
   // Cards originais
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 4, elevation: 3 },
