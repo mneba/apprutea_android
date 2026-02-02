@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,10 @@ import {
   Modal,
   TextInput,
   Dimensions,
+  Image,
+  Platform,
 } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
 import { LiquidacaoDiaria } from '../types';
@@ -159,12 +162,27 @@ export default function LiquidacaoScreen({ navigation }: any) {
   } | null>(null);
   const [loadingVisualizacao, setLoadingVisualizacao] = useState(false);
 
+  // Estado de conectividade
+  const [isConnected, setIsConnected] = useState(true);
+
   const t = textos[language];
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
 
+  // Bloqueia navegação para meses futuros
+  const ehMesAtualOuFuturo = anoAtual > hoje.getFullYear() ||
+    (anoAtual === hoje.getFullYear() && mesAtual >= hoje.getMonth());
+
   useEffect(() => {
     carregarLiquidacoes();
+  }, []);
+
+  // Listener de conectividade
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setIsConnected(state.isConnected ?? true);
+    });
+    return () => unsubscribe();
   }, []);
 
   const carregarLiquidacoes = async () => {
@@ -258,12 +276,13 @@ export default function LiquidacaoScreen({ navigation }: any) {
   };
 
   const irProximoMes = () => {
+    if (ehMesAtualOuFuturo) return;
     if (mesAtual === 11) { setMesAtual(0); setAnoAtual(anoAtual + 1); }
     else { setMesAtual(mesAtual + 1); }
   };
 
   const handleClickDia = (dia: DiaCalendario) => {
-    if (!dia.mesAtual) return;
+    if (!dia.mesAtual || dia.ehFuturo) return;
     
     if (dia.liquidacao) {
       const status = dia.liquidacao.status?.toUpperCase();
@@ -507,9 +526,18 @@ export default function LiquidacaoScreen({ navigation }: any) {
         <View style={styles.header}>
           <Text style={styles.headerTitle}>{t.titulo}</Text>
           <View style={styles.headerActions}>
-            <View style={[styles.statusDot, { backgroundColor: '#EF4444' }]} />
+            <View style={[styles.statusDot, { backgroundColor: isConnected ? '#10B981' : '#EF4444' }]} />
             <TouchableOpacity onPress={toggleLanguage} style={styles.langButton}>
               <Text style={styles.langText}>🌐 {language === 'pt-BR' ? 'PT' : 'ES'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.avatarButton} onPress={() => navigation.navigate('Perfil')}>
+              {vendedor?.foto_url ? (
+                <Image source={{ uri: vendedor.foto_url }} style={styles.avatarSmall} />
+              ) : (
+                <View style={styles.avatarSmallPlaceholder}>
+                  <Text style={styles.avatarSmallText}>👤</Text>
+                </View>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -528,8 +556,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
                 <Text style={styles.mesNavText}>‹</Text>
               </TouchableOpacity>
               <Text style={styles.mesTitulo}>{t.meses[mesAtual]} {anoAtual}</Text>
-              <TouchableOpacity onPress={irProximoMes} style={styles.mesNavBtn}>
-                <Text style={styles.mesNavText}>›</Text>
+              <TouchableOpacity onPress={irProximoMes} style={styles.mesNavBtn} disabled={ehMesAtualOuFuturo}>
+                <Text style={[styles.mesNavText, ehMesAtualOuFuturo && { color: '#D1D5DB' }]}>›</Text>
               </TouchableOpacity>
             </View>
 
@@ -547,17 +575,18 @@ export default function LiquidacaoScreen({ navigation }: any) {
                   key={index}
                   style={[styles.diaCell, dia.ehHoje && styles.diaCellHoje]}
                   onPress={() => handleClickDia(dia)}
-                  disabled={!dia.mesAtual}
+                  disabled={!dia.mesAtual || dia.ehFuturo}
                 >
                   <Text style={[
                     styles.diaNumero,
                     !dia.mesAtual && styles.diaNumeroOutroMes,
                     dia.ehHoje && styles.diaNumeroHoje,
+                    dia.ehFuturo && dia.mesAtual && { color: '#D1D5DB' },
                   ]}>
                     {dia.diaNumero}
                   </Text>
                   
-                  {dia.mesAtual && (
+                  {dia.mesAtual && !dia.ehFuturo && (
                     <View style={[styles.diaIndicador, getCorDia(dia)]}>
                       <Text style={[
                         styles.diaIcone,
@@ -636,13 +665,22 @@ export default function LiquidacaoScreen({ navigation }: any) {
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{t.titulo}</Text>
         <View style={styles.headerActions}>
-          <View style={[styles.statusDot, { backgroundColor: liquidacao ? '#10B981' : '#EF4444' }]} />
+          <View style={[styles.statusDot, { backgroundColor: isConnected ? '#10B981' : '#EF4444' }]} />
           <TouchableOpacity onPress={toggleLanguage} style={styles.langButton}>
             <Text style={styles.langText}>🌐 {language === 'pt-BR' ? 'PT' : 'ES'}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton}><Text style={styles.iconText}>👤</Text></TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton}><Text style={styles.iconText}>📤</Text></TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton}><Text style={styles.iconText}>⚙️</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.avatarButton} onPress={() => navigation.navigate('Perfil')}>
+            {vendedor?.foto_url ? (
+              <Image source={{ uri: vendedor.foto_url }} style={styles.avatarSmall} />
+            ) : (
+              <View style={styles.avatarSmallPlaceholder}>
+                <Text style={styles.avatarSmallText}>👤</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconButton} onPress={() => navigation.navigate('Configuracoes')}>
+            <Text style={styles.iconText}>⚙️</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -973,6 +1011,10 @@ const styles = StyleSheet.create({
   langText: { color: '#fff', fontSize: 12 },
   iconButton: { padding: 6 },
   iconText: { fontSize: 16 },
+  avatarButton: { marginLeft: 4 },
+  avatarSmall: { width: 32, height: 32, borderRadius: 16, borderWidth: 2, borderColor: 'rgba(255,255,255,0.6)' },
+  avatarSmallPlaceholder: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.25)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.6)' },
+  avatarSmallText: { fontSize: 16 },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 16 },
   
   // Banner Visualização

@@ -10,6 +10,7 @@ import LoginScreen from '../screens/LoginScreen';
 import LiquidacaoScreen from '../screens/LiquidacaoScreen';
 import ClientesScreen from '../screens/ClientesScreen';
 import PagamentoScreen from '../screens/PagamentoScreen';
+import PerfilScreen from '../screens/PerfilScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -134,6 +135,16 @@ function AppStack() {
         name="ClienteDetalhe" 
         component={PlaceholderScreen}
         options={{ title: 'Detalhes do Cliente' }}
+      />
+      <Stack.Screen 
+        name="Perfil" 
+        component={PerfilScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen 
+        name="Configuracoes" 
+        component={PlaceholderScreen}
+        options={{ title: 'Configurações' }}
       />
     </Stack.Navigator>
   );
