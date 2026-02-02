@@ -83,6 +83,9 @@ const textos = {
     empAtivo: 'Empréstimo Ativo', empVencido: 'Empréstimo Vencido',
     valorParcela: 'Valor Parcela', saldoDevedor: 'Saldo Devedor',
     empAdicional: 'Empréstimo Adicional', detalhes: 'Detalhes',
+    modoVisualizacao: 'Modo Visualização',
+    modoVisualizacaoDesc: 'Visualizando dados de',
+    modoVisualizacaoSair: 'Sair',
   },
   'es': {
     titulo: 'Mis Clientes', hoje: 'Hoy', clientes: 'clientes',
@@ -102,6 +105,9 @@ const textos = {
     empAtivo: 'Préstamo Activo', empVencido: 'Préstamo Vencido',
     valorParcela: 'Valor Cuota', saldoDevedor: 'Saldo Deudor',
     empAdicional: 'Préstamo Adicional', detalhes: 'Detalles',
+    modoVisualizacao: 'Modo Visualización',
+    modoVisualizacaoDesc: 'Visualizando datos de',
+    modoVisualizacaoSair: 'Salir',
   }
 };
 
@@ -383,7 +389,19 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   return (
     <View style={S.c}>
-      <View style={S.hd}><View><Text style={S.hdT}>{t.titulo}</Text><Text style={S.hdS}>{t.hoje} - {tab === 'liquidacao' ? filtered.length : todosList.length} {t.clientes}</Text></View><View style={S.hdR}><View style={S.hdDot} /><Text style={S.hdI}>🔔</Text><Text style={S.hdI}>⚙️</Text></View></View>
+      <View style={S.hd}><View><Text style={S.hdT}>{t.titulo}</Text><Text style={S.hdS}>{tab === 'liquidacao' ? dataLiq : t.hoje} - {tab === 'liquidacao' ? filtered.length : todosList.length} {t.clientes}</Text></View><View style={S.hdR}><View style={S.hdDot} /><Text style={S.hdI}>🔔</Text><Text style={S.hdI}>⚙️</Text></View></View>
+      {/* Banner Modo Visualização */}
+      {isViz && (
+        <View style={S.vizBanner}>
+          <View style={S.vizBannerContent}>
+            <Text style={S.vizBannerIcon}>⚠️</Text>
+            <View style={S.vizBannerTexts}>
+              <Text style={S.vizBannerTitle}>{t.modoVisualizacao}</Text>
+              <Text style={S.vizBannerDesc}>{t.modoVisualizacaoDesc} {dataLiq}</Text>
+            </View>
+          </View>
+        </View>
+      )}
       <View style={S.tabs}>
         <TouchableOpacity style={[S.tb, tab === 'liquidacao' && S.tbOn]} onPress={() => setTab('liquidacao')}><Text style={S.tbI}>📅</Text><Text style={[S.tbTx, tab === 'liquidacao' && S.tbTxOn]}>{t.liquidacao} ({cntTotal})</Text></TouchableOpacity>
         <TouchableOpacity style={[S.tb, tab === 'todos' && S.tbOn]} onPress={() => setTab('todos')}><Text style={S.tbI}>👥</Text><Text style={[S.tbTx, tab === 'todos' && S.tbTxOn]}>{t.todosList} ({todosList.length})</Text></TouchableOpacity>
@@ -406,7 +424,7 @@ export default function ClientesScreen({ navigation, route }: any) {
           <TouchableOpacity style={S.tFB}><Text style={S.tFBT}>{t.statusFiltro}</Text><Text style={S.tFC}>▼</Text></TouchableOpacity>
           <Text style={S.tCnt}>{todosFilt.length} {t.clientes}</Text><Text style={S.tChv}>▼</Text>
         </View>)}
-      <ScrollView style={S.ls} contentContainerStyle={S.lsI} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />} showsVerticalScrollIndicator={false}>
+      <ScrollView style={S.ls} contentContainerStyle={S.lsI} refreshControl={!isViz ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined} showsVerticalScrollIndicator={false}>
         {tab === 'liquidacao' ? (filtered.length === 0 ? <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View> : filtered.map(renderCard)) : (loadTodos ? <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} /> : todosFilt.length === 0 ? <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View> : todosFilt.map(renderTodos))}
         <View style={{ height: 90 }} />
       </ScrollView>
@@ -421,6 +439,12 @@ const S = StyleSheet.create({
   hd: { backgroundColor: '#3B82F6', paddingTop: 48, paddingBottom: 14, paddingHorizontal: 16, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   hdT: { color: '#fff', fontSize: 18, fontWeight: '700' }, hdS: { color: 'rgba(255,255,255,0.75)', fontSize: 12, marginTop: 1 },
   hdR: { flexDirection: 'row', alignItems: 'center', gap: 10 }, hdDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#10B981' }, hdI: { fontSize: 18 },
+  vizBanner: { backgroundColor: '#FEF3C7', paddingVertical: 10, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#FDE68A' },
+  vizBannerContent: { flexDirection: 'row', alignItems: 'center' },
+  vizBannerIcon: { fontSize: 16, marginRight: 10 },
+  vizBannerTexts: { flex: 1 },
+  vizBannerTitle: { fontSize: 13, fontWeight: '700', color: '#92400E' },
+  vizBannerDesc: { fontSize: 11, color: '#B45309', marginTop: 1 },
   tabs: { flexDirection: 'row', marginHorizontal: 16, marginTop: 14, backgroundColor: '#E8EBF7', borderRadius: 12, padding: 3 },
   tb: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 11, borderRadius: 10, gap: 5 }, tbOn: { backgroundColor: '#3B82F6' },
   tbI: { fontSize: 13 }, tbTx: { fontSize: 13, fontWeight: '600', color: '#6B7280' }, tbTxOn: { color: '#fff' },

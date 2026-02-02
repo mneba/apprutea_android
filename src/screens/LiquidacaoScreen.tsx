@@ -78,6 +78,7 @@ const textos = {
     legendaAprovado: 'Aprovado',
     legendaSemRegistro: 'Sem registro',
     visualizando: 'Visualizando:',
+    fecharCalendario: 'Voltar à Liquidação',
     meses: ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'],
     diasSemana: ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'],
   },
@@ -128,6 +129,7 @@ const textos = {
     legendaAprovado: 'Aprobado',
     legendaSemRegistro: 'Sin registro',
     visualizando: 'Visualizando:',
+    fecharCalendario: 'Volver a Liquidación',
     meses: ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'],
     diasSemana: ['D', 'L', 'M', 'M', 'J', 'V', 'S'],
   }
@@ -337,6 +339,21 @@ export default function LiquidacaoScreen({ navigation }: any) {
     setMostrarCalendario(true);
   };
 
+  const handleFecharCalendario = () => {
+    // Volta para a liquidação aberta (se existir)
+    const aberta = todasLiquidacoes.find(l => {
+      const s = l.status?.toUpperCase();
+      return s === 'ABERTO' || s === 'ABERTA';
+    });
+    if (aberta) {
+      setLiquidacao(aberta);
+      setModoVisualizacao(false);
+      setDataVisualizacao(null);
+      setDadosVisualizacao(null);
+      setMostrarCalendario(false);
+    }
+  };
+
   // === FutureRouteView Functions ===
   const enterFutureView = async (data: Date) => {
     setModoVisualizacao(true);
@@ -542,6 +559,14 @@ export default function LiquidacaoScreen({ navigation }: any) {
           </View>
         </View>
 
+        {/* Botão fixo: Fechar calendário e voltar à liquidação aberta */}
+        {todasLiquidacoes.some(l => { const s = l.status?.toUpperCase(); return s === 'ABERTO' || s === 'ABERTA'; }) && (
+          <TouchableOpacity style={styles.fecharCalendarioBtn} onPress={handleFecharCalendario}>
+            <Text style={styles.fecharCalendarioIcon}>←</Text>
+            <Text style={styles.fecharCalendarioText}>{t.fecharCalendario}</Text>
+          </TouchableOpacity>
+        )}
+
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
           {/* Info Card */}
           <View style={styles.infoCard}>
@@ -709,7 +734,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
       <ScrollView
         style={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={!modoVisualizacao ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined}
         showsVerticalScrollIndicator={false}
       >
         {liquidacao ? (
@@ -1015,6 +1040,9 @@ const styles = StyleSheet.create({
   avatarSmall: { width: 32, height: 32, borderRadius: 16, borderWidth: 2, borderColor: 'rgba(255,255,255,0.6)' },
   avatarSmallPlaceholder: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.25)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.6)' },
   avatarSmallText: { fontSize: 16 },
+  fecharCalendarioBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#DBEAFE', marginHorizontal: 16, marginTop: 12, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1, borderColor: '#93C5FD' },
+  fecharCalendarioIcon: { fontSize: 18, color: '#2563EB', fontWeight: '700', marginRight: 10 },
+  fecharCalendarioText: { fontSize: 14, color: '#2563EB', fontWeight: '600' },
   content: { flex: 1, paddingHorizontal: 16, paddingTop: 16 },
   
   // Banner Visualização
