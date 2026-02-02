@@ -185,7 +185,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     try {
       const { data, error } = await supabase
         .from('emprestimos')
-        .select('id, cliente_id, status, valor_principal, saldo_devedor, valor_parcela, numero_parcelas, frequencia_pagamento, clientes(id, consecutivo, nome, telefone_celular, status)')
+        .select('id, cliente_id, status, valor_principal, valor_saldo, valor_parcela, numero_parcelas, frequencia_pagamento, clientes(id, consecutivo, nome, telefone_celular, status)')
         .eq('rota_id', rotaId)
         .in('status', ['ATIVO', 'VENCIDO']);
       if (error) throw error;
@@ -196,8 +196,8 @@ export default function ClientesScreen({ navigation, route }: any) {
       const parcAtualMap = new Map<string, number>();
       if (empIds.length > 0) {
         const [{ data: pVenc }, { data: pMax }] = await Promise.all([
-          supabase.from('parcelas').select('emprestimo_id, valor_parcela').in('emprestimo_id', empIds).eq('status', 'PENDENTE').lt('data_vencimento', new Date().toISOString().split('T')[0]),
-          supabase.from('parcelas').select('emprestimo_id, numero_parcela').in('emprestimo_id', empIds).eq('status', 'PAGO').order('numero_parcela', { ascending: false }),
+          supabase.from('emprestimo_parcelas').select('emprestimo_id, valor_parcela').in('emprestimo_id', empIds).eq('status', 'PENDENTE').lt('data_vencimento', new Date().toISOString().split('T')[0]),
+          supabase.from('emprestimo_parcelas').select('emprestimo_id, numero_parcela').in('emprestimo_id', empIds).eq('status', 'PAGO').order('numero_parcela', { ascending: false }),
         ]);
         (pVenc || []).forEach((p: any) => {
           const ex = vencMap.get(p.emprestimo_id) || { total: 0, valor: 0 };
@@ -214,7 +214,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         const c = e.clientes; if (!c) return;
         const venc = vencMap.get(e.id) || { total: 0, valor: 0 };
         const empT: EmprestimoTodos = {
-          id: e.id, valor_principal: e.valor_principal || 0, saldo_emprestimo: e.saldo_devedor || 0,
+          id: e.id, valor_principal: e.valor_principal || 0, saldo_emprestimo: e.valor_saldo || 0,
           valor_parcela: e.valor_parcela || 0, numero_parcelas: e.numero_parcelas || 0,
           numero_parcela_atual: parcAtualMap.get(e.id) || 1, status: e.status,
           frequencia_pagamento: e.frequencia_pagamento || 'DIARIO',
