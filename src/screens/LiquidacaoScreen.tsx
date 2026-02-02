@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { useAuth } from '../contexts/AuthContext';
+import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
 import { LiquidacaoDiaria } from '../types';
 
@@ -137,6 +138,7 @@ const textos = {
 
 export default function LiquidacaoScreen({ navigation }: any) {
   const { vendedor } = useAuth();
+  const liqCtx = useLiquidacaoContext();
   const [liquidacao, setLiquidacao] = useState<LiquidacaoDiaria | null>(null);
   const [todasLiquidacoes, setTodasLiquidacoes] = useState<LiquidacaoDiaria[]>([]);
   const [loading, setLoading] = useState(true);
@@ -150,10 +152,26 @@ export default function LiquidacaoScreen({ navigation }: any) {
   
   // Estados do Calendário
   const [mostrarCalendario, setMostrarCalendario] = useState(false);
-  const [modoVisualizacao, setModoVisualizacao] = useState(false);
-  const [dataVisualizacao, setDataVisualizacao] = useState<Date | null>(null);
+  const [modoVisualizacao, setModoVisualizacaoLocal] = useState(false);
+  const [dataVisualizacao, setDataVisualizacaoLocal] = useState<Date | null>(null);
   const [mesAtual, setMesAtual] = useState(new Date().getMonth());
   const [anoAtual, setAnoAtual] = useState(new Date().getFullYear());
+  
+  // Wrappers que sincronizam estado local → contexto compartilhado
+  const setModoVisualizacao = useCallback((v: boolean) => {
+    setModoVisualizacaoLocal(v);
+    liqCtx.setModoVisualizacao(v);
+  }, [liqCtx]);
+
+  const setDataVisualizacao = useCallback((d: Date | null) => {
+    setDataVisualizacaoLocal(d);
+    liqCtx.setDataVisualizacao(d ? d.toISOString().split('T')[0] : null);
+  }, [liqCtx]);
+
+  // Sincroniza liquidacaoId no contexto quando liquidação muda
+  useEffect(() => {
+    liqCtx.setLiquidacaoIdVisualizacao(liquidacao?.id || null);
+  }, [liquidacao?.id]);
   
   // Dados do modo visualização (dias sem liquidação)
   const [dadosVisualizacao, setDadosVisualizacao] = useState<{

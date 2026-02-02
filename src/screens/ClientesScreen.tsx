@@ -4,6 +4,7 @@ import {
   ActivityIndicator, TextInput, Linking, Platform,
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
+import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
 
 type Language = 'pt-BR' | 'es';
@@ -130,6 +131,7 @@ const fmtTel = (tel: string | null) => {
   return tel;
 };
 const FREQ: Record<string, string> = { DIARIO: 'Diário', SEMANAL: 'Semanal', QUINZENAL: 'Quinzenal', MENSAL: 'Mensal', FLEXIVEL: 'Flexível' };
+const fmtData = (d: string) => { const p = d.split('-'); return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : d; };
 const borderOf = (e: EmprestimoData, paga: boolean) => {
   if (paga) return '#10B981';
   if (e.is_parcela_atrasada) return '#EF4444';
@@ -141,10 +143,11 @@ const isPaga = (pid: string, sd: string, set: Set<string>) => set.has(pid) || sd
 // ── Component ──
 export default function ClientesScreen({ navigation, route }: any) {
   const { vendedor } = useAuth();
+  const liqCtx = useLiquidacaoContext();
   const rotaId = route?.params?.rotaId || vendedor?.rota_id;
-  const dataLiq = route?.params?.dataLiquidacao || new Date().toISOString().split('T')[0];
-  const liqId = route?.params?.liquidacaoId;
-  const isViz = route?.params?.isVisualizacao || false;
+  const dataLiq = liqCtx.dataVisualizacao || route?.params?.dataLiquidacao || new Date().toISOString().split('T')[0];
+  const liqId = liqCtx.liquidacaoIdVisualizacao || route?.params?.liquidacaoId;
+  const isViz = liqCtx.modoVisualizacao || route?.params?.isVisualizacao || false;
 
   const [lang] = useState<Language>('pt-BR');
   const [tab, setTab] = useState<TabAtiva>('liquidacao');
@@ -389,7 +392,7 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   return (
     <View style={S.c}>
-      <View style={S.hd}><View><Text style={S.hdT}>{t.titulo}</Text><Text style={S.hdS}>{tab === 'liquidacao' ? dataLiq : t.hoje} - {tab === 'liquidacao' ? filtered.length : todosList.length} {t.clientes}</Text></View><View style={S.hdR}><View style={S.hdDot} /><Text style={S.hdI}>🔔</Text><Text style={S.hdI}>⚙️</Text></View></View>
+      <View style={S.hd}><View><Text style={S.hdT}>{t.titulo}</Text><Text style={S.hdS}>{isViz ? fmtData(dataLiq) : t.hoje} - {tab === 'liquidacao' ? filtered.length : todosList.length} {t.clientes}</Text></View><View style={S.hdR}><View style={S.hdDot} /><Text style={S.hdI}>🔔</Text><Text style={S.hdI}>⚙️</Text></View></View>
       {/* Banner Modo Visualização */}
       {isViz && (
         <View style={S.vizBanner}>
@@ -397,7 +400,7 @@ export default function ClientesScreen({ navigation, route }: any) {
             <Text style={S.vizBannerIcon}>⚠️</Text>
             <View style={S.vizBannerTexts}>
               <Text style={S.vizBannerTitle}>{t.modoVisualizacao}</Text>
-              <Text style={S.vizBannerDesc}>{t.modoVisualizacaoDesc} {dataLiq}</Text>
+              <Text style={S.vizBannerDesc}>{t.modoVisualizacaoDesc} {fmtData(dataLiq)}</Text>
             </View>
           </View>
         </View>
