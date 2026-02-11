@@ -589,7 +589,8 @@ export default function ClientesScreen({ navigation, route }: any) {
     try {
       const { data, error } = await supabase.rpc('fn_estornar_pagamento', { 
         p_parcela_id: parcelaEstorno.parcela_id, 
-        p_motivo: motivoEstorno.trim()
+        p_motivo: motivoEstorno.trim(),
+        p_vendedor_id: vendedor?.id  // Passa o ID do vendedor logado
       });
       
       if (error) throw error;
@@ -598,7 +599,8 @@ export default function ClientesScreen({ navigation, route }: any) {
       if (res?.sucesso) {
         setModalEstornoVisible(false);
         setParcelaEstorno(null);
-        Alert.alert('Sucesso', t.estornoSucesso);
+        // Usa a mensagem retornada pela function que já inclui o nome do responsável
+        Alert.alert('Sucesso', res.mensagem || t.estornoSucesso);
         if (clienteModal) abrirParcelas(clienteModal.id, clienteModal.nome, clienteModal.emprestimo_id);
         loadLiq();
       } else { 
@@ -610,7 +612,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       Alert.alert('Erro', e.message || t.estornoErro); 
     }
     finally { setProcessando(false); }
-  }, [parcelaEstorno, motivoEstorno, t, clienteModal, abrirParcelas, loadLiq, processando]);
+  }, [parcelaEstorno, motivoEstorno, vendedor, t, clienteModal, abrirParcelas, loadLiq, processando]);
 
   const grouped = useMemo((): ClienteAgrupado[] => {
     const m = new Map<string, ClienteAgrupado>();
