@@ -275,84 +275,92 @@ export default function ClientesScreen({ navigation, route }: any) {
       
       // 2. Busca parcelas que foram pagas NA liquidação atual (para mostrar como "pagas")
       if (liqId) {
-        const { data: pagasLiq } = await supabase
-          .from('financeiro')
-          .select(`
-            ref_parcela_id,
-            liquidacao_id,
-            emprestimo_parcelas!inner(
-              id,
-              numero_parcela,
-              valor_parcela,
-              data_vencimento,
-              status,
-              emprestimos!inner(
-                id,
-                valor_principal,
-                valor_saldo,
-                numero_parcelas,
-                status,
-                frequencia_pagamento,
-                rota_id,
-                clientes!inner(
-                  id,
-                  nome,
-                  telefone_celular,
-                  endereco,
-                  latitude,
-                  longitude,
-                  consecutivo
-                )
-              )
-            )
-          `)
-          .eq('liquidacao_id', liqId)
-          .eq('tipo', 'RECEBER')
-          .eq('status', 'CONFIRMADO')
-          .not('ref_parcela_id', 'is', null);
+        console.log('🔍 Buscando parcelas pagas na liquidação:', liqId);
         
-        // Adiciona parcelas pagas que não estão na lista (já foram pagas)
-        (pagasLiq || []).forEach((f: any) => {
-          const p = f.emprestimo_parcelas;
-          const e = p?.emprestimos;
-          const c = e?.clientes;
-          if (!p || !e || !c || existingParcelaIds.has(f.ref_parcela_id)) return;
+        // Busca diretamente de pagamentos_parcelas que tem todos os dados
+        const { data: pagamentos, error: errPag } = await supabase
+          .from('pagamentos_parcelas')
+          .select('parcela_id, cliente_id, emprestimo_id, liquidacao_id, numero_parcela, valor_parcela, valor_pago_atual, valor_credito_gerado, estornado')
+          .eq('liquidacao_id', liqId)
+          .eq('estornado', false);
+        
+        console.log('📦 Pagamentos na liquidação:', { count: pagamentos?.length, error: errPag?.message });
+        
+        if (pagamentos && pagamentos.length > 0) {
+          // Filtra parcelas que não estão na lista (view não retornou pq já estão pagas)
+          const pagamentosNovos = pagamentos.filter(p => !existingParcelaIds.has(p.parcela_id));
           
-          // Monta objeto compatível com ClienteRotaDia
-          const pagaRow: ClienteRotaDia = {
-            cliente_id: c.id,
-            nome: c.nome,
-            telefone_celular: c.telefone_celular,
-            endereco: c.endereco,
-            latitude: c.latitude,
-            longitude: c.longitude,
-            consecutivo: c.consecutivo,
-            emprestimo_id: e.id,
-            saldo_emprestimo: e.valor_saldo,
-            valor_principal: e.valor_principal,
-            numero_parcelas: e.numero_parcelas,
-            status_emprestimo: e.status,
-            rota_id: e.rota_id,
-            frequencia_pagamento: e.frequencia_pagamento,
-            parcela_id: f.ref_parcela_id,
-            numero_parcela: p.numero_parcela,
-            valor_parcela: p.valor_parcela,
-            valor_pago_parcela: p.valor_parcela, // Foi paga
-            saldo_parcela: 0,
-            status_parcela: 'PAGO',
-            data_vencimento: p.data_vencimento,
-            ordem_visita_dia: null,
-            liquidacao_id: f.liquidacao_id,
-            tem_parcelas_vencidas: false,
-            total_parcelas_vencidas: 0,
-            valor_total_vencido: 0,
-            status_dia: 'PAGO',
-            permite_emprestimo_adicional: false,
-            is_parcela_atrasada: false,
-          };
-          allData.push(pagaRow);
-          existingParcelaIds.add(f.ref_parcela_id);
-        });
+          console.log('📋 Pagamentos não listados:', pagamentosNovos.length);
+          
+          if (pagamentosNovos.length > 0) {
+            // Busca dados dos clientes
+            const clienteIds = [...new Set(pagamentosNovos.map(p => p.cliente_id))];
+            const { data: clientes } = await supabase
+              .from('clientes')
+              .select('id, nome, telefone_celular, endereco, latitude, longitude, consecutivo')
+              .in('id', clienteIds);
+            const cliMap = new Map((clientes || []).map(c => [c.id, c]));
+            
+            // Busca dados dos empréstimos
+            const empIds = [...new Set(pagamentosNovos.map(p => p.emprestimo_id))];
+            const { data: emps } = await supabase
+              .from('emprestimos')
+              .select('id, valor_principal, valor_saldo, numero_parcelas, status, frequencia_pagamento, rota_id')
+              .in('id', empIds);
+            const empMap = new Map((emps || []).map(e => [e.id, e]));
+            
+            // Busca dados das parcelas (para data_vencimento)
+            const parcIds = pagamentosNovos.map(p => p.parcela_id);
+            const { data: parcs } = await supabase
+              .from('emprestimo_parcelas')
+              .select('id, data_vencimento, status')
+              .in('id', parcIds);
+            const parcMap = new Map((parcs || []).map(p => [p.id, p]));
+            
+            // Monta os registros
+            pagamentosNovos.forEach(pag => {
+              const cli = cliMap.get(pag.cliente_id);
+              const emp = empMap.get(pag.emprestimo_id);
+              const parc = parcMap.get(pag.parcela_id);
+              if (!cli || !emp) return;
+              
+              const pagaRow: ClienteRotaDia = {
+                cliente_id: cli.id,
+                nome: cli.nome,
+                telefone_celular: cli.telefone_celular,
+                endereco: cli.endereco,
+                latitude: cli.latitude,
+                longitude: cli.longitude,
+                consecutivo: cli.consecutivo,
+                emprestimo_id: emp.id,
+                saldo_emprestimo: emp.valor_saldo,
+                valor_principal: emp.valor_principal,
+                numero_parcelas: emp.numero_parcelas,
+                status_emprestimo: emp.status,
+                rota_id: emp.rota_id,
+                frequencia_pagamento: emp.frequencia_pagamento,
+                parcela_id: pag.parcela_id,
+                numero_parcela: pag.numero_parcela,
+                valor_parcela: pag.valor_parcela,
+                valor_pago_parcela: pag.valor_pago_atual,
+                saldo_parcela: 0,
+                status_parcela: parc?.status || 'PAGO',
+                data_vencimento: parc?.data_vencimento || new Date().toISOString(),
+                ordem_visita_dia: null,
+                liquidacao_id: pag.liquidacao_id,
+                tem_parcelas_vencidas: false,
+                total_parcelas_vencidas: 0,
+                valor_total_vencido: 0,
+                status_dia: 'PAGO',
+                permite_emprestimo_adicional: false,
+                is_parcela_atrasada: false,
+              };
+              allData.push(pagaRow);
+              existingParcelaIds.add(pag.parcela_id);
+              console.log('✅ Adicionado cliente pago:', cli.nome, 'parcela:', pag.numero_parcela);
+            });
+          }
+        }
       }
       
       console.log('📊 loadLiq resultado:', { 
@@ -421,41 +429,22 @@ export default function ClientesScreen({ navigation, route }: any) {
       if (!parcelas || parcelas.length === 0) { setParcelasModal([]); setLoadingParcelas(false); return; }
       const ids = parcelas.map((p: any) => p.parcela_id);
       
-      // Busca pagamentos com liquidacao_id (campo é ref_parcela_id na tabela financeiro)
+      // Busca pagamentos com liquidacao_id (tabela pagamentos_parcelas tem tudo)
       const { data: pagamentos } = await supabase
-        .from('financeiro')
-        .select('ref_parcela_id, valor, liquidacao_id')
-        .in('ref_parcela_id', ids)
-        .eq('tipo', 'RECEBER')
-        .eq('status', 'CONFIRMADO');
+        .from('pagamentos_parcelas')
+        .select('parcela_id, valor_pago_atual, valor_credito_gerado, liquidacao_id, estornado')
+        .in('parcela_id', ids)
+        .eq('estornado', false);
       
       const pMap = new Map<string, { valorPago: number; creditoGerado: number; liquidacaoId: string | null }>();
       let creditoTotal = 0;
       (pagamentos || []).forEach((p: any) => { 
-        const existing = pMap.get(p.ref_parcela_id);
-        if (!existing || p.valor > existing.valorPago) {
-          pMap.set(p.ref_parcela_id, { 
-            valorPago: p.valor || 0, 
-            creditoGerado: 0, 
-            liquidacaoId: p.liquidacao_id 
-          }); 
-        }
-      });
-      
-      // Busca créditos gerados separadamente
-      const { data: creditos } = await supabase
-        .from('pagamentos_parcelas')
-        .select('parcela_id, valor_pago_atual, valor_credito_gerado')
-        .in('parcela_id', ids);
-      (creditos || []).forEach((c: any) => {
-        const existing = pMap.get(c.parcela_id);
-        if (existing) {
-          existing.valorPago = c.valor_pago_atual || existing.valorPago;
-          existing.creditoGerado = c.valor_credito_gerado || 0;
-        } else {
-          pMap.set(c.parcela_id, { valorPago: c.valor_pago_atual || 0, creditoGerado: c.valor_credito_gerado || 0, liquidacaoId: null });
-        }
-        creditoTotal += c.valor_credito_gerado || 0;
+        pMap.set(p.parcela_id, { 
+          valorPago: p.valor_pago_atual || 0, 
+          creditoGerado: p.valor_credito_gerado || 0, 
+          liquidacaoId: p.liquidacao_id 
+        }); 
+        creditoTotal += p.valor_credito_gerado || 0;
       });
       
       setCreditoDisponivel(creditoTotal);
