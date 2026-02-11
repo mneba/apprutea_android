@@ -246,9 +246,28 @@ export default function ClientesScreen({ navigation, route }: any) {
   }, []);
 
   const loadLiq = useCallback(async () => {
-    if (!rotaId) return;
+    if (!rotaId) {
+      console.log('❌ loadLiq: rotaId não definido');
+      setLoading(false);
+      return;
+    }
+    console.log('🔍 loadLiq: Buscando clientes...', { rotaId, dataLiq });
     try {
-      const { data, error } = await supabase.from('vw_clientes_rota_dia').select('*').eq('rota_id', rotaId).eq('data_vencimento', dataLiq);
+      // Busca parcelas com data_vencimento <= dataLiq (hoje ou vencidas)
+      // A view já filtra por status PENDENTE/PARCIAL/VENCIDO e empréstimos ATIVO/VENCIDO
+      const { data, error } = await supabase
+        .from('vw_clientes_rota_dia')
+        .select('*')
+        .eq('rota_id', rotaId)
+        .lte('data_vencimento', dataLiq); // <= em vez de =
+      
+      console.log('📊 loadLiq resultado:', { 
+        count: data?.length || 0, 
+        error: error?.message,
+        rotaId,
+        dataLiq,
+        primeiroDado: data?.[0] 
+      });
       if (error) throw error;
       setRaw((data || []) as ClienteRotaDia[]);
       const ids = (data || []).map((r: any) => r.parcela_id).filter(Boolean);
@@ -382,8 +401,21 @@ export default function ClientesScreen({ navigation, route }: any) {
       return;
     }
     const valorNum = parseFloat(valorPagamento.replace(',', '.'));
-    if (isNaN(valorNum) || valorNum <= 0) { Alert.alert('Erro', 'Valor inválido'); return; }
-    const valorCredito = usarCredito && dadosPagamento?.credito_disponivel ? dadosPagamento.credito_disponivel : 0;
+    if (isNaN(valorNum) || valorNum < 0) { Alert.alert('Erro', 'Valor inválido'); return; }
+    
+    // Calcula crédito a usar: no máximo o disponível, mas limitado ao valor da parcela
+    let valorCredito = 0;
+    if (usarCredito && dadosPagamento?.credito_disponivel > 0) {
+      const valorParcela = dadosPagamento.valor_saldo_parcela || parcelaPagamento.valor_parcela;
+      valorCredito = Math.min(dadosPagamento.credito_disponivel, valorParcela);
+    }
+    
+    // Validação: pelo menos um valor deve ser informado (dinheiro OU crédito)
+    if (valorNum === 0 && valorCredito === 0) {
+      Alert.alert('Erro', 'Informe um valor para pagar ou use o crédito disponível');
+      return;
+    }
+    
     setProcessando(true);
     try {
       const { data, error } = await supabase.rpc('fn_registrar_pagamento', { 
@@ -404,6 +436,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         setModalPagamentoVisible(false);
         setParcelaPagamento(null);
         setDadosPagamento(null);
+        setUsarCredito(false);
         if (clienteModal) abrirParcelas(clienteModal.id, clienteModal.nome, clienteModal.emprestimo_id);
         loadLiq();
       } else { Alert.alert('Erro', res?.mensagem || t.erro); }
@@ -606,14 +639,27 @@ export default function ClientesScreen({ navigation, route }: any) {
                   />
                 </View>
                 
-                {/* Linha de crédito disponível */}
+                {/* Linha de crédito disponível - quando marcado, REDUZ o valor a pagar em dinheiro */}
                 {dadosPagamento?.tem_credito && dadosPagamento.credito_disponivel > 0 && (
                   <View style={S.pgCreditoRow}>
                     <Text style={S.pgCreditoIcon}>💳</Text>
                     <Text style={S.pgCreditoText}>{t.credito} {fmt(dadosPagamento.credito_disponivel)}</Text>
                     <TouchableOpacity 
                       style={[S.pgCreditoBtn, usarCredito && S.pgCreditoBtnOn]} 
-                      onPress={() => setUsarCredito(!usarCredito)}
+                      onPress={() => {
+                        const novoUsarCredito = !usarCredito;
+                        setUsarCredito(novoUsarCredito);
+                        // Quando marcar/desmarcar, ajusta o valor do campo
+                        const valorBase = dadosPagamento.valor_saldo_parcela || parcelaPagamento.valor_parcela;
+                        if (novoUsarCredito) {
+                          // Reduz o valor a pagar em dinheiro
+                          const valorComCredito = Math.max(0, valorBase - dadosPagamento.credito_disponivel);
+                          setValorPagamento(valorComCredito.toFixed(2).replace('.', ','));
+                        } else {
+                          // Volta ao valor original
+                          setValorPagamento(valorBase.toFixed(2).replace('.', ','));
+                        }
+                      }}
                     >
                       <View style={[S.pgCreditoCheck, usarCredito && S.pgCreditoCheckOn]}>
                         {usarCredito && <Text style={S.pgCreditoCheckIcon}>✓</Text>}
@@ -671,7 +717,12 @@ export default function ClientesScreen({ navigation, route }: any) {
                 ) : (
                   <>
                     <Text style={S.pgBtnIcon}>✓</Text>
-                    <Text style={S.pgBtnTx}>{t.pagarBtn} {fmt((parseFloat(valorPagamento.replace(',', '.')) || 0) + (usarCredito && dadosPagamento?.credito_disponivel ? dadosPagamento.credito_disponivel : 0))}</Text>
+                    <Text style={S.pgBtnTx}>{t.pagarBtn} {fmt(
+                      (parseFloat(valorPagamento.replace(',', '.')) || 0) + 
+                      (usarCredito && dadosPagamento?.credito_disponivel 
+                        ? Math.min(dadosPagamento.credito_disponivel, dadosPagamento.valor_saldo_parcela || parcelaPagamento?.valor_parcela || 0) 
+                        : 0)
+                    )}</Text>
                   </>
                 )}
               </TouchableOpacity>
