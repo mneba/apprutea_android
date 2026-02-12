@@ -667,28 +667,89 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   const renderParcelaItem = (p: ParcelaModal) => {
     const isPago = p.status === 'PAGO';
+    const isParcial = p.status === 'PARCIAL';
     const isVencida = p.status === 'VENCIDO' || p.status === 'VENCIDA';
-    const iconColor = isPago ? '#10B981' : isVencida ? '#EF4444' : '#F59E0B';
-    const iconBg = isPago ? '#D1FAE5' : isVencida ? '#FEE2E2' : '#FEF3C7';
-    const statusColor = isPago ? '#10B981' : isVencida ? '#EF4444' : '#F97316';
-    const statusBg = isPago ? '#D1FAE5' : isVencida ? '#FEE2E2' : '#FFEDD5';
-    const statusText = isPago ? 'PAGO' : isVencida ? 'VENCIDA' : 'PENDENTE';
+    
+    // Cores baseadas no status
+    const iconColor = isPago ? '#10B981' : isParcial ? '#F59E0B' : isVencida ? '#EF4444' : '#6B7280';
+    const iconBg = isPago ? '#D1FAE5' : isParcial ? '#FEF3C7' : isVencida ? '#FEE2E2' : '#F3F4F6';
+    const statusColor = isPago ? '#10B981' : isParcial ? '#D97706' : isVencida ? '#EF4444' : '#F97316';
+    const statusBg = isPago ? '#D1FAE5' : isParcial ? '#FEF3C7' : isVencida ? '#FEE2E2' : '#FFEDD5';
+    const statusText = isPago ? 'PAGO' : isParcial ? 'PARCIAL' : isVencida ? 'VENCIDA' : 'PENDENTE';
+    
+    // Calcula valor restante para parcial
+    const valorPago = p.valor_pago || 0;
+    const valorRestante = isParcial ? (p.valor_parcela - valorPago) : p.valor_parcela;
+    
     return (
       <View key={p.parcela_id} style={[S.mParcela, { borderLeftColor: iconColor }]}>
         <View style={S.mParcelaRow}>
-          <View style={[S.mParcelaIcon, { backgroundColor: iconBg }]}><Text style={{ color: iconColor, fontSize: 14 }}>{isPago ? '✓' : '📅'}</Text></View>
-          <View style={S.mParcelaInfo}><Text style={S.mParcelaNum}>{t.parcela} {p.numero_parcela}</Text><Text style={S.mParcelaVenc}>{t.venc} {fmtData(p.data_vencimento)}</Text></View>
+          <View style={[S.mParcelaIcon, { backgroundColor: iconBg }]}>
+            <Text style={{ color: iconColor, fontSize: 14 }}>
+              {isPago ? '✓' : isParcial ? '◐' : '📅'}
+            </Text>
+          </View>
+          <View style={S.mParcelaInfo}>
+            <Text style={S.mParcelaNum}>{t.parcela} {p.numero_parcela}</Text>
+            <Text style={S.mParcelaVenc}>{t.venc} {fmtData(p.data_vencimento)}</Text>
+          </View>
           <View style={S.mParcelaValores}>
             <Text style={S.mParcelaOriginal}>{t.original} {fmt(p.valor_parcela)}</Text>
-            {isPago && p.valor_pago ? (<><Text style={S.mParcelaPago}>{t.pago} {fmt(p.valor_pago)}</Text>{(p.credito_gerado || 0) > 0 && <Text style={S.mParcelaCredito}>{t.credito} {fmt(p.credito_gerado || 0)}</Text>}</>) : (<Text style={S.mParcelaValor}>{fmt(p.valor_parcela)}</Text>)}
-            <View style={[S.mParcelaStatus, { backgroundColor: statusBg }]}><Text style={[S.mParcelaStatusTx, { color: statusColor }]}>{statusText}</Text></View>
-            {isPago && p.data_pagamento && <Text style={S.mParcelaDataPg}>{t.em} {fmtData(p.data_pagamento)}</Text>}
+            
+            {/* PAGO - mostra valor pago e crédito */}
+            {isPago && valorPago > 0 && (
+              <>
+                <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
+                {(p.credito_gerado || 0) > 0 && (
+                  <Text style={S.mParcelaCredito}>{t.credito} {fmt(p.credito_gerado || 0)}</Text>
+                )}
+              </>
+            )}
+            
+            {/* PARCIAL - mostra valor pago e valor restante */}
+            {isParcial && (
+              <>
+                <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
+                <Text style={S.mParcelaRestante}>Restante: {fmt(valorRestante)}</Text>
+              </>
+            )}
+            
+            {/* PENDENTE/VENCIDA - mostra apenas valor */}
+            {!isPago && !isParcial && (
+              <Text style={S.mParcelaValor}>{fmt(p.valor_parcela)}</Text>
+            )}
+            
+            <View style={[S.mParcelaStatus, { backgroundColor: statusBg }]}>
+              <Text style={[S.mParcelaStatusTx, { color: statusColor }]}>{statusText}</Text>
+            </View>
+            
+            {isPago && p.data_pagamento && (
+              <Text style={S.mParcelaDataPg}>{t.em} {fmtData(p.data_pagamento)}</Text>
+            )}
+            {isParcial && p.data_pagamento && (
+              <Text style={S.mParcelaDataPg}>{t.em} {fmtData(p.data_pagamento)}</Text>
+            )}
           </View>
         </View>
         <View style={S.mParcelaBtns}>
-          {!isPago && p.parcela_id && <TouchableOpacity style={[S.mBtnPagar, (!liqId || isViz) && S.mBtnPagarDisabled]} onPress={() => abrirPagamento(p)} disabled={!liqId || isViz}><Text style={S.mBtnPagarIcon}>💰</Text><Text style={S.mBtnPagarTx}>{t.pagar}</Text></TouchableOpacity>}
+          {/* Botão Pagar: mostra se NÃO é PAGO (ou seja, PENDENTE, VENCIDA ou PARCIAL) */}
+          {!isPago && p.parcela_id && (
+            <TouchableOpacity 
+              style={[S.mBtnPagar, (!liqId || isViz) && S.mBtnPagarDisabled]} 
+              onPress={() => abrirPagamento(p)} 
+              disabled={!liqId || isViz}
+            >
+              <Text style={S.mBtnPagarIcon}>💰</Text>
+              <Text style={S.mBtnPagarTx}>{t.pagar}</Text>
+            </TouchableOpacity>
+          )}
           {/* Estornar: só mostra se PAGO + tem parcela_id + liquidação aberta + não visualização + pago NA liquidação atual */}
-          {isPago && p.parcela_id && liqId && !isViz && p.liquidacao_id === liqId && <TouchableOpacity style={S.mBtnEstornar} onPress={() => abrirEstorno(p)}><Text style={S.mBtnEstornarIcon}>↩</Text><Text style={S.mBtnEstornarTx}>{t.estornar}</Text></TouchableOpacity>}
+          {isPago && p.parcela_id && liqId && !isViz && p.liquidacao_id === liqId && (
+            <TouchableOpacity style={S.mBtnEstornar} onPress={() => abrirEstorno(p)}>
+              <Text style={S.mBtnEstornarIcon}>↩</Text>
+              <Text style={S.mBtnEstornarTx}>{t.estornar}</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     );
@@ -1038,6 +1099,7 @@ const S = StyleSheet.create({
   mParcelaOriginal: { fontSize: 10, color: '#9CA3AF' },
   mParcelaValor: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
   mParcelaPago: { fontSize: 14, fontWeight: '700', color: '#10B981' },
+  mParcelaRestante: { fontSize: 12, fontWeight: '600', color: '#D97706', marginTop: 2 },
   mParcelaCredito: { fontSize: 10, color: '#2563EB' },
   mParcelaStatus: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, marginTop: 4 },
   mParcelaStatusTx: { fontSize: 9, fontWeight: '700' },
