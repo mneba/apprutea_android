@@ -519,27 +519,67 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   // Função para ir para próxima parcela pendente
   const irParaProximaParcela = useCallback(async () => {
-    if (!clienteModal) return;
+    if (!clienteModal) {
+      Alert.alert('Erro', 'Dados do cliente não disponíveis');
+      return;
+    }
+    
+    console.log('🔄 irParaProximaParcela - buscando para emprestimo:', clienteModal.emprestimo_id);
     setLoadingDadosPagamento(true);
+    
     try {
       const { data, error } = await supabase.rpc('fn_buscar_proxima_parcela_a_pagar', { p_emprestimo_id: clienteModal.emprestimo_id });
+      console.log('📦 Resposta fn_buscar_proxima_parcela_a_pagar:', { data, error });
+      
       if (error) throw error;
       const proxima = Array.isArray(data) ? data[0] : data;
+      console.log('📦 Próxima parcela:', proxima);
+      
       if (proxima && proxima.parcela_id) {
+        // A function retorna valor_saldo (não valor_saldo_parcela)
+        const valorSaldo = proxima.valor_saldo || proxima.valor_parcela;
+        console.log('💰 Valor saldo da parcela:', valorSaldo);
+        
         const novaParcela: ParcelaModal = {
-          parcela_id: proxima.parcela_id, numero_parcela: proxima.numero_parcela,
-          data_vencimento: proxima.data_vencimento, valor_parcela: proxima.valor_parcela,
-          status: proxima.status, data_pagamento: null, valor_multa: proxima.valor_multa || 0,
+          parcela_id: proxima.parcela_id, 
+          numero_parcela: proxima.numero_parcela,
+          data_vencimento: proxima.data_vencimento, 
+          valor_parcela: proxima.valor_parcela,
+          status: proxima.status, 
+          data_pagamento: null, 
+          valor_multa: proxima.valor_multa || 0,
+          valor_pago: proxima.valor_pago || 0,
         };
+        
+        console.log('📝 Nova parcela a exibir:', novaParcela);
         setParcelaPagamento(novaParcela);
-        const { data: dadosNova } = await supabase.rpc('fn_consultar_parcela_para_pagamento', { p_parcela_id: proxima.parcela_id });
+        
+        // Busca dados completos via fn_consultar_parcela_para_pagamento
+        const { data: dadosNova, error: errConsulta } = await supabase.rpc('fn_consultar_parcela_para_pagamento', { p_parcela_id: proxima.parcela_id });
+        console.log('📋 Resposta fn_consultar_parcela_para_pagamento:', { dadosNova, errConsulta });
+        
         const dados = Array.isArray(dadosNova) ? dadosNova[0] : dadosNova;
+        console.log('📋 Dados processados:', dados);
+        
         if (dados) {
           setDadosPagamento(dados);
-          setValorPagamento((dados.valor_saldo_parcela || proxima.valor_parcela).toFixed(2).replace('.', ','));
+          // Usa valor_saldo_parcela se disponível, senão valor_saldo da fn_buscar
+          const valorAPagar = dados.valor_saldo_parcela || valorSaldo;
+          setValorPagamento(valorAPagar.toFixed(2).replace('.', ','));
+          console.log('✅ Modal atualizado! Parcela:', dados.numero_parcela, 'Valor:', valorAPagar);
+        } else {
+          // Fallback se fn_consultar não retornar dados
+          setValorPagamento(valorSaldo.toFixed(2).replace('.', ','));
+          console.log('⚠️ Usando fallback - Valor:', valorSaldo);
         }
+      } else {
+        console.log('⚠️ Nenhuma parcela pendente encontrada');
+        Alert.alert('Aviso', proxima?.mensagem_status || 'Nenhuma parcela pendente encontrada');
       }
-    } catch (e) { console.error('Erro ao buscar próxima parcela:', e); }
+    } catch (e: any) { 
+      console.error('❌ Erro ao buscar próxima parcela:', e); 
+      Alert.alert('Erro', e.message || 'Não foi possível buscar a próxima parcela');
+    }
     finally { setLoadingDadosPagamento(false); }
   }, [clienteModal]);
 
@@ -876,113 +916,163 @@ export default function ClientesScreen({ navigation, route }: any) {
             <>
               <View style={S.pgInfoRow}>
                 <Text style={S.pgInfoParcela}>{t.parcela} {dadosPagamento?.numero_parcela || parcelaPagamento.numero_parcela}/{dadosPagamento?.total_parcelas || parcelasModal.length || '?'}</Text>
-                <View style={S.pgInfoStatus}><Text style={S.pgInfoStatusTx}>{t.pendente}</Text></View>
+                <View style={[
+                  S.pgInfoStatus, 
+                  (dadosPagamento?.status_parcela || parcelaPagamento.status) === 'PARCIAL' && { backgroundColor: '#FEF3C7' }
+                ]}>
+                  <Text style={[
+                    S.pgInfoStatusTx,
+                    (dadosPagamento?.status_parcela || parcelaPagamento.status) === 'PARCIAL' && { color: '#D97706' }
+                  ]}>
+                    {(dadosPagamento?.status_parcela || parcelaPagamento.status) === 'PARCIAL' ? 'PARCIAL' : t.pendente}
+                  </Text>
+                </View>
               </View>
               <Text style={S.pgInfoCliente}>{dadosPagamento?.cliente_nome || clienteModal?.nome || ''}</Text>
               <Text style={S.pgInfoVenc}>{t.vencimento} {fmtData(dadosPagamento?.data_vencimento || parcelaPagamento.data_vencimento)}</Text>
               
-              {/* Input de valor com linha de crédito */}
-              <View style={S.pgInputBox}>
-                <Text style={S.pgInputLabel}>{t.valorAPagar}</Text>
-                <View style={S.pgInputRow}>
-                  <Text style={S.pgInputCurrency}>$</Text>
-                  <TextInput 
-                    style={S.pgInput} 
-                    value={valorPagamento} 
-                    onChangeText={setValorPagamento} 
-                    keyboardType="decimal-pad" 
-                    placeholder="0,00"
-                    editable={dadosPagamento?.permite_pagamento !== false}
-                  />
-                </View>
-                
-                {/* Linha de crédito disponível - quando marcado, REDUZ o valor a pagar em dinheiro */}
-                {dadosPagamento?.tem_credito && dadosPagamento.credito_disponivel > 0 && (
-                  <View style={S.pgCreditoRow}>
-                    <Text style={S.pgCreditoIcon}>💳</Text>
-                    <Text style={S.pgCreditoText}>{t.credito} {fmt(dadosPagamento.credito_disponivel)}</Text>
-                    <TouchableOpacity 
-                      style={[S.pgCreditoBtn, usarCredito && S.pgCreditoBtnOn]} 
-                      onPress={() => {
-                        const novoUsarCredito = !usarCredito;
-                        setUsarCredito(novoUsarCredito);
-                        // Quando marcar/desmarcar, ajusta o valor do campo
-                        const valorBase = dadosPagamento.valor_saldo_parcela || parcelaPagamento.valor_parcela;
-                        if (novoUsarCredito) {
-                          // Reduz o valor a pagar em dinheiro
-                          const valorComCredito = Math.max(0, valorBase - dadosPagamento.credito_disponivel);
-                          setValorPagamento(valorComCredito.toFixed(2).replace('.', ','));
-                        } else {
-                          // Volta ao valor original
-                          setValorPagamento(valorBase.toFixed(2).replace('.', ','));
-                        }
-                      }}
-                    >
-                      <View style={[S.pgCreditoCheck, usarCredito && S.pgCreditoCheckOn]}>
-                        {usarCredito && <Text style={S.pgCreditoCheckIcon}>✓</Text>}
-                      </View>
-                      <Text style={[S.pgCreditoBtnTx, usarCredito && S.pgCreditoBtnTxOn]}>{t.usar || 'Usar'}</Text>
+              {/* CENÁRIO A: Parcela NÃO é a próxima - BLOQUEIA (qtd_parcelas_anteriores_pendentes > 0) */}
+              {dadosPagamento && dadosPagamento.qtd_parcelas_anteriores_pendentes > 0 && (
+                <>
+                  {/* Alerta amarelo - saldo anterior pendente */}
+                  <View style={S.pgAlertYellow}>
+                    <Text style={S.pgAlertYellowIcon}>⚠</Text>
+                    <View style={S.pgAlertYellowTexts}>
+                      <Text style={S.pgAlertYellowTitle}>{t.saldoAnterior || 'Saldo anterior de'} {dadosPagamento.qtd_parcelas_anteriores_pendentes} {t.parcela}(s)</Text>
+                      <Text style={S.pgAlertYellowDesc}>{t.valorPendente || 'Valor pendente:'} {fmt(dadosPagamento.saldo_parcelas_anteriores)}</Text>
+                    </View>
+                  </View>
+                  
+                  {/* Alerta vermelho - bloqueio */}
+                  <View style={S.pgAlertRed}>
+                    <Text style={S.pgAlertRedIcon}>⛔</Text>
+                    <View style={S.pgAlertRedTexts}>
+                      <Text style={S.pgAlertRedTitle}>{t.pagamentoBloqueado || 'Pagamento bloqueado'}</Text>
+                      <Text style={S.pgAlertRedDesc}>
+                        {`Existem ${dadosPagamento.qtd_parcelas_anteriores_pendentes} parcela(s) anterior(es) pendente(s) com saldo de ${fmt(dadosPagamento.saldo_parcelas_anteriores)}. É necessário quitar as parcelas mais antigas primeiro.`}
+                      </Text>
+                    </View>
+                    <TouchableOpacity style={S.pgAlertRedBtn} onPress={irParaProximaParcela}>
+                      <Text style={S.pgAlertRedBtnTx}>{t.irProximaParcela || 'Ir para próxima parcela pendente'}</Text>
                     </TouchableOpacity>
                   </View>
-                )}
-              </View>
-              
-              {/* Alerta amarelo - saldo anterior pendente */}
-              {dadosPagamento?.tem_saldo_anterior && dadosPagamento.qtd_parcelas_anteriores_pendentes > 0 && (
-                <View style={S.pgAlertYellow}>
-                  <Text style={S.pgAlertYellowIcon}>⚠</Text>
-                  <View style={S.pgAlertYellowTexts}>
-                    <Text style={S.pgAlertYellowTitle}>{t.saldoAnterior || 'Saldo anterior de'} {dadosPagamento.qtd_parcelas_anteriores_pendentes} {t.parcela}(s)</Text>
-                    <Text style={S.pgAlertYellowDesc}>{t.valorPendente || 'Valor pendente:'} {fmt(dadosPagamento.saldo_parcelas_anteriores)}</Text>
-                  </View>
-                </View>
+                </>
               )}
               
-              {/* Alerta vermelho - bloqueio */}
-              {dadosPagamento && !dadosPagamento.permite_pagamento && dadosPagamento.mensagem_bloqueio && (
-                <View style={S.pgAlertRed}>
-                  <Text style={S.pgAlertRedIcon}>⛔</Text>
-                  <View style={S.pgAlertRedTexts}>
-                    <Text style={S.pgAlertRedTitle}>{t.pagamentoBloqueado || 'Pagamento bloqueado'}</Text>
-                    <Text style={S.pgAlertRedDesc}>{dadosPagamento.mensagem_bloqueio}</Text>
+              {/* CENÁRIO B: Parcela É a próxima - Mostra formulário (qtd_parcelas_anteriores_pendentes === 0) */}
+              {(!dadosPagamento || dadosPagamento.qtd_parcelas_anteriores_pendentes === 0) && (
+                <>
+                  {/* Aviso amarelo se tem saldo anterior parcial (parcelas com pagamento parcial) */}
+                  {dadosPagamento?.tem_saldo_anterior && dadosPagamento.saldo_parcelas_anteriores > 0 && (
+                    <View style={S.pgAlertYellow}>
+                      <Text style={S.pgAlertYellowIcon}>⚠</Text>
+                      <View style={S.pgAlertYellowTexts}>
+                        <Text style={S.pgAlertYellowTitle}>{t.saldoAnterior || 'Saldo anterior de'} parcela(s)</Text>
+                        <Text style={S.pgAlertYellowDesc}>{t.valorPendente || 'Valor pendente:'} {fmt(dadosPagamento.saldo_parcelas_anteriores)}</Text>
+                      </View>
+                      {/* Botão para incluir atrasos no pagamento */}
+                      <TouchableOpacity 
+                        style={S.pgAlertYellowBtn} 
+                        onPress={() => {
+                          const valorTotal = dadosPagamento.valor_total_sugerido || (dadosPagamento.valor_saldo_parcela + dadosPagamento.saldo_parcelas_anteriores);
+                          const valorFinal = usarCredito && dadosPagamento.credito_disponivel > 0 
+                            ? Math.max(0, valorTotal - dadosPagamento.credito_disponivel)
+                            : valorTotal;
+                          setValorPagamento(valorFinal.toFixed(2).replace('.', ','));
+                        }}
+                      >
+                        <Text style={S.pgAlertYellowBtnTx}>+ Incluir atraso ({fmt(dadosPagamento.saldo_parcelas_anteriores)})</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  
+                  {/* Input de valor */}
+                  <View style={S.pgInputBox}>
+                    <Text style={S.pgInputLabel}>{t.valorAPagar}</Text>
+                    <View style={S.pgInputRow}>
+                      <Text style={S.pgInputCurrency}>$</Text>
+                      <TextInput 
+                        style={S.pgInput} 
+                        value={valorPagamento} 
+                        onChangeText={setValorPagamento} 
+                        keyboardType="decimal-pad" 
+                        placeholder="0,00"
+                        editable={dadosPagamento?.permite_pagamento !== false}
+                      />
+                    </View>
+                    
+                    {/* Linha de crédito disponível */}
+                    {dadosPagamento?.tem_credito && dadosPagamento.credito_disponivel > 0 && (
+                      <View style={S.pgCreditoRow}>
+                        <Text style={S.pgCreditoIcon}>💳</Text>
+                        <Text style={S.pgCreditoText}>{t.credito} {fmt(dadosPagamento.credito_disponivel)}</Text>
+                        <TouchableOpacity 
+                          style={[S.pgCreditoBtn, usarCredito && S.pgCreditoBtnOn]} 
+                          onPress={() => {
+                            const novoUsarCredito = !usarCredito;
+                            setUsarCredito(novoUsarCredito);
+                            const valorBase = dadosPagamento.valor_saldo_parcela || parcelaPagamento.valor_parcela;
+                            if (novoUsarCredito) {
+                              const valorComCredito = Math.max(0, valorBase - dadosPagamento.credito_disponivel);
+                              setValorPagamento(valorComCredito.toFixed(2).replace('.', ','));
+                            } else {
+                              setValorPagamento(valorBase.toFixed(2).replace('.', ','));
+                            }
+                          }}
+                        >
+                          <View style={[S.pgCreditoCheck, usarCredito && S.pgCreditoCheckOn]}>
+                            {usarCredito && <Text style={S.pgCreditoCheckIcon}>✓</Text>}
+                          </View>
+                          <Text style={[S.pgCreditoBtnTx, usarCredito && S.pgCreditoBtnTxOn]}>{t.usar || 'Usar'}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
                   </View>
-                  <TouchableOpacity style={S.pgAlertRedBtn} onPress={irParaProximaParcela}>
-                    <Text style={S.pgAlertRedBtnTx}>{t.irProximaParcela || 'Ir para próxima parcela pendente'}</Text>
+                  
+                  {/* Alerta de bloqueio por status (PAGO/CANCELADO) */}
+                  {dadosPagamento && !dadosPagamento.permite_pagamento && dadosPagamento.mensagem_bloqueio && (
+                    <View style={S.pgAlertRed}>
+                      <Text style={S.pgAlertRedIcon}>⛔</Text>
+                      <View style={S.pgAlertRedTexts}>
+                        <Text style={S.pgAlertRedTitle}>{t.pagamentoBloqueado || 'Pagamento bloqueado'}</Text>
+                        <Text style={S.pgAlertRedDesc}>{dadosPagamento.mensagem_bloqueio}</Text>
+                      </View>
+                    </View>
+                  )}
+                  
+                  <View style={S.pgFormRow}>
+                    <Text style={S.pgFormLabel}>{t.forma}</Text>
+                    <TouchableOpacity style={S.pgFormSelect} onPress={() => setFormaPagamento(formaPagamento === 'DINHEIRO' ? 'TRANSFERENCIA' : 'DINHEIRO')}>
+                      <Text style={S.pgFormSelectTx}>{formaPagamento === 'DINHEIRO' ? 'Dinheiro' : 'Transferência'}</Text>
+                      <Text style={S.pgFormSelectChev}>▼</Text>
+                    </TouchableOpacity>
+                    <View style={[S.pgGpsStatus, gpsStatus === 'ok' ? S.pgGpsOk : S.pgGpsErro]}>
+                      <Text style={S.pgGpsIcon}>{gpsStatus === 'ok' ? '◉' : '○'}</Text>
+                      <Text style={[S.pgGpsTx, gpsStatus === 'ok' ? S.pgGpsTxOk : S.pgGpsTxErro]}>{gpsStatus === 'ok' ? t.gpsOk : t.gpsErro}</Text>
+                    </View>
+                  </View>
+                  
+                  <TouchableOpacity 
+                    style={[S.pgBtnPagar, (processando || (dadosPagamento && !dadosPagamento.permite_pagamento)) && S.pgBtnDisabled]} 
+                    onPress={registrarPagamento} 
+                    disabled={processando || (dadosPagamento && !dadosPagamento.permite_pagamento)}
+                  >
+                    {processando ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <>
+                        <Text style={S.pgBtnIcon}>✓</Text>
+                        <Text style={S.pgBtnTx}>{t.pagarBtn} {fmt(
+                          (parseFloat(valorPagamento.replace(',', '.')) || 0) + 
+                          (usarCredito && dadosPagamento?.credito_disponivel 
+                            ? Math.min(dadosPagamento.credito_disponivel, dadosPagamento.valor_saldo_parcela || parcelaPagamento?.valor_parcela || 0) 
+                            : 0)
+                        )}</Text>
+                      </>
+                    )}
                   </TouchableOpacity>
-                </View>
+                </>
               )}
-              
-              <View style={S.pgFormRow}>
-                <Text style={S.pgFormLabel}>{t.forma}</Text>
-                <TouchableOpacity style={S.pgFormSelect} onPress={() => setFormaPagamento(formaPagamento === 'DINHEIRO' ? 'TRANSFERENCIA' : 'DINHEIRO')}>
-                  <Text style={S.pgFormSelectTx}>{formaPagamento === 'DINHEIRO' ? 'Dinheiro' : 'Transferência'}</Text>
-                  <Text style={S.pgFormSelectChev}>▼</Text>
-                </TouchableOpacity>
-                <View style={[S.pgGpsStatus, gpsStatus === 'ok' ? S.pgGpsOk : S.pgGpsErro]}>
-                  <Text style={S.pgGpsIcon}>{gpsStatus === 'ok' ? '◉' : '○'}</Text>
-                  <Text style={[S.pgGpsTx, gpsStatus === 'ok' ? S.pgGpsTxOk : S.pgGpsTxErro]}>{gpsStatus === 'ok' ? t.gpsOk : t.gpsErro}</Text>
-                </View>
-              </View>
-              
-              <TouchableOpacity 
-                style={[S.pgBtnPagar, (processando || (dadosPagamento && !dadosPagamento.permite_pagamento)) && S.pgBtnDisabled]} 
-                onPress={registrarPagamento} 
-                disabled={processando || (dadosPagamento && !dadosPagamento.permite_pagamento)}
-              >
-                {processando ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <>
-                    <Text style={S.pgBtnIcon}>✓</Text>
-                    <Text style={S.pgBtnTx}>{t.pagarBtn} {fmt(
-                      (parseFloat(valorPagamento.replace(',', '.')) || 0) + 
-                      (usarCredito && dadosPagamento?.credito_disponivel 
-                        ? Math.min(dadosPagamento.credito_disponivel, dadosPagamento.valor_saldo_parcela || parcelaPagamento?.valor_parcela || 0) 
-                        : 0)
-                    )}</Text>
-                  </>
-                )}
-              </TouchableOpacity>
             </>
           )}
         </View></View>
@@ -1179,6 +1269,8 @@ const S = StyleSheet.create({
   pgAlertYellowTexts: { flex: 1 },
   pgAlertYellowTitle: { fontSize: 13, fontWeight: '600', color: '#92400E' },
   pgAlertYellowDesc: { fontSize: 12, color: '#B45309', marginTop: 2 },
+  pgAlertYellowBtn: { alignSelf: 'flex-start', marginTop: 8, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: '#F59E0B' },
+  pgAlertYellowBtnTx: { fontSize: 12, fontWeight: '600', color: '#fff' },
   // Alerta vermelho (bloqueio)
   pgAlertRed: { backgroundColor: '#FEF2F2', marginHorizontal: 16, marginTop: 12, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#FECACA' },
   pgAlertRedIcon: { fontSize: 16, marginRight: 10 },
