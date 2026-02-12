@@ -1,26 +1,29 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import NetInfo from '@react-native-community/netinfo';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  RefreshControl,
   ActivityIndicator,
   Alert,
-  Modal,
-  TextInput,
   Dimensions,
   Image,
-  Platform,
+  Modal,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
-import NetInfo from '@react-native-community/netinfo';
 import { useAuth } from '../contexts/AuthContext';
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
 import { LiquidacaoDiaria } from '../types';
 
 type Language = 'pt-BR' | 'es';
+
+interface ContaRota {
+  id: string;
+  saldo_atual: number;
+}
 
 interface DiaCalendario {
   data: Date;
@@ -71,6 +74,8 @@ const textos = {
     atencao: 'Atenção: Você não poderá mais adicionar movimentos nesta data após encerrar.',
     cancelar: 'Cancelar',
     confirmar: 'Confirmar',
+    caixaInicialAutomatico: 'Caixa inicial (automático):',
+    infoSaldoConta: 'O valor do caixa inicial é automaticamente o saldo atual da conta da rota.',
     selecioneData: 'Selecione uma Data',
     semLiquidacaoCalendario: 'Não há liquidação aberta para hoje. Selecione uma data no calendário abaixo para visualizar os dados.',
     legenda: 'Legenda:',
@@ -122,6 +127,8 @@ const textos = {
     atencao: 'Atención: No podrá agregar más movimientos después de cerrar.',
     cancelar: 'Cancelar',
     confirmar: 'Confirmar',
+    caixaInicialAutomatico: 'Caja inicial (automático):',
+    infoSaldoConta: 'El valor de la caja inicial es automáticamente el saldo actual de la cuenta de la ruta.',
     selecioneData: 'Seleccione una Fecha',
     semLiquidacaoCalendario: 'No hay liquidación abierta para hoy. Seleccione una fecha en el calendario a continuación.',
     legenda: 'Leyenda:',
@@ -147,7 +154,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const [fechando, setFechando] = useState(false);
   const [modalIniciarVisible, setModalIniciarVisible] = useState(false);
   const [modalFecharVisible, setModalFecharVisible] = useState(false);
-  const [caixaInicial, setCaixaInicial] = useState('');
+  const [contaRota, setContaRota] = useState<ContaRota | null>(null);
   const [salvando, setSalvando] = useState(false);
   
   // Estados do Calendário
@@ -232,6 +239,19 @@ export default function LiquidacaoScreen({ navigation }: any) {
         }
       } else {
         setLiquidacao(null);
+      }
+
+      // Buscar saldo da conta da rota (será usado como caixa inicial automático)
+      const { data: contaData } = await supabase
+        .from('contas')
+        .select('id, saldo_atual')
+        .eq('rota_id', vendedor.rota_id)
+        .eq('tipo_conta', 'ROTA')
+        .eq('status', 'ATIVA')
+        .maybeSingle();
+      
+      if (contaData) {
+        setContaRota(contaData);
       }
     } catch (error) {
       console.error('Erro ao carregar liquidações:', error);
@@ -481,19 +501,21 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const handleIniciarDia = async () => {
     if (!vendedor) return;
     
+    // CAIXA INICIAL AUTOMÁTICO = SALDO DA CONTA DA ROTA
+    const valorCaixaInicial = contaRota?.saldo_atual || 0;
+    
     setSalvando(true);
     try {
       const { data, error } = await supabase.rpc('fn_abrir_liquidacao_diaria', {
         p_vendedor_id: vendedor.id,
         p_rota_id: vendedor.rota_id,
-        p_caixa_inicial: parseFloat(caixaInicial.replace(',', '.')) || 0,
+        p_caixa_inicial: valorCaixaInicial,
         p_user_id: vendedor.user_id,
       });
 
       if (error) throw error;
 
       setModalIniciarVisible(false);
-      setCaixaInicial('');
       setMostrarCalendario(false);
       setModoVisualizacao(false);
       carregarLiquidacoes();
@@ -681,11 +703,19 @@ export default function LiquidacaoScreen({ navigation }: any) {
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
               <Text style={styles.modalTitle}>{t.iniciarDia}</Text>
-              <Text style={styles.modalLabel}>{t.caixa} {t.inicial}</Text>
-              <View style={styles.modalInputContainer}>
-                <Text style={styles.modalInputPrefix}>R$</Text>
-                <TextInput style={styles.modalInput} value={caixaInicial} onChangeText={setCaixaInicial} keyboardType="decimal-pad" placeholder="0,00" />
+              
+              {/* Info: caixa inicial automático */}
+              <View style={styles.caixaInicialInfo}>
+                <Text style={styles.caixaInicialInfoIcon}>ℹ️</Text>
+                <Text style={styles.caixaInicialInfoText}>{t.infoSaldoConta}</Text>
               </View>
+              
+              {/* Valor do caixa inicial (somente leitura) */}
+              <View style={styles.caixaInicialReadOnly}>
+                <Text style={styles.caixaInicialLabel}>{t.caixaInicialAutomatico}</Text>
+                <Text style={styles.caixaInicialValor}>{formatarMoeda(contaRota?.saldo_atual || 0)}</Text>
+              </View>
+              
               <View style={styles.modalButtons}>
                 <TouchableOpacity style={styles.modalButtonCancel} onPress={() => setModalIniciarVisible(false)}>
                   <Text style={styles.modalButtonCancelText}>{t.cancelar}</Text>
@@ -1001,10 +1031,17 @@ export default function LiquidacaoScreen({ navigation }: any) {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{t.iniciarDia}</Text>
-            <Text style={styles.modalLabel}>{t.caixa} {t.inicial}</Text>
-            <View style={styles.modalInputContainer}>
-              <Text style={styles.modalInputPrefix}>R$</Text>
-              <TextInput style={styles.modalInput} value={caixaInicial} onChangeText={setCaixaInicial} keyboardType="decimal-pad" placeholder="0,00" />
+            
+            {/* Info: caixa inicial automático */}
+            <View style={styles.caixaInicialInfo}>
+              <Text style={styles.caixaInicialInfoIcon}>ℹ️</Text>
+              <Text style={styles.caixaInicialInfoText}>{t.infoSaldoConta}</Text>
+            </View>
+            
+            {/* Valor do caixa inicial (somente leitura) */}
+            <View style={styles.caixaInicialReadOnly}>
+              <Text style={styles.caixaInicialLabel}>{t.caixaInicialAutomatico}</Text>
+              <Text style={styles.caixaInicialValor}>{formatarMoeda(contaRota?.saldo_atual || 0)}</Text>
             </View>
             <View style={styles.modalButtons}>
               <TouchableOpacity style={styles.modalButtonCancel} onPress={() => setModalIniciarVisible(false)}>
@@ -1242,4 +1279,11 @@ const styles = StyleSheet.create({
   modalButtonConfirm: { flex: 1, paddingVertical: 14, borderRadius: 8, backgroundColor: '#10B981', alignItems: 'center' },
   modalButtonAmber: { backgroundColor: '#D97706' },
   modalButtonConfirmText: { color: '#fff', fontWeight: '600' },
+  // Caixa Inicial Automático (somente leitura)
+  caixaInicialInfo: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#EFF6FF', padding: 12, borderRadius: 8, marginBottom: 16, borderWidth: 1, borderColor: '#BFDBFE' },
+  caixaInicialInfoIcon: { fontSize: 14, marginRight: 8 },
+  caixaInicialInfoText: { flex: 1, fontSize: 13, color: '#1E40AF', lineHeight: 18 },
+  caixaInicialReadOnly: { backgroundColor: '#F0FDF4', borderWidth: 2, borderColor: '#86EFAC', borderRadius: 12, padding: 20, marginBottom: 24, alignItems: 'center' },
+  caixaInicialLabel: { fontSize: 13, color: '#166534', marginBottom: 8 },
+  caixaInicialValor: { fontSize: 28, fontWeight: '700', color: '#10B981' },
 });

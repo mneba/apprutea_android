@@ -374,11 +374,30 @@ export default function ClientesScreen({ navigation, route }: any) {
       setRaw(allData);
       const ids = allData.map((r: any) => r.parcela_id).filter(Boolean);
       if (ids.length > 0) {
-        const { data: pags } = await supabase.from('pagamentos_parcelas').select('parcela_id, cliente_id, valor_pago_atual, valor_credito_gerado, valor_parcela, data_pagamento').in('parcela_id', ids);
+        // Busca pagamentos NÃO estornados
+        const { data: pags } = await supabase
+          .from('pagamentos_parcelas')
+          .select('parcela_id, cliente_id, valor_pago_atual, valor_credito_gerado, valor_parcela, data_pagamento')
+          .in('parcela_id', ids)
+          .eq('estornado', false);
+        
         const m = new Map<string, PagamentoParcela>();
         const s = new Set<string>();
-        (pags || []).forEach((p: any) => { m.set(p.parcela_id, p); if (p.valor_pago_atual >= p.valor_parcela) s.add(p.parcela_id); });
-        setPagMap(m); setPagasSet(s);
+        (pags || []).forEach((p: any) => { 
+          m.set(p.parcela_id, p); 
+          if (p.valor_pago_atual >= p.valor_parcela) s.add(p.parcela_id); 
+        });
+        
+        // Também adiciona ao pagasSet as parcelas que vieram como PAGO no allData
+        allData.forEach((r: any) => {
+          if (r.status_dia === 'PAGO' || r.status_parcela === 'PAGO') {
+            s.add(r.parcela_id);
+          }
+        });
+        
+        console.log('📋 PagasSet:', { total: s.size, ids: Array.from(s).slice(0, 5) });
+        setPagMap(m); 
+        setPagasSet(s);
       } else { setPagMap(new Map()); setPagasSet(new Set()); }
     } catch (e) { console.error('Erro loadLiq:', e); }
     finally { setLoading(false); setRefreshing(false); }
