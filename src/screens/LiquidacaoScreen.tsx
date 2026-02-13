@@ -178,7 +178,13 @@ export default function LiquidacaoScreen({ navigation }: any) {
   // Sincroniza liquidacaoId no contexto quando liquidação muda
   useEffect(() => {
     liqCtx.setLiquidacaoIdVisualizacao(liquidacao?.id || null);
-  }, [liquidacao?.id]);
+    // Sincronizar liquidação aberta no contexto compartilhado
+    if (liquidacao && (liquidacao.status === 'ABERTO' || liquidacao.status === 'ABERTA' || liquidacao.status === 'REABERTO')) {
+      liqCtx.setLiquidacaoAtual(liquidacao);
+    } else if (!modoVisualizacao) {
+      liqCtx.setLiquidacaoAtual(null);
+    }
+  }, [liquidacao?.id, liquidacao?.status]);
   
   // Dados do modo visualização (dias sem liquidação)
   const [dadosVisualizacao, setDadosVisualizacao] = useState<{
