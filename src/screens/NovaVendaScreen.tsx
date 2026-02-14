@@ -1,5 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -130,6 +130,7 @@ export default function NovaVendaScreen({ navigation }: any) {
   const [ddiTarget, setDdiTarget] = useState<'celular' | 'fixo'>('celular');
   const [showSegmentoModal, setShowSegmentoModal] = useState(false);
   const [segmentoBusca, setSegmentoBusca] = useState('');
+  const segmentoBuscaRef = useRef<TextInput>(null);
 
   // Loading geral
   const [submitting, setSubmitting] = useState(false);
@@ -423,12 +424,12 @@ export default function NovaVendaScreen({ navigation }: any) {
   // SUBMIT - CONFIRMAR VENDA
   // -----------------------------------------------------------
   const handleSubmit = async () => {
+    // ETAPA 1 - Validação local
     if (!isValido()) {
-      Alert.alert('Campos obrigatórios', 'Preencha todos os campos obrigatórios marcados com *.');
+      Alert.alert('Dados incompletos', 'Preencha todos os campos obrigatórios marcados com *.');
       return;
     }
 
-    // Validações condicionais
     if (frequencia === 'SEMANAL' && !diaSemanaPagamento) {
       Alert.alert('Campo obrigatório', 'Selecione o dia da semana para cobrança.');
       return;
@@ -442,11 +443,97 @@ export default function NovaVendaScreen({ navigation }: any) {
       return;
     }
 
+    // ETAPA 2 - Verificar IDs de contexto
+    const vendedorId = vendedor?.id;
+    const userId = vendedor?.user_id;
+    let empresaId = vendedor?.empresa_id || null;
+    let rotaId = vendedor?.rota_id || null;
+
+    if (!userId) {
+      Alert.alert('Erro de autenticação', 'Sessão expirada. Faça login novamente.');
+      return;
+    }
+
+    // Se não tem rota_id, buscar
+    if (!rotaId && vendedorId) {
+      try {
+        const { data: rotaData } = await supabase
+          .from('rotas')
+          .select('id, empresa_id')
+          .eq('vendedor_id', vendedorId)
+          .single();
+        if (rotaData) {
+          rotaId = rotaData.id;
+          empresaId = empresaId || rotaData.empresa_id;
+        }
+      } catch (err) {
+        console.error('Erro ao buscar rota:', err);
+      }
+    }
+
+    // Se não tem empresa_id, buscar da rota
+    if (!empresaId && rotaId) {
+      try {
+        const { data: rotaData } = await supabase
+          .from('rotas')
+          .select('empresa_id')
+          .eq('id', rotaId)
+          .single();
+        if (rotaData) {
+          empresaId = rotaData.empresa_id;
+        }
+      } catch (err) {
+        console.error('Erro ao buscar empresa:', err);
+      }
+    }
+
     setSubmitting(true);
     try {
+      // ETAPA 3 - GPS (timeout 5s, não bloqueia)
+      let latitude: number | null = null;
+      let longitude: number | null = null;
+
+      try {
+        const Location = require('expo-location');
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const loc = await Promise.race([
+            Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+            new Promise((_, reject) => setTimeout(() => reject('timeout'), 5000)),
+          ]) as any;
+          if (loc?.coords) {
+            latitude = loc.coords.latitude;
+            longitude = loc.coords.longitude;
+          }
+        }
+      } catch (gpsErr) {
+        // GPS falhou — não bloqueia a venda
+        console.log('GPS indisponível:', gpsErr);
+      }
+
+      // ETAPA 4 - Validar liquidação aberta (obrigatória)
+      const { data: liqData, error: liqError } = await supabase
+        .from('liquidacoes_diarias')
+        .select('id')
+        .eq('rota_id', rotaId)
+        .in('status', ['ABERTO', 'ABERTA'])
+        .order('data_abertura', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (liqError || !liqData) {
+        Alert.alert(
+          'Liquidação não encontrada',
+          'Nenhuma liquidação aberta encontrada. Abra uma liquidação antes de registrar vendas.'
+        );
+        setSubmitting(false);
+        return;
+      }
+
+      // ETAPA 5 - Montar e enviar parâmetros
       const params: Record<string, any> = {
         // Cliente
-        p_cliente_id: null, // null = cliente novo
+        p_cliente_id: null,
         p_cliente_nome: nome.trim(),
         p_cliente_documento: documento.trim() || null,
         p_cliente_telefone: telefoneCelular ? `${ddiCelular}${telefoneCelular}` : null,
@@ -471,18 +558,19 @@ export default function NovaVendaScreen({ navigation }: any) {
         // Microseguro
         p_microseguro_valor: microValor > 0 ? microValor : null,
         // Contexto
-        p_empresa_id: vendedor?.empresa_id || null,
-        p_rota_id: vendedor?.rota_id || null,
-        p_vendedor_id: vendedor?.id || null,
-        p_user_id: vendedor?.user_id || null,
-        p_latitude: null, // TODO: GPS
-        p_longitude: null,
+        p_empresa_id: empresaId,
+        p_rota_id: rotaId,
+        p_vendedor_id: vendedorId,
+        p_user_id: userId,
+        p_latitude: latitude,
+        p_longitude: longitude,
       };
 
       const { data, error } = await supabase.rpc('fn_nova_venda_completa', params);
 
       if (error) throw error;
 
+      // ETAPA 6 - Tratamento da resposta
       const res = Array.isArray(data) ? data[0] : data;
 
       if (!res?.sucesso) {
@@ -490,9 +578,8 @@ export default function NovaVendaScreen({ navigation }: any) {
         return;
       }
 
-      // Atualizar liquidação no contexto
+      // Sucesso — atualizar liquidação e mostrar resultado
       liqCtx.recarregarLiquidacao();
-
       setResultado(res);
       setShowResultado(true);
     } catch (err: any) {
@@ -1339,7 +1426,13 @@ export default function NovaVendaScreen({ navigation }: any) {
       {/* ================================================ */}
       {/* MODAL: Seleção de Segmento                       */}
       {/* ================================================ */}
-      <Modal visible={showSegmentoModal} transparent animationType="fade" onRequestClose={() => { setShowSegmentoModal(false); setSegmentoBusca(''); }}>
+      <Modal
+        visible={showSegmentoModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { setShowSegmentoModal(false); setSegmentoBusca(''); }}
+        onShow={() => setTimeout(() => segmentoBuscaRef.current?.focus(), 300)}
+      >
         <Pressable style={styles.pickerOverlay} onPress={() => { setShowSegmentoModal(false); setSegmentoBusca(''); }}>
           <View style={styles.pickerCard} onStartShouldSetResponder={() => true}>
             <View style={styles.pickerHeader}>
@@ -1352,6 +1445,7 @@ export default function NovaVendaScreen({ navigation }: any) {
             {/* Campo de busca */}
             <View style={styles.pickerSearchWrapper}>
               <TextInput
+                ref={segmentoBuscaRef}
                 style={styles.pickerSearchInput}
                 value={segmentoBusca}
                 onChangeText={setSegmentoBusca}
