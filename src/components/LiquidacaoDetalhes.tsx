@@ -3,7 +3,8 @@
 // Arquivo: src/components/LiquidacaoDetalhes.tsx
 // =====================================================
 
-import React, { useEffect, useState } from 'react';
+import * as Sharing from 'expo-sharing';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -11,11 +12,13 @@ import {
   Modal,
   Platform,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { captureRef } from 'react-native-view-shot';
 import { supabase } from '../services/supabase';
 
 const { width, height } = Dimensions.get('window');
@@ -24,7 +27,7 @@ const { width, height } = Dimensions.get('window');
 // HELPERS
 // =====================================================
 const fmt = (v: number | null | undefined) =>
-  (v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  '$ ' + (v ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const fmtData = (d: string | null) => {
   if (!d) return '-';
@@ -36,6 +39,54 @@ const fmtHora = (d: string | null) => {
   if (!d) return '';
   const dt = new Date(d);
   return dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+};
+
+// =====================================================
+// INTERNACIONALIZAÇÃO DOS MODAIS
+// =====================================================
+type Lang = 'pt-BR' | 'es';
+
+const i18n: Record<Lang, Record<string, string>> = {
+  'pt-BR': {
+    extratoDia: 'EXTRATO DO DIA', extratoLiq: 'EXTRATO LIQUIDAÇÃO DIÁRIA',
+    caixaInicial: 'CAIXA INICIAL', entradas: '(+) ENTRADAS', saidas: '(-) SAIDAS',
+    cobrancas: '(+) COBRANÇAS', caixaFinal: 'CAIXA FINAL',
+    movimentacoes: 'MOVIMENTAÇÕES', nenhuma: 'Nenhuma movimentação',
+    totalEntradas: 'TOTAL ENTRADAS', totalCobrancas: 'TOTAL COBRANÇAS',
+    totalSaidas: 'TOTAL SAIDAS', saldoFinal: 'SALDO FINAL',
+    fimExtrato: '*** FIM DO EXTRATO ***', compartilhar: 'Compartilhar Extrato',
+    pagamentos: 'Pagamentos', pagos: 'Pagos', naoPagos: 'Não Pagos',
+    recebido: 'Recebido', dinheiro: 'Dinheiro', transferencia: 'Transf/PIX',
+    parcela: 'Parcela', credito: 'Crédito', creditoUsado: 'Crédito usado',
+    creditoGerado: 'Crédito gerado', semPagamentos: 'Nenhum pagamento registrado',
+    vendas: 'Vendas do Dia', receitas: 'Receitas do Dia', despesas: 'Despesas do Dia',
+    total: 'Total', quantidade: 'Quantidade', semRegistros: 'Nenhum registro',
+    lancamentos: 'lançamentos', microseguro: 'Micro Seguro',
+    totalVendido: 'Total Vendido', contratos: 'Contratos',
+    semMicroseguro: 'Nenhuma venda de microseguro', emprestimo: 'Empréstimo',
+    vendedor: 'Vendedor', cliente: 'Cliente', valor: 'Valor', hora: 'Hora',
+    fechar: 'Fechar',
+  },
+  'es': {
+    extratoDia: 'EXTRACTO DEL DÍA', extratoLiq: 'EXTRACTO LIQUIDACIÓN DIARIA',
+    caixaInicial: 'CAJA INICIAL', entradas: '(+) ENTRADAS', saidas: '(-) SALIDAS',
+    cobrancas: '(+) COBROS', caixaFinal: 'CAJA FINAL',
+    movimentacoes: 'MOVIMIENTOS', nenhuma: 'Ningún movimiento',
+    totalEntradas: 'TOTAL ENTRADAS', totalCobrancas: 'TOTAL COBROS',
+    totalSaidas: 'TOTAL SALIDAS', saldoFinal: 'SALDO FINAL',
+    fimExtrato: '*** FIN DEL EXTRACTO ***', compartilhar: 'Compartir Extracto',
+    pagamentos: 'Pagos', pagos: 'Pagados', naoPagos: 'No Pagados',
+    recebido: 'Recibido', dinheiro: 'Efectivo', transferencia: 'Transf/PIX',
+    parcela: 'Cuota', credito: 'Crédito', creditoUsado: 'Crédito usado',
+    creditoGerado: 'Crédito generado', semPagamentos: 'Ningún pago registrado',
+    vendas: 'Ventas del Día', receitas: 'Ingresos del Día', despesas: 'Egresos del Día',
+    total: 'Total', quantidade: 'Cantidad', semRegistros: 'Ningún registro',
+    lancamentos: 'movimientos', microseguro: 'Micro Seguro',
+    totalVendido: 'Total Vendido', contratos: 'Contratos',
+    semMicroseguro: 'Ninguna venta de microseguro', emprestimo: 'Préstamo',
+    vendedor: 'Vendedor', cliente: 'Cliente', valor: 'Valor', hora: 'Hora',
+    fechar: 'Cerrar',
+  },
 };
 
 // =====================================================
@@ -64,17 +115,6 @@ const ModalHeader = ({
 );
 
 // =====================================================
-// 1. MODAL EXTRATO (CAIXA)
-// =====================================================
-interface ExtratoProps {
-  visible: boolean;
-  onClose: () => void;
-  liquidacaoId: string;
-  caixaInicial: number;
-  caixaFinal: number;
-}
-
-// =====================================================
 // 1. MODAL EXTRATO (CAIXA) - ESTILO CUPOM FISCAL
 // =====================================================
 interface ExtratoProps {
@@ -84,14 +124,15 @@ interface ExtratoProps {
   caixaInicial: number;
   caixaFinal: number;
   rotaNome?: string;
+  lang?: Lang;
 }
 
-export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, caixaFinal, rotaNome }: ExtratoProps) {
+export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, caixaFinal, rotaNome, lang = 'pt-BR' }: ExtratoProps) {
+  const t = i18n[lang];
   const [registros, setRegistros] = useState<any[]>([]);
   const [pagamentos, setPagamentos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const scrollRef = React.useRef<ScrollView>(null);
-  const extratoRef = React.useRef<View>(null);
+  const extratoViewRef = useRef<View>(null);
 
   useEffect(() => {
     if (visible && liquidacaoId) carregarExtrato();
@@ -138,53 +179,39 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const DIV = '- - - - - - - - - - - -';
   const DDIV = '= = = = = = = = = = = =';
 
-  const compartilharExtrato = async () => {
-    try {
-      let txt = '';
-      txt += `${rotaNome || 'Rota'}\n`;
-      txt += `EXTRATO LIQUIDAÇÃO DIÁRIA\n`;
-      txt += `= = = = = = = = = = = =\n`;
-      txt += `${dataHoje}  ${horaAgora}\n`;
-      txt += `- - - - - - - - - - - -\n`;
-      txt += `CAIXA INICIAL     ${fmt(caixaInicial)}\n`;
-      txt += `- - - - - - - - - - - -\n`;
-      txt += `(+) ENTRADAS      ${fmt(totalEntradas)}\n`;
-      txt += `(-) SAIDAS        ${fmt(totalSaidas)}\n`;
-      txt += `(+) COBRANÇAS     ${fmt(totalPagamentos)}\n`;
-      txt += `= = = = = = = = = = = =\n`;
-      txt += `CAIXA FINAL       ${fmt(caixaFinal)}\n`;
-      txt += `= = = = = = = = = = = =\n\n`;
+  const [compartilhando, setCompartilhando] = useState(false);
 
-      txt += `MOVIMENTAÇÕES (${registros.length})\n`;
-      txt += `- - - - - - - - - - - -\n`;
-      registros.forEach((item, idx) => {
-        const sinal = item.tipo === 'RECEBER' ? '+' : '-';
-        txt += `${String(idx + 1).padStart(2, '0')} ${formatarCategoria(item.categoria)}\n`;
-        txt += `   ${sinal}${fmt(parseFloat(item.valor))}  ${fmtHora(item.created_at)}\n`;
+  const compartilharExtrato = async () => {
+    if (!extratoViewRef.current || compartilhando) return;
+    setCompartilhando(true);
+    try {
+      const uri = await captureRef(extratoViewRef, {
+        format: 'png',
+        quality: 1,
+        result: 'tmpfile',
       });
 
-      if (pagamentos.length > 0) {
-        txt += `\nCOBRANÇAS (${pagamentos.length})\n`;
-        txt += `- - - - - - - - - - - -\n`;
-        pagamentos.forEach((p) => {
-          const nome = p.cliente?.nome || 'Cliente';
-          txt += `${nome}  +${fmt(parseFloat(p.valor_pago_total))}\n`;
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'image/png',
+          dialogTitle: `Extrato ${dataHoje}`,
         });
       }
-
-      txt += `= = = = = = = = = = = =\n`;
-      txt += `TOTAL ENTRADAS:  ${fmt(totalEntradas)}\n`;
-      txt += `TOTAL COBRANÇAS: ${fmt(totalPagamentos)}\n`;
-      txt += `TOTAL SAIDAS:    ${fmt(totalSaidas)}\n`;
-      txt += `- - - - - - - - - - - -\n`;
-      txt += `SALDO FINAL:     ${fmt(caixaFinal)}\n`;
-      txt += `= = = = = = = = = = = =\n`;
-      txt += `*** FIM DO EXTRATO ***\n`;
-
-      const { Share } = require('react-native');
-      await Share.share({ message: txt, title: `Extrato ${dataHoje}` });
     } catch (e) {
-      console.error('Erro compartilhar:', e);
+      console.error('Erro ao compartilhar:', e);
+      // Fallback: compartilha como texto
+      try {
+        let txt = `${rotaNome || 'Rota'} - Extrato ${dataHoje}\n`;
+        txt += `Caixa Inicial: ${fmt(caixaInicial)}\n`;
+        txt += `Entradas: ${fmt(totalEntradas)}\n`;
+        txt += `Cobranças: ${fmt(totalPagamentos)}\n`;
+        txt += `Saídas: ${fmt(totalSaidas)}\n`;
+        txt += `Caixa Final: ${fmt(caixaFinal)}`;
+        await Share.share({ message: txt });
+      } catch {}
+    } finally {
+      setCompartilhando(false);
     }
   };
 
@@ -193,42 +220,42 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
       <View style={cupom.container}>
         {/* Header */}
         <View style={cupom.header}>
-          <Text style={cupom.headerTxt}>EXTRATO DO DIA</Text>
+          <Text style={cupom.headerTxt}>{t.extratoDia}</Text>
           <TouchableOpacity onPress={onClose} style={cupom.closeBtn}>
             <Text style={cupom.closeTxt}>✕</Text>
           </TouchableOpacity>
         </View>
 
-        <ScrollView ref={scrollRef} style={cupom.scroll} showsVerticalScrollIndicator={false}>
-          <View ref={extratoRef} style={cupom.papel}>
+        <ScrollView style={cupom.scroll} showsVerticalScrollIndicator={false}>
+          <View ref={extratoViewRef} collapsable={false} style={cupom.papel}>
             {/* Cabeçalho */}
             <Text style={cupom.centro}>{rotaNome || 'Rota'}</Text>
-            <Text style={cupom.centroSub}>EXTRATO LIQUIDAÇÃO DIÁRIA</Text>
+            <Text style={cupom.centroSub}>{t.extratoLiq}</Text>
             <Text style={cupom.div2}>{DDIV}</Text>
             <Text style={cupom.centro}>{dataHoje}  {horaAgora}</Text>
             <Text style={cupom.div1}>{DIV}</Text>
 
             {/* Resumo */}
             <View style={cupom.linha}>
-              <Text style={cupom.txt}>CAIXA INICIAL</Text>
+              <Text style={cupom.txt}>{t.caixaInicial}</Text>
               <Text style={cupom.txt}>{fmt(caixaInicial)}</Text>
             </View>
             <Text style={cupom.div1}>{DIV}</Text>
             <View style={cupom.linha}>
-              <Text style={cupom.txtVerde}>(+) ENTRADAS</Text>
+              <Text style={cupom.txtVerde}>{t.entradas}</Text>
               <Text style={cupom.txtVerde}>{fmt(totalEntradas)}</Text>
             </View>
             <View style={cupom.linha}>
-              <Text style={cupom.txtVerde}>(+) COBRANÇAS</Text>
+              <Text style={cupom.txtVerde}>{t.cobrancas}</Text>
               <Text style={cupom.txtVerde}>{fmt(totalPagamentos)}</Text>
             </View>
             <View style={cupom.linha}>
-              <Text style={cupom.txtVerm}>(-) SAIDAS</Text>
+              <Text style={cupom.txtVerm}>{t.saidas}</Text>
               <Text style={cupom.txtVerm}>{fmt(totalSaidas)}</Text>
             </View>
             <Text style={cupom.div2}>{DDIV}</Text>
             <View style={cupom.linha}>
-              <Text style={cupom.txtBold}>CAIXA FINAL</Text>
+              <Text style={cupom.txtBold}>{t.caixaFinal}</Text>
               <Text style={cupom.txtBold}>{fmt(caixaFinal)}</Text>
             </View>
             <Text style={cupom.div2}>{DDIV}</Text>
@@ -238,11 +265,11 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
             ) : (
               <>
                 {/* Movimentações */}
-                <Text style={[cupom.centro, { marginTop: 10 }]}>MOVIMENTAÇÕES ({registros.length})</Text>
+                <Text style={[cupom.centro, { marginTop: 10 }]}>{t.movimentacoes} ({registros.length})</Text>
                 <Text style={cupom.div1}>{DIV}</Text>
 
                 {registros.length === 0 ? (
-                  <Text style={cupom.centro}>Nenhuma movimentação</Text>
+                  <Text style={cupom.centro}>{t.nenhuma}</Text>
                 ) : (
                   registros.map((item, idx) => {
                     const isEntrada = item.tipo === 'RECEBER';
@@ -267,14 +294,14 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                   })
                 )}
 
-                {/* Cobranças (Pagamentos de Parcelas) */}
+                {/* Cobranças */}
                 {pagamentos.length > 0 && (
                   <>
                     <Text style={cupom.div1}>{DIV}</Text>
-                    <Text style={[cupom.centro, { marginTop: 4 }]}>COBRANÇAS ({pagamentos.length})</Text>
+                    <Text style={[cupom.centro, { marginTop: 4 }]}>{t.cobrancas.replace('(+) ', '')} ({pagamentos.length})</Text>
                     <Text style={cupom.div1}>{DIV}</Text>
-                    {pagamentos.map((p, idx) => {
-                      const nome = p.cliente?.nome || 'Cliente';
+                    {pagamentos.map((p) => {
+                      const nome = p.cliente?.nome || t.cliente;
                       return (
                         <View key={p.id} style={cupom.linha}>
                           <Text style={cupom.txtSmall} numberOfLines={1}>{nome}</Text>
@@ -288,24 +315,24 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                 {/* Totais finais */}
                 <Text style={cupom.div2}>{DDIV}</Text>
                 <View style={cupom.linha}>
-                  <Text style={cupom.txt}>TOTAL ENTRADAS</Text>
+                  <Text style={cupom.txt}>{t.totalEntradas}</Text>
                   <Text style={cupom.txtVerde}>{fmt(totalEntradas)}</Text>
                 </View>
                 <View style={cupom.linha}>
-                  <Text style={cupom.txt}>TOTAL COBRANÇAS</Text>
+                  <Text style={cupom.txt}>{t.totalCobrancas}</Text>
                   <Text style={cupom.txtVerde}>{fmt(totalPagamentos)}</Text>
                 </View>
                 <View style={cupom.linha}>
-                  <Text style={cupom.txt}>TOTAL SAIDAS</Text>
+                  <Text style={cupom.txt}>{t.totalSaidas}</Text>
                   <Text style={cupom.txtVerm}>{fmt(totalSaidas)}</Text>
                 </View>
                 <Text style={cupom.div1}>{DIV}</Text>
                 <View style={cupom.linha}>
-                  <Text style={cupom.txtBold}>SALDO FINAL</Text>
+                  <Text style={cupom.txtBold}>{t.saldoFinal}</Text>
                   <Text style={cupom.txtBold}>{fmt(caixaFinal)}</Text>
                 </View>
                 <Text style={cupom.div2}>{DDIV}</Text>
-                <Text style={[cupom.centro, { marginTop: 8, fontSize: 10 }]}>*** FIM DO EXTRATO ***</Text>
+                <Text style={[cupom.centro, { marginTop: 8, fontSize: 10 }]}>{t.fimExtrato}</Text>
               </>
             )}
             <View style={{ height: 24 }} />
@@ -314,8 +341,12 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
 
         {/* Botão Compartilhar */}
         <View style={cupom.shareBar}>
-          <TouchableOpacity style={cupom.shareBtn} onPress={compartilharExtrato}>
-            <Text style={cupom.shareTxt}>📤 Compartilhar Extrato</Text>
+          <TouchableOpacity style={cupom.shareBtn} onPress={compartilharExtrato} disabled={compartilhando}>
+            {compartilhando ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={cupom.shareTxt}>📤 {t.compartilhar}</Text>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -367,9 +398,11 @@ interface PagamentosProps {
   totalPagos: number;
   totalNaoPagos: number;
   valorRecebido: number;
+  lang?: Lang;
 }
 
-export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, totalNaoPagos, valorRecebido }: PagamentosProps) {
+export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, totalNaoPagos, valorRecebido, lang = 'pt-BR' }: PagamentosProps) {
+  const t = i18n[lang];
   const [registros, setRegistros] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -424,26 +457,26 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
         </View>
         <View style={dStyles.pagItemBottom}>
           <View style={dStyles.pagDetail}>
-            <Text style={dStyles.pagDetailLabel}>Parcela</Text>
+            <Text style={dStyles.pagDetailLabel}>{t.parcela}</Text>
             <Text style={dStyles.pagDetailValue}>{item.numero_parcela}/{item.emprestimo?.numero_parcelas || '?'}</Text>
           </View>
           <View style={dStyles.pagDetail}>
-            <Text style={dStyles.pagDetailLabel}>Valor</Text>
+            <Text style={dStyles.pagDetailLabel}>{t.valor}</Text>
             <Text style={[dStyles.pagDetailValue, { color: '#059669', fontWeight: '700' }]}>{fmt(parseFloat(item.valor_pago_total || 0))}</Text>
           </View>
           <View style={dStyles.pagDetail}>
-            <Text style={dStyles.pagDetailLabel}>Forma</Text>
+            <Text style={dStyles.pagDetailLabel}>{lang === 'es' ? 'Forma' : 'Forma'}</Text>
             <Text style={dStyles.pagDetailValue}>{item.forma_pagamento === 'DINHEIRO' ? '💵' : '📲'} {item.forma_pagamento}</Text>
           </View>
           <View style={dStyles.pagDetail}>
-            <Text style={dStyles.pagDetailLabel}>Hora</Text>
+            <Text style={dStyles.pagDetailLabel}>{t.hora}</Text>
             <Text style={dStyles.pagDetailValue}>{fmtHora(item.created_at)}</Text>
           </View>
         </View>
         {(item.valor_credito_usado > 0 || item.valor_credito_gerado > 0) && (
           <View style={dStyles.pagCredito}>
-            {item.valor_credito_usado > 0 && <Text style={dStyles.pagCreditoText}>Crédito usado: {fmt(item.valor_credito_usado)}</Text>}
-            {item.valor_credito_gerado > 0 && <Text style={dStyles.pagCreditoText}>Crédito gerado: {fmt(item.valor_credito_gerado)}</Text>}
+            {item.valor_credito_usado > 0 && <Text style={dStyles.pagCreditoText}>{t.creditoUsado}: {fmt(item.valor_credito_usado)}</Text>}
+            {item.valor_credito_gerado > 0 && <Text style={dStyles.pagCreditoText}>{t.creditoGerado}: {fmt(item.valor_credito_gerado)}</Text>}
           </View>
         )}
       </View>
@@ -453,23 +486,23 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View style={dStyles.container}>
-        <ModalHeader titulo="Pagamentos" icone="💰" cor="#EF4444" onClose={onClose} />
+        <ModalHeader titulo={t.pagamentos} icone="💰" cor="#EF4444" onClose={onClose} />
 
         {/* Resumo */}
         <View style={dStyles.pagResumo}>
           <View style={dStyles.pagResumoItem}>
             <Text style={[dStyles.pagResumoValor, { color: '#059669' }]}>{totalPagos}</Text>
-            <Text style={dStyles.pagResumoLabel}>Pagos</Text>
+            <Text style={dStyles.pagResumoLabel}>{t.pagos}</Text>
           </View>
           <View style={dStyles.pagResumoDivider} />
           <View style={dStyles.pagResumoItem}>
             <Text style={[dStyles.pagResumoValor, { color: '#DC2626' }]}>{totalNaoPagos}</Text>
-            <Text style={dStyles.pagResumoLabel}>Não Pagos</Text>
+            <Text style={dStyles.pagResumoLabel}>{t.naoPagos}</Text>
           </View>
           <View style={dStyles.pagResumoDivider} />
           <View style={dStyles.pagResumoItem}>
             <Text style={dStyles.pagResumoValor}>{fmt(valorRecebido)}</Text>
-            <Text style={dStyles.pagResumoLabel}>Recebido</Text>
+            <Text style={dStyles.pagResumoLabel}>{t.recebido}</Text>
           </View>
         </View>
 
@@ -477,12 +510,12 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
         <View style={dStyles.pagSubtotais}>
           <View style={dStyles.pagSubItem}>
             <Text style={dStyles.pagSubIcon}>💵</Text>
-            <Text style={dStyles.pagSubLabel}>Dinheiro</Text>
+            <Text style={dStyles.pagSubLabel}>{t.dinheiro}</Text>
             <Text style={dStyles.pagSubValue}>{fmt(totalDinheiro)}</Text>
           </View>
           <View style={dStyles.pagSubItem}>
             <Text style={dStyles.pagSubIcon}>📲</Text>
-            <Text style={dStyles.pagSubLabel}>Transf/PIX</Text>
+            <Text style={dStyles.pagSubLabel}>{t.transferencia}</Text>
             <Text style={dStyles.pagSubValue}>{fmt(totalTransf)}</Text>
           </View>
         </View>
@@ -492,7 +525,7 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
         ) : registros.length === 0 ? (
           <View style={dStyles.emptyState}>
             <Text style={dStyles.emptyIcon}>💳</Text>
-            <Text style={dStyles.emptyText}>Nenhum pagamento registrado</Text>
+            <Text style={dStyles.emptyText}>{t.semPagamentos}</Text>
           </View>
         ) : (
           <FlatList
@@ -520,19 +553,21 @@ interface FinanceiroProps {
   tipo: TipoFinanceiro;
   totalValor: number;
   totalQtd: number;
+  lang?: Lang;
 }
 
-const configFinanceiro: Record<TipoFinanceiro, { titulo: string; icone: string; cor: string; filtro: any }> = {
-  VENDAS: { titulo: 'Vendas / Empréstimos', icone: '💼', cor: '#10B981', filtro: { tipo: 'PAGAR', categoria: 'EMPRESTIMO' } },
-  RECEITAS: { titulo: 'Receitas', icone: '📥', cor: '#3B82F6', filtro: { tipo: 'RECEBER' } },
-  DESPESAS: { titulo: 'Despesas', icone: '📤', cor: '#EF4444', filtro: { tipo: 'PAGAR' } },
-};
+const getConfigFinanceiro = (lang: Lang): Record<TipoFinanceiro, { titulo: string; icone: string; cor: string; filtro: any }> => ({
+  VENDAS: { titulo: lang === 'es' ? 'Ventas / Préstamos' : 'Vendas / Empréstimos', icone: '💼', cor: '#10B981', filtro: { tipo: 'PAGAR', categoria: 'EMPRESTIMO' } },
+  RECEITAS: { titulo: lang === 'es' ? 'Ingresos' : 'Receitas', icone: '📥', cor: '#3B82F6', filtro: { tipo: 'RECEBER' } },
+  DESPESAS: { titulo: lang === 'es' ? 'Egresos' : 'Despesas', icone: '📤', cor: '#EF4444', filtro: { tipo: 'PAGAR' } },
+});
 
-export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalValor, totalQtd }: FinanceiroProps) {
+export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalValor, totalQtd, lang = 'pt-BR' }: FinanceiroProps) {
+  const t = i18n[lang];
   const [registros, setRegistros] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const config = configFinanceiro[tipo];
+  const config = getConfigFinanceiro(lang)[tipo];
 
   useEffect(() => {
     if (visible && liquidacaoId) carregarRegistros();
@@ -592,11 +627,11 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
         {/* Resumo */}
         <View style={[dStyles.finResumo, { borderLeftColor: config.cor }]}>
           <View>
-            <Text style={dStyles.finResumoLabel}>Total</Text>
+            <Text style={dStyles.finResumoLabel}>{t.total}</Text>
             <Text style={[dStyles.finResumoValor, { color: config.cor }]}>{fmt(totalValor)}</Text>
           </View>
           <View style={dStyles.finResumoBadge}>
-            <Text style={dStyles.finResumoBadgeText}>{totalQtd} {tipo === 'VENDAS' ? 'emp.' : 'lanç.'}</Text>
+            <Text style={dStyles.finResumoBadgeText}>{totalQtd} {tipo === 'VENDAS' ? (lang === 'es' ? 'prést.' : 'emp.') : t.lancamentos}</Text>
           </View>
         </View>
 
@@ -605,7 +640,7 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
         ) : registros.length === 0 ? (
           <View style={dStyles.emptyState}>
             <Text style={dStyles.emptyIcon}>{config.icone}</Text>
-            <Text style={dStyles.emptyText}>Nenhum registro encontrado</Text>
+            <Text style={dStyles.emptyText}>{t.semRegistros}</Text>
           </View>
         ) : (
           <FlatList
@@ -630,9 +665,11 @@ interface MicroseguroProps {
   liquidacaoId: string;
   totalValor: number;
   totalQtd: number;
+  lang?: Lang;
 }
 
-export function ModalMicroseguro({ visible, onClose, liquidacaoId, totalValor, totalQtd }: MicroseguroProps) {
+export function ModalMicroseguro({ visible, onClose, liquidacaoId, totalValor, totalQtd, lang = 'pt-BR' }: MicroseguroProps) {
+  const t = i18n[lang];
   const [vendas, setVendas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -683,10 +720,10 @@ export function ModalMicroseguro({ visible, onClose, liquidacaoId, totalValor, t
             {clienteCod ? <Text style={dStyles.microItemCod}>#{clienteCod}</Text> : null}
             {item.emprestimo && (
               <Text style={dStyles.microItemEmprestimo}>
-                Empréstimo: {fmt(item.emprestimo.valor_principal)} ({item.emprestimo.numero_parcelas}x)
+                {t.emprestimo}: {fmt(item.emprestimo.valor_principal)} ({item.emprestimo.numero_parcelas}x)
               </Text>
             )}
-            {vendedorNome ? <Text style={dStyles.microItemVendedor}>Vendedor: {vendedorNome}</Text> : null}
+            {vendedorNome ? <Text style={dStyles.microItemVendedor}>{t.vendedor}: {vendedorNome}</Text> : null}
           </View>
           <View style={dStyles.microItemRight}>
             <Text style={dStyles.microItemValor}>{fmt(parseFloat(item.valor))}</Text>
@@ -700,18 +737,18 @@ export function ModalMicroseguro({ visible, onClose, liquidacaoId, totalValor, t
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View style={dStyles.container}>
-        <ModalHeader titulo="Microseguro" icone="🛡️" cor="#D97706" onClose={onClose} />
+        <ModalHeader titulo={t.microseguro} icone="🛡️" cor="#D97706" onClose={onClose} />
 
         {/* Resumo */}
         <View style={dStyles.microResumo}>
           <View style={dStyles.microResumoItem}>
             <Text style={dStyles.microResumoValor}>{fmt(totalValor)}</Text>
-            <Text style={dStyles.microResumoLabel}>Total Vendido</Text>
+            <Text style={dStyles.microResumoLabel}>{t.totalVendido}</Text>
           </View>
           <View style={dStyles.microResumoDivider} />
           <View style={dStyles.microResumoItem}>
             <Text style={dStyles.microResumoValor}>{totalQtd}</Text>
-            <Text style={dStyles.microResumoLabel}>Contratos</Text>
+            <Text style={dStyles.microResumoLabel}>{t.contratos}</Text>
           </View>
         </View>
 
@@ -720,7 +757,7 @@ export function ModalMicroseguro({ visible, onClose, liquidacaoId, totalValor, t
         ) : vendas.length === 0 ? (
           <View style={dStyles.emptyState}>
             <Text style={dStyles.emptyIcon}>🛡️</Text>
-            <Text style={dStyles.emptyText}>Nenhum microseguro vendido</Text>
+            <Text style={dStyles.emptyText}>{t.semMicroseguro}</Text>
           </View>
         ) : (
           <FlatList

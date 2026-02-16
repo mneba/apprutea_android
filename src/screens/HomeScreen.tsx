@@ -27,11 +27,8 @@ interface LiquidacaoDiaria {
   clientes_renegociados: number; clientes_cancelados: number;
   pagamentos_pagos: number; pagamentos_nao_pagos: number;
   total_despesas_dia: number; qtd_despesas_dia: number;
-  total_receitas_dia: number; qtd_receitas_dia: number;
   total_emprestado_dia: number; qtd_emprestimos_dia: number;
-  total_juros_dia: number;
   total_microseguro_dia: number; qtd_microseguros_dia: number;
-  qtd_estornos_dia: number; valor_estornos_dia: number;
   observacoes: string | null;
 }
 
@@ -283,7 +280,7 @@ export default function HomeScreen({ navigation }: any) {
     try {
       const { data, error } = await supabase.rpc('fn_abrir_liquidacao_diaria', {
         p_vendedor_id: vendedor.id, p_rota_id: vendedor.rota_id,
-        p_caixa_inicial: valorCaixa, p_user_id: vendedor.user_id || null,
+        p_caixa_inicial: valorCaixa, p_user_id: null,
         p_latitude: null, p_longitude: null, p_precisao_gps: null,
       });
       if (error) throw error;
@@ -306,7 +303,7 @@ export default function HomeScreen({ navigation }: any) {
       });
       if (error) throw error;
       if (data?.[0]?.sucesso) {
-        Alert.alert('Sucesso', `Dia encerrado!\nRecebido: R$ ${data[0].valor_recebido_dia?.toFixed(2) || '0,00'}`);
+        Alert.alert('Sucesso', `Dia encerrado!\nRecebido: $ ${data[0].valor_recebido_dia?.toFixed(2) || '0,00'}`);
         setModalFecharVisible(false); setObservacoesFechamento(''); carregarDados();
       } else { Alert.alert('Erro', data?.[0]?.mensagem || 'Erro ao fechar'); }
     } catch (e: any) { Alert.alert('Erro', e.message); }
@@ -315,7 +312,7 @@ export default function HomeScreen({ navigation }: any) {
 
   // ==================== FORMATADORES ====================
   const formatarMoeda = (v: number | null | undefined) => 
-    (v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    '$ ' + (v ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   
   const formatarData = (d: string | Date) => 
     (typeof d === 'string' ? new Date(d) : d).toLocaleDateString('pt-BR');
@@ -324,7 +321,8 @@ export default function HomeScreen({ navigation }: any) {
     (liquidacao.clientes_iniciais||0)+(liquidacao.clientes_novos||0)+(liquidacao.clientes_renovados||0)+
     (liquidacao.clientes_renegociados||0)-(liquidacao.clientes_cancelados||0) : 0;
   
-  const calcularCaixaAtual = () => liquidacao?.caixa_final ?? 0;
+  const calcularCaixaAtual = () => liquidacao ?
+    (liquidacao.caixa_inicial||0)+(liquidacao.valor_recebido_dia||0)-(liquidacao.total_despesas_dia||0)-(liquidacao.total_emprestado_dia||0) : 0;
   
   const calcularEfetividade = () => {
     if (!liquidacao) return '0%';
@@ -563,7 +561,8 @@ export default function HomeScreen({ navigation }: any) {
           {/* Botão Ver Outras Datas */}
           <TouchableOpacity 
             style={styles.verOutrasDatasBtn} 
-            onPress={handleAbrirCalendario}
+              onPress={() => alert('TESTE')}
+            /*onPress={handleAbrirCalendario}*/
             activeOpacity={0.7}
           >
             <Text style={styles.verOutrasDatasText}>{t.verOutrasDatas}</Text>
@@ -649,8 +648,8 @@ export default function HomeScreen({ navigation }: any) {
             </View>
             <View style={[styles.operacaoCard, styles.operacaoCardReceitas]}>
               <Text style={styles.operacaoTitulo}>{t.receitas}</Text>
-              <Text style={styles.operacaoValor}>{formatarMoeda(liquidacao?.total_receitas_dia)}</Text>
-              <Text style={styles.operacaoSubtexto}>{t.qtdEmprestimos} {liquidacao?.qtd_receitas_dia || 0}</Text>
+              <Text style={styles.operacaoValor}>{formatarMoeda(liquidacao?.valor_recebido_dia)}</Text>
+              <Text style={styles.operacaoSubtexto}>{t.qtdEmprestimos} {liquidacao?.pagamentos_pagos || 0}</Text>
             </View>
             <View style={[styles.operacaoCard, styles.operacaoCardDespesas]}>
               <Text style={styles.operacaoTitulo}>{t.despesas}</Text>
@@ -693,7 +692,7 @@ export default function HomeScreen({ navigation }: any) {
       {fabExpanded && (
         <TouchableOpacity style={styles.fabOverlay} activeOpacity={1} onPress={() => setFabExpanded(false)}>
           <View style={styles.fabMenu}>
-            <TouchableOpacity style={styles.fabMenuItem} onPress={() => { setFabExpanded(false); navigation.navigate('NovaVenda'); }}>
+            <TouchableOpacity style={styles.fabMenuItem} onPress={() => { setFabExpanded(false); navigation.navigate('NovoEmprestimo'); }}>
               <View style={[styles.fabMenuIcon, { backgroundColor: '#10B981' }]}>
                 <Text style={styles.fabMenuIconText}>👤+</Text>
               </View>
@@ -702,7 +701,7 @@ export default function HomeScreen({ navigation }: any) {
                 <Text style={styles.fabMenuSubtitle}>{t.adicionarCliente}</Text>
               </View>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.fabMenuItem} onPress={() => { setFabExpanded(false); navigation.navigate('NovaMovimentacao'); }}>
+            <TouchableOpacity style={styles.fabMenuItem} onPress={() => { setFabExpanded(false); navigation.navigate('Despesas'); }}>
               <View style={[styles.fabMenuIcon, { backgroundColor: '#F59E0B' }]}>
                 <Text style={styles.fabMenuIconText}>💰</Text>
               </View>

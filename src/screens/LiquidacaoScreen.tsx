@@ -19,7 +19,6 @@ import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
 import { LiquidacaoDiaria } from '../types';
 
-type Language = 'pt-BR' | 'es';
 
 interface ContaRota {
   id: string;
@@ -148,11 +147,11 @@ const textos = {
 export default function LiquidacaoScreen({ navigation }: any) {
   const { vendedor } = useAuth();
   const liqCtx = useLiquidacaoContext();
+  const { language, setLanguage } = liqCtx;
   const [liquidacao, setLiquidacao] = useState<LiquidacaoDiaria | null>(null);
   const [todasLiquidacoes, setTodasLiquidacoes] = useState<LiquidacaoDiaria[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [language, setLanguage] = useState<Language>('pt-BR');
   const [fechando, setFechando] = useState(false);
   const [modalIniciarVisible, setModalIniciarVisible] = useState(false);
   const [modalFecharVisible, setModalFecharVisible] = useState(false);
@@ -487,14 +486,13 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
   // ==================== FORMATADORES ====================
   const formatarMoeda = (valor: number | null) => {
-    if (valor === null || valor === undefined) return 'R$ 0,00';
-    return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    if (valor === null || valor === undefined) return '$ 0,00';
+    return '$ ' + valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
   const formatarMoedaCompacta = (valor: number | null) => {
-    if (valor === null || valor === undefined) return 'R$0';
-    if (valor >= 1000) return `R$${(valor / 1000).toFixed(1)}k`;
-    return `R$${valor.toFixed(0)}`;
+    if (valor === null || valor === undefined) return '$ 0';
+    return '$ ' + valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
   const formatarData = (data: string | Date | null) => {
@@ -813,7 +811,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
             <Text style={styles.saudacao}>{getSaudacao()}, {vendedor?.nome?.split(' ')[0] || 'Vendedor'}</Text>
 
             {/* Card Status Liquidação (compacto) */}
-            <View style={[styles.card, styles.cardStatus]}>
+            <View style={[styles.card, styles.cardStatus, { elevation: 0, shadowOpacity: 0, borderWidth: 0 }]}>
               <View style={styles.statusRow}>
                 <Text style={styles.statusIcon}>{isAberto ? '🔓' : isReaberto ? '🔄' : '🔒'}</Text>
                 <Text style={styles.dataText}>{formatarData(liquidacao.data_abertura)}</Text>
@@ -900,17 +898,17 @@ export default function LiquidacaoScreen({ navigation }: any) {
             <View style={styles.operacoesRow}>
               <TouchableOpacity style={[styles.operacaoCard, styles.operacaoVendas]} onPress={() => { setTipoFinanceiro('VENDAS'); setModalFinanceiroVisible(true); }} activeOpacity={0.7}>
                 <Text style={styles.opLabelVerde}>{t.vendas}</Text>
-                <Text style={styles.opValorVerde}>{formatarMoedaCompacta(liquidacao.total_emprestado_dia)}</Text>
+                <Text style={styles.opValorVerde} numberOfLines={1} adjustsFontSizeToFit>{formatarMoedaCompacta(liquidacao.total_emprestado_dia)}</Text>
                 <Text style={styles.opDetalheVerde}>{liquidacao.qtd_emprestimos_dia || 0} emp.</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.operacaoCard, styles.operacaoReceitas]} onPress={() => { setTipoFinanceiro('RECEITAS'); setModalFinanceiroVisible(true); }} activeOpacity={0.7}>
                 <Text style={styles.opLabelAzul}>{t.receitas}</Text>
-                <Text style={styles.opValorAzul}>{formatarMoedaCompacta(liquidacao.total_receitas_dia)}</Text>
+                <Text style={styles.opValorAzul} numberOfLines={1} adjustsFontSizeToFit>{formatarMoedaCompacta(liquidacao.total_receitas_dia)}</Text>
                 <Text style={styles.opDetalheAzul}>{liquidacao.qtd_receitas_dia || 0} lanç.</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.operacaoCard, styles.operacaoDespesas]} onPress={() => { setTipoFinanceiro('DESPESAS'); setModalFinanceiroVisible(true); }} activeOpacity={0.7}>
                 <Text style={styles.opLabelVermelho}>{t.despesas}</Text>
-                <Text style={styles.opValorVermelho}>{formatarMoedaCompacta(liquidacao.total_despesas_dia)}</Text>
+                <Text style={styles.opValorVermelho} numberOfLines={1} adjustsFontSizeToFit>{formatarMoedaCompacta(liquidacao.total_despesas_dia)}</Text>
                 <Text style={styles.opDetalheVermelho}>{liquidacao.qtd_despesas_dia || 0} desp.</Text>
               </TouchableOpacity>
             </View>
@@ -1003,7 +1001,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
                   style={styles.verClientesBtn}
                   onPress={() => navigation.navigate('Clientes', { 
                     dataVisualizacao: dataVisualizacao?.toISOString(),
-                    modoVisualizacao: true 
+                    modoVisualizacao: true,
+                    language: language
                   })}
                 >
                   <Text style={styles.verClientesBtnIcon}>👥</Text>
@@ -1101,6 +1100,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
             caixaInicial={liquidacao.caixa_inicial}
             caixaFinal={liquidacao.caixa_final}
             rotaNome={contaRota?.nome || 'Rota'}
+            lang={language}
           />
           <ModalPagamentos
             visible={modalPagamentosVisible}
@@ -1109,6 +1109,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
             totalPagos={liquidacao.pagamentos_pagos || 0}
             totalNaoPagos={liquidacao.pagamentos_nao_pagos || 0}
             valorRecebido={liquidacao.valor_recebido_dia || 0}
+            lang={language}
           />
           <ModalFinanceiro
             visible={modalFinanceiroVisible}
@@ -1125,6 +1126,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
               tipoFinanceiro === 'RECEITAS' ? (liquidacao.qtd_receitas_dia || 0) :
               (liquidacao.qtd_despesas_dia || 0)
             }
+            lang={language}
           />
           <ModalMicroseguro
             visible={modalMicroseguroVisible}
@@ -1132,6 +1134,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
             liquidacaoId={liquidacao.id}
             totalValor={liquidacao.total_microseguro_dia || 0}
             totalQtd={liquidacao.qtd_microseguros_dia || 0}
+            lang={language}
           />
         </>
       )}
@@ -1308,13 +1311,13 @@ const styles = StyleSheet.create({
   operacaoReceitas: { backgroundColor: '#EFF6FF', borderLeftColor: '#3B82F6' },
   operacaoDespesas: { backgroundColor: '#FEF2F2', borderLeftColor: '#EF4444' },
   opLabelVerde: { fontSize: 10, fontWeight: '500', color: '#059669' },
-  opValorVerde: { fontSize: 14, fontWeight: '700', color: '#065F46' },
+  opValorVerde: { fontSize: 12, fontWeight: '700', color: '#065F46' },
   opDetalheVerde: { fontSize: 10, color: '#047857' },
   opLabelAzul: { fontSize: 10, fontWeight: '500', color: '#2563EB' },
-  opValorAzul: { fontSize: 14, fontWeight: '700', color: '#1E40AF' },
+  opValorAzul: { fontSize: 12, fontWeight: '700', color: '#1E40AF' },
   opDetalheAzul: { fontSize: 10, color: '#1D4ED8' },
   opLabelVermelho: { fontSize: 10, fontWeight: '500', color: '#DC2626' },
-  opValorVermelho: { fontSize: 14, fontWeight: '700', color: '#991B1B' },
+  opValorVermelho: { fontSize: 12, fontWeight: '700', color: '#991B1B' },
   opDetalheVermelho: { fontSize: 10, color: '#B91C1C' },
   microSeguroCard: { backgroundColor: '#FEF9C3', borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: '#FDE047' },
   microSeguroHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },

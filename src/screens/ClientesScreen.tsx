@@ -15,10 +15,10 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
-import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
+import { Language, useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
 
-type Language = 'pt-BR' | 'es';
+// Language importado do LiquidacaoContext
 type TabAtiva = 'liquidacao' | 'todos';
 type FiltroLiquidacao = 'todos' | 'atrasados';
 type OrdenacaoLiquidacao = 'rota' | 'nome';
@@ -130,8 +130,26 @@ const textos = {
     liquidacaoFechada: 'Liquidação fechada',
     semLiquidacaoAberta: 'Nenhuma liquidação aberta',
     abrirLiquidacao: 'Abra uma liquidação para operar',
-  },
-  'es': {
+    // Strings adicionais para Alerts e popups
+    atencao: 'Atenção', erroGenerico: 'Erro', sucessoGenerico: 'Sucesso', aviso: 'Aviso',
+    erroCarregarParcelas: 'Não foi possível carregar as parcelas.',
+    dadosClienteIndisponiveis: 'Dados do cliente não disponíveis',
+    nenhumaParcela: 'Nenhuma parcela pendente encontrada',
+    erroBuscarParcela: 'Não foi possível buscar a próxima parcela',
+    pagamentoNaoPermitido: 'Pagamento não permitido',
+    valorInvalido: 'Valor inválido',
+    informeValor: 'Informe um valor para pagar ou use o crédito disponível',
+    nenhumaParcelaEncontrada: 'Nenhuma parcela encontrada',
+    dinheiro: 'Dinheiro', transferencia: 'Transf/PIX',
+    pagoStatus: 'PAGO', parcialStatus: 'PARCIAL', vencidaStatus: 'VENCIDA',
+    creditoUsado: 'Crédito usado:', creditoGerado: 'Crédito gerado:',
+    semNumero: 'Sem número',
+    existemParcelas: 'Existem',
+    parcelasAnteriores: 'parcela(s) anterior(es) pendente(s) com saldo de',
+    quitarPrimeiro: 'É necessário quitar as parcelas mais antigas primeiro.',
+    saldoAnteriorParcelas: 'parcela(s)',
+    incluirAtraso: 'Incluir atraso',
+  },  'es': {
     titulo: 'Mis Clientes', hoje: 'Hoy', clientes: 'clientes',
     liquidacao: 'Liquidación', todosList: 'Todos', buscar: 'Buscar...',
     ordemRota: 'Orden ruta', ordemNome: 'Nombre A-Z',
@@ -156,7 +174,7 @@ const textos = {
     creditoDisponivel: 'Crédito disponible:',
     registrarPagamento: 'Registrar Pago', valorAPagar: 'Valor a pagar',
     forma: 'Forma:', gpsOk: 'GPS OK', gpsErro: 'Sin GPS',
-    pagarBtn: 'PAGAR', pendente: 'PENDIENTE', vencimiento: 'Vencimiento:',
+    pagarBtn: 'PAGAR', pendente: 'PENDIENTE', vencimento: 'Vencimiento:',
     processando: 'Procesando...', sucesso: '¡Pago registrado!',
     erro: 'Error al registrar pago',
     motivoEstorno: 'Motivo de reversión', estornarPagamento: 'Reversar Pago',
@@ -172,12 +190,34 @@ const textos = {
     liquidacaoFechada: 'Liquidación cerrada',
     semLiquidacaoAberta: 'Ninguna liquidación abierta',
     abrirLiquidacao: 'Abra una liquidación para operar',
+    // Strings adicionais para Alerts e popups
+    atencao: 'Atención', erroGenerico: 'Error', sucessoGenerico: 'Éxito', aviso: 'Aviso',
+    erroCarregarParcelas: 'No fue posible cargar las cuotas.',
+    dadosClienteIndisponiveis: 'Datos del cliente no disponibles',
+    nenhumaParcela: 'Ninguna cuota pendiente encontrada',
+    erroBuscarParcela: 'No fue posible buscar la próxima cuota',
+    pagamentoNaoPermitido: 'Pago no permitido',
+    valorInvalido: 'Valor inválido',
+    informeValor: 'Informe un valor para pagar o use el crédito disponible',
+    nenhumaParcelaEncontrada: 'Ninguna cuota encontrada',
+    dinheiro: 'Efectivo', transferencia: 'Transf/PIX',
+    pagoStatus: 'PAGADO', parcialStatus: 'PARCIAL', vencidaStatus: 'VENCIDA',
+    creditoUsado: 'Crédito usado:', creditoGerado: 'Crédito generado:',
+    semNumero: 'Sin número',
+    existemParcelas: 'Existen',
+    parcelasAnteriores: 'cuota(s) anterior(es) pendiente(s) con saldo de',
+    quitarPrimeiro: 'Es necesario pagar las cuotas más antiguas primero.',
+    saldoAnteriorParcelas: 'cuota(s)',
+    incluirAtraso: 'Incluir atraso',
   },
 };
 
-const FREQ: Record<string, string> = { DIARIO: 'Diário', SEMANAL: 'Semanal', QUINZENAL: 'Quinzenal', MENSAL: 'Mensal', FLEXIVEL: 'Flexível' };
+const FREQ: Record<Language, Record<string, string>> = { 
+  'pt-BR': { DIARIO: 'Diário', SEMANAL: 'Semanal', QUINZENAL: 'Quinzenal', MENSAL: 'Mensal', FLEXIVEL: 'Flexível' },
+  'es': { DIARIO: 'Diario', SEMANAL: 'Semanal', QUINZENAL: 'Quincenal', MENSAL: 'Mensual', FLEXIVEL: 'Flexible' },
+};
 const getIni = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase() || '').join('');
-const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }).replace('R$', '$ ');
+const fmt = (v: number) => '$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtData = (d: string) => { if (!d) return ''; const [y, m, day] = d.split('-'); return `${day}/${m}/${y}`; };
 const fmtTel = (t: string) => t.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
 const borderOf = (e: EmprestimoData, paga: boolean) => {
@@ -196,7 +236,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   const liqId = liqCtx.liquidacaoIdVisualizacao || route?.params?.liquidacaoId;
   const isViz = liqCtx.modoVisualizacao || route?.params?.isVisualizacao || false;
 
-  const [lang] = useState<Language>('pt-BR');
+  const lang = liqCtx.language || 'pt-BR';
   // Se não há liquidação aberta, força tab "todos"
   const [tab, setTab] = useState<TabAtiva>(!liqId ? 'todos' : 'liquidacao');
   const [loading, setLoading] = useState(true);
@@ -517,13 +557,13 @@ export default function ClientesScreen({ navigation, route }: any) {
           liquidacao_id: pag?.liquidacaoId || null
         }; 
       }));
-    } catch (e) { console.error('Erro parcelas:', e); Alert.alert('Erro', 'Não foi possível carregar as parcelas.'); }
+    } catch (e) { console.error('Erro parcelas:', e); Alert.alert(t.erroGenerico, t.erroCarregarParcelas); }
     finally { setLoadingParcelas(false); }
   }, []);
 
   // FUNÇÃO ATUALIZADA - Busca dados completos via RPC antes de abrir modal
   const abrirPagamento = useCallback(async (parcela: ParcelaModal) => {
-    if (!liqId && !isViz) { Alert.alert('Atenção', t.liquidacaoNecessaria); return; }
+    if (!liqId && !isViz) { Alert.alert(t.atencao, t.liquidacaoNecessaria); return; }
     
     setParcelaPagamento(parcela);
     setDadosPagamento(null);
@@ -555,7 +595,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   // Função para ir para próxima parcela pendente
   const irParaProximaParcela = useCallback(async () => {
     if (!clienteModal) {
-      Alert.alert('Erro', 'Dados do cliente não disponíveis');
+      Alert.alert(t.erroGenerico, t.dadosClienteIndisponiveis);
       return;
     }
     
@@ -609,11 +649,11 @@ export default function ClientesScreen({ navigation, route }: any) {
         }
       } else {
         console.log('⚠️ Nenhuma parcela pendente encontrada');
-        Alert.alert('Aviso', proxima?.mensagem_status || 'Nenhuma parcela pendente encontrada');
+        Alert.alert(t.aviso, proxima?.mensagem_status || t.nenhumaParcela);
       }
     } catch (e: any) { 
       console.error('❌ Erro ao buscar próxima parcela:', e); 
-      Alert.alert('Erro', e.message || 'Não foi possível buscar a próxima parcela');
+      Alert.alert(t.erroGenerico, e.message || t.erroBuscarParcela);
     }
     finally { setLoadingDadosPagamento(false); }
   }, [clienteModal]);
@@ -622,11 +662,11 @@ export default function ClientesScreen({ navigation, route }: any) {
   const registrarPagamento = useCallback(async () => {
     if (!parcelaPagamento || processando) return;
     if (dadosPagamento && !dadosPagamento.permite_pagamento) {
-      Alert.alert('Atenção', dadosPagamento.mensagem_bloqueio || 'Pagamento não permitido');
+      Alert.alert(t.atencao, dadosPagamento.mensagem_bloqueio || t.pagamentoNaoPermitido);
       return;
     }
     const valorNum = parseFloat(valorPagamento.replace(',', '.'));
-    if (isNaN(valorNum) || valorNum < 0) { Alert.alert('Erro', 'Valor inválido'); return; }
+    if (isNaN(valorNum) || valorNum < 0) { Alert.alert(t.erroGenerico, t.valorInvalido); return; }
     
     // Calcula crédito a usar: no máximo o disponível, mas limitado ao valor da parcela
     let valorCredito = 0;
@@ -637,7 +677,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     
     // Validação: pelo menos um valor deve ser informado (dinheiro OU crédito)
     if (valorNum === 0 && valorCredito === 0) {
-      Alert.alert('Erro', 'Informe um valor para pagar ou use o crédito disponível');
+      Alert.alert(t.erroGenerico, t.informeValor);
       return;
     }
     
@@ -657,20 +697,20 @@ export default function ClientesScreen({ navigation, route }: any) {
       if (error) throw error;
       const res = Array.isArray(data) ? data[0] : data;
       if (res?.sucesso) {
-        Alert.alert('Sucesso', t.sucesso);
+        Alert.alert(t.sucessoGenerico, t.sucesso);
         setModalPagamentoVisible(false);
         setParcelaPagamento(null);
         setDadosPagamento(null);
         setUsarCredito(false);
         if (clienteModal) abrirParcelas(clienteModal.id, clienteModal.nome, clienteModal.emprestimo_id);
         loadLiq();
-      } else { Alert.alert('Erro', res?.mensagem || t.erro); }
-    } catch (e: any) { console.error('Erro pagamento:', e); Alert.alert('Erro', e.message || t.erro); }
+      } else { Alert.alert(t.erroGenerico, res?.mensagem || t.erro); }
+    } catch (e: any) { console.error('Erro pagamento:', e); Alert.alert(t.erroGenerico, e.message || t.erro); }
     finally { setProcessando(false); }
   }, [parcelaPagamento, dadosPagamento, valorPagamento, usarCredito, formaPagamento, coords, liqId, t, clienteModal, abrirParcelas, loadLiq, processando]);
 
   const abrirEstorno = useCallback((parcela: ParcelaModal) => {
-    if (!liqId) { Alert.alert('Atenção', t.liquidacaoNecessaria); return; }
+    if (!liqId) { Alert.alert(t.atencao, t.liquidacaoNecessaria); return; }
     setParcelaEstorno(parcela);
     setMotivoEstorno('');
     setModalEstornoVisible(true);
@@ -694,16 +734,16 @@ export default function ClientesScreen({ navigation, route }: any) {
         setModalEstornoVisible(false);
         setParcelaEstorno(null);
         // Usa a mensagem retornada pela function que já inclui o nome do responsável
-        Alert.alert('Sucesso', res.mensagem || t.estornoSucesso);
+        Alert.alert(t.sucessoGenerico, res.mensagem || t.estornoSucesso);
         if (clienteModal) abrirParcelas(clienteModal.id, clienteModal.nome, clienteModal.emprestimo_id);
         loadLiq();
       } else { 
         setModalEstornoVisible(false);
-        Alert.alert('Erro', res?.mensagem || t.estornoErro); 
+        Alert.alert(t.erroGenerico, res?.mensagem || t.estornoErro); 
       }
     } catch (e: any) { 
       console.error('Erro estorno:', e); 
-      Alert.alert('Erro', e.message || t.estornoErro); 
+      Alert.alert(t.erroGenerico, e.message || t.estornoErro); 
     }
     finally { setProcessando(false); }
   }, [parcelaEstorno, motivoEstorno, vendedor, t, clienteModal, abrirParcelas, loadLiq, processando]);
@@ -779,86 +819,81 @@ export default function ClientesScreen({ navigation, route }: any) {
     const isParcial = p.status === 'PARCIAL';
     const isVencida = p.status === 'VENCIDO' || p.status === 'VENCIDA';
     
-    // Cores baseadas no status
     const iconColor = isPago ? '#10B981' : isParcial ? '#F59E0B' : isVencida ? '#EF4444' : '#6B7280';
     const iconBg = isPago ? '#D1FAE5' : isParcial ? '#FEF3C7' : isVencida ? '#FEE2E2' : '#F3F4F6';
     const statusColor = isPago ? '#10B981' : isParcial ? '#D97706' : isVencida ? '#EF4444' : '#F97316';
     const statusBg = isPago ? '#D1FAE5' : isParcial ? '#FEF3C7' : isVencida ? '#FEE2E2' : '#FFEDD5';
-    const statusText = isPago ? 'PAGO' : isParcial ? 'PARCIAL' : isVencida ? 'VENCIDA' : 'PENDENTE';
+    const statusText = isPago ? t.pagoStatus : isParcial ? t.parcialStatus : isVencida ? t.vencidaStatus : t.pendente;
     
-    // Calcula valor restante para parcial
     const valorPago = p.valor_pago || 0;
     const valorRestante = isParcial ? (p.valor_parcela - valorPago) : p.valor_parcela;
     
     return (
       <View key={p.parcela_id} style={[S.mParcela, { borderLeftColor: iconColor }]}>
         <View style={S.mParcelaRow}>
+          {/* Lado esquerdo: ícone + info + valores */}
           <View style={[S.mParcelaIcon, { backgroundColor: iconBg }]}>
             <Text style={{ color: iconColor, fontSize: 14 }}>
               {isPago ? '✓' : isParcial ? '◐' : '📅'}
             </Text>
           </View>
           <View style={S.mParcelaInfo}>
-            <Text style={S.mParcelaNum}>{t.parcela} {p.numero_parcela}</Text>
+            {/* Linha 1: Parcela X + badge status */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={S.mParcelaNum}>{t.parcela} {p.numero_parcela}</Text>
+              <View style={[S.mParcelaStatus, { backgroundColor: statusBg }]}>
+                <Text style={[S.mParcelaStatusTx, { color: statusColor }]}>{statusText}</Text>
+              </View>
+            </View>
+            {/* Linha 2: Vencimento */}
             <Text style={S.mParcelaVenc}>{t.venc} {fmtData(p.data_vencimento)}</Text>
-          </View>
-          <View style={S.mParcelaValores}>
-            <Text style={S.mParcelaOriginal}>{t.original} {fmt(p.valor_parcela)}</Text>
-            
-            {/* PAGO - mostra valor pago e crédito */}
-            {isPago && valorPago > 0 && (
-              <>
-                <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
-                {(p.credito_gerado || 0) > 0 && (
-                  <Text style={S.mParcelaCredito}>{t.credito} {fmt(p.credito_gerado || 0)}</Text>
-                )}
-              </>
-            )}
-            
-            {/* PARCIAL - mostra valor pago e valor restante */}
-            {isParcial && (
-              <>
-                <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
-                <Text style={S.mParcelaRestante}>Restante: {fmt(valorRestante)}</Text>
-              </>
-            )}
-            
-            {/* PENDENTE/VENCIDA - mostra apenas valor */}
+            {/* Linha 3: Valor principal */}
             {!isPago && !isParcial && (
               <Text style={S.mParcelaValor}>{fmt(p.valor_parcela)}</Text>
             )}
-            
-            <View style={[S.mParcelaStatus, { backgroundColor: statusBg }]}>
-              <Text style={[S.mParcelaStatusTx, { color: statusColor }]}>{statusText}</Text>
-            </View>
-            
-            {isPago && p.data_pagamento && (
-              <Text style={S.mParcelaDataPg}>{t.em} {fmtData(p.data_pagamento)}</Text>
+            {/* PAGO: valor pago + crédito */}
+            {isPago && valorPago > 0 && (
+              <View style={{ marginTop: 2 }}>
+                <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
+                <Text style={S.mParcelaOriginal}>{t.original} {fmt(p.valor_parcela)}</Text>
+                {(p.credito_gerado || 0) > 0 && (
+                  <Text style={S.mParcelaCredito}>{t.credito} {fmt(p.credito_gerado || 0)}</Text>
+                )}
+                {p.data_pagamento && (
+                  <Text style={S.mParcelaDataPg}>{t.em} {fmtData(p.data_pagamento)}</Text>
+                )}
+              </View>
             )}
-            {isParcial && p.data_pagamento && (
-              <Text style={S.mParcelaDataPg}>{t.em} {fmtData(p.data_pagamento)}</Text>
+            {/* PARCIAL: pago + restante */}
+            {isParcial && (
+              <View style={{ marginTop: 2 }}>
+                <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
+                <Text style={S.mParcelaRestante}>{lang === 'es' ? 'Restante:' : 'Restante:'} {fmt(valorRestante)}</Text>
+                {p.data_pagamento && (
+                  <Text style={S.mParcelaDataPg}>{t.em} {fmtData(p.data_pagamento)}</Text>
+                )}
+              </View>
             )}
           </View>
-        </View>
-        <View style={S.mParcelaBtns}>
-          {/* Botão Pagar: mostra se NÃO é PAGO (ou seja, PENDENTE, VENCIDA ou PARCIAL) */}
-          {!isPago && p.parcela_id && (
-            <TouchableOpacity 
-              style={[S.mBtnPagar, (!liqId || isViz) && S.mBtnPagarDisabled]} 
-              onPress={() => abrirPagamento(p)} 
-              disabled={!liqId || isViz}
-            >
-              <Text style={S.mBtnPagarIcon}>💰</Text>
-              <Text style={S.mBtnPagarTx}>{t.pagar}</Text>
-            </TouchableOpacity>
-          )}
-          {/* Estornar: só mostra se PAGO + tem parcela_id + liquidação aberta + não visualização + pago NA liquidação atual */}
-          {isPago && p.parcela_id && liqId && !isViz && p.liquidacao_id === liqId && (
-            <TouchableOpacity style={S.mBtnEstornar} onPress={() => abrirEstorno(p)}>
-              <Text style={S.mBtnEstornarIcon}>↩</Text>
-              <Text style={S.mBtnEstornarTx}>{t.estornar}</Text>
-            </TouchableOpacity>
-          )}
+          {/* Lado direito: botão */}
+          <View style={S.mParcelaBtns}>
+            {!isPago && p.parcela_id && (
+              <TouchableOpacity 
+                style={[S.mBtnPagar, (!liqId || isViz) && S.mBtnPagarDisabled]} 
+                onPress={() => abrirPagamento(p)} 
+                disabled={!liqId || isViz}
+              >
+                <Text style={S.mBtnPagarIcon}>💰</Text>
+                <Text style={S.mBtnPagarTx}>{t.pagar}</Text>
+              </TouchableOpacity>
+            )}
+            {isPago && p.parcela_id && liqId && !isViz && p.liquidacao_id === liqId && (
+              <TouchableOpacity style={S.mBtnEstornar} onPress={() => abrirEstorno(p)}>
+                <Text style={S.mBtnEstornarIcon}>↩</Text>
+                <Text style={S.mBtnEstornarTx}>{t.estornar}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
       </View>
     );
@@ -881,14 +916,14 @@ export default function ClientesScreen({ navigation, route }: any) {
           </View>
         </View>
         <View style={S.pRow}>
-          <View><View style={S.pLblR}><Text style={S.pLbl}>{t.parcela} {e.numero_parcela}/{e.numero_parcelas}</Text><View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[e.frequencia_pagamento] || e.frequencia_pagamento}</Text></View></View>{pg && pi ? (<><Text style={S.pgVal}>{t.pago} {fmt(pi.valorPago)}</Text><Text style={S.pgOrig}>{t.original} {fmt(pi.valorParcela)}</Text>{pi.creditoGerado > 0 && <Text style={S.pgCred}>{t.credito} {fmt(pi.creditoGerado)}</Text>}</>) : (<Text style={S.pVal}>{fmt(e.valor_parcela)}</Text>)}</View>
+          <View><View style={S.pLblR}><Text style={S.pLbl}>{t.parcela} {e.numero_parcela}/{e.numero_parcelas}</Text><View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento}</Text></View></View>{pg && pi ? (<><Text style={S.pgVal}>{t.pago} {fmt(pi.valorPago)}</Text><Text style={S.pgOrig}>{t.original} {fmt(pi.valorParcela)}</Text>{pi.creditoGerado > 0 && <Text style={S.pgCred}>{t.credito} {fmt(pi.creditoGerado)}</Text>}</>) : (<Text style={S.pVal}>{fmt(e.valor_parcela)}</Text>)}</View>
           <View style={S.sCol}><Text style={S.sLbl}>{t.saldoEmprestimo}</Text><Text style={S.sVal}>{fmt(e.saldo_emprestimo)}</Text></View>
         </View>
         {ex && (<View style={S.exp}>
           {e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && <View style={S.aR}><Text style={S.aRT}>⚠ {e.total_parcelas_vencidas} {t.parcelasVencidas}</Text><Text style={S.aRS}>{t.totalAtraso} {fmt(e.valor_total_vencido)}</Text></View>}
-          {e.status_parcela === 'PARCIAL' && !pg && <View style={S.aY}><Text style={S.aYT}>Parcial: {fmt(e.valor_pago_parcela)} / {fmt(e.valor_parcela)}</Text><Text style={S.aYS}>Restante: {fmt(e.saldo_parcela)}</Text></View>}
+          {e.status_parcela === 'PARCIAL' && !pg && <View style={S.aY}><Text style={S.aYT}>{t.parcialStatus}: {fmt(e.valor_pago_parcela)} / {fmt(e.valor_parcela)}</Text><Text style={S.aYS}>{lang === 'es' ? 'Restante:' : 'Restante:'} {fmt(e.saldo_parcela)}</Text></View>}
           {c.tem_multiplos_vencimentos && (<View style={S.eNav}><TouchableOpacity onPress={() => eSet(c.cliente_id, Math.max(0, ei - 1))} disabled={ei === 0} style={[S.eNBtn, ei === 0 && S.eNOff]}><Text style={S.eNBTx}>◀</Text></TouchableOpacity>{c.emprestimos.map((_, i) => <View key={i} style={[S.eDot, i === ei && S.eDotOn]} />)}<TouchableOpacity onPress={() => eSet(c.cliente_id, Math.min(c.emprestimos.length - 1, ei + 1))} disabled={ei >= c.emprestimos.length - 1} style={[S.eNBtn, ei >= c.emprestimos.length - 1 && S.eNOff]}><Text style={S.eNBTx}>▶</Text></TouchableOpacity><Text style={S.eNLbl}> {t.emprestimo} {ei + 1}/{c.qtd_emprestimos}</Text></View>)}
-          <View style={S.res}><View style={S.resH}><Text style={S.resT}>{t.emprestimo} {ei + 1}/{c.qtd_emprestimos}</Text><View style={[S.stB, { backgroundColor: e.status_dia === 'EM_ATRASO' ? '#FEE2E2' : pg ? '#D1FAE5' : '#F3F4F6' }]}><Text style={[S.stBT, { color: e.status_dia === 'EM_ATRASO' ? '#DC2626' : pg ? '#059669' : '#6B7280' }]}>{pg ? 'PAGO' : e.status_dia}</Text></View></View><View style={S.g3}><View style={S.gi}><Text style={S.gl}>{t.principal}</Text><Text style={S.gv}>{fmt(e.valor_principal)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.juros}</Text><Text style={[S.gv, { color: '#F59E0B' }]}>{fmt(juros)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.total}</Text><Text style={S.gv}>{fmt(totalE)}</Text></View></View><View style={S.g3}><View style={S.gi}><Text style={S.gl}>{t.jaPago}</Text><Text style={[S.gv, { color: '#10B981' }]}>{fmt(totalE - e.saldo_emprestimo)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.saldo}</Text><Text style={[S.gv, { color: '#EF4444' }]}>{fmt(e.saldo_emprestimo)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.parcelas}</Text><Text style={S.gv}>{pp}/{e.numero_parcelas}</Text></View></View><Text style={S.prL}>{t.progresso}</Text><View style={S.prB}><View style={[S.prF, { width: `${pct}%` }]} /></View><Text style={S.prR}>{pr} {t.restantes}</Text></View>
+          <View style={S.res}><View style={S.resH}><Text style={S.resT}>{t.emprestimo} {ei + 1}/{c.qtd_emprestimos}</Text><View style={[S.stB, { backgroundColor: e.status_dia === 'EM_ATRASO' ? '#FEE2E2' : pg ? '#D1FAE5' : '#F3F4F6' }]}><Text style={[S.stBT, { color: e.status_dia === 'EM_ATRASO' ? '#DC2626' : pg ? '#059669' : '#6B7280' }]}>{pg ? t.pagoStatus : e.status_dia}</Text></View></View><View style={S.g3}><View style={S.gi}><Text style={S.gl}>{t.principal}</Text><Text style={S.gv}>{fmt(e.valor_principal)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.juros}</Text><Text style={[S.gv, { color: '#F59E0B' }]}>{fmt(juros)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.total}</Text><Text style={S.gv}>{fmt(totalE)}</Text></View></View><View style={S.g3}><View style={S.gi}><Text style={S.gl}>{t.jaPago}</Text><Text style={[S.gv, { color: '#10B981' }]}>{fmt(totalE - e.saldo_emprestimo)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.saldo}</Text><Text style={[S.gv, { color: '#EF4444' }]}>{fmt(e.saldo_emprestimo)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.parcelas}</Text><Text style={S.gv}>{pp}/{e.numero_parcelas}</Text></View></View><Text style={S.prL}>{t.progresso}</Text><View style={S.prB}><View style={[S.prF, { width: `${pct}%` }]} /></View><Text style={S.prR}>{pr} {t.restantes}</Text></View>
           <View style={S.btR}><TouchableOpacity style={[S.bt, S.btG, (!liqId || isViz || pg) && S.btOff]} onPress={() => { if (liqId && !isViz && !pg) abrirPagamento({ parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0 }); }} disabled={!liqId || isViz || pg}><Text style={S.btI}>💰</Text><Text style={S.btW}>{t.pagar}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btBl]} onPress={() => abrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}><Text style={S.btI}>👁</Text><Text style={S.btW}>{t.verParcelas}</Text></TouchableOpacity></View>
           <View style={S.btR}><TouchableOpacity style={[S.bt, S.btOG]} onPress={() => c.telefone_celular && Linking.openURL(`tel:${c.telefone_celular.replace(/\D/g, '')}`)} disabled={!c.telefone_celular}><Text style={S.btI}>📱</Text><Text style={S.btTG}>{t.contato}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btOB]} onPress={() => { if (c.latitude && c.longitude) Linking.openURL(Platform.OS === 'ios' ? `maps:?daddr=${c.latitude},${c.longitude}` : `google.navigation:q=${c.latitude},${c.longitude}`); }} disabled={!c.latitude}><Text style={S.btI}>🧭</Text><Text style={S.btTB}>{t.ir}</Text></TouchableOpacity></View>
         </View>)}
@@ -968,7 +1003,7 @@ export default function ClientesScreen({ navigation, route }: any) {
           <View style={S.modalHeader}><Text style={S.modalTitle}>{clienteModal?.nome || ''}</Text><TouchableOpacity onPress={() => setModalParcelasVisible(false)} style={S.modalClose}><Text style={S.modalCloseX}>✕</Text></TouchableOpacity></View>
           {creditoDisponivel > 0 && (<View style={S.creditoBanner}><Text style={S.creditoIcon}>💳</Text><Text style={S.creditoText}>{t.creditoDisponivel} {fmt(creditoDisponivel)}</Text></View>)}
           <ScrollView style={S.modalScroll} showsVerticalScrollIndicator={false}>
-            {loadingParcelas ? (<ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />) : parcelasModal.length === 0 ? (<Text style={S.modalEmpty}>Nenhuma parcela encontrada</Text>) : (parcelasModal.map(p => renderParcelaItem(p)))}
+            {loadingParcelas ? (<ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />) : parcelasModal.length === 0 ? (<Text style={S.modalEmpty}>{ t.nenhumaParcelaEncontrada }</Text>) : (parcelasModal.map(p => renderParcelaItem(p)))}
             <View style={{ height: 20 }} />
           </ScrollView>
         </View></View>
@@ -1018,7 +1053,7 @@ export default function ClientesScreen({ navigation, route }: any) {
                     <View style={S.pgAlertRedTexts}>
                       <Text style={S.pgAlertRedTitle}>{t.pagamentoBloqueado || 'Pagamento bloqueado'}</Text>
                       <Text style={S.pgAlertRedDesc}>
-                        {`Existem ${dadosPagamento.qtd_parcelas_anteriores_pendentes} parcela(s) anterior(es) pendente(s) com saldo de ${fmt(dadosPagamento.saldo_parcelas_anteriores)}. É necessário quitar as parcelas mais antigas primeiro.`}
+                        {`${t.existemParcelas} ${dadosPagamento.qtd_parcelas_anteriores_pendentes} ${t.parcelasAnteriores} ${fmt(dadosPagamento.saldo_parcelas_anteriores)}. ${t.quitarPrimeiro}`}
                       </Text>
                     </View>
                     <TouchableOpacity style={S.pgAlertRedBtn} onPress={irParaProximaParcela}>
@@ -1036,8 +1071,8 @@ export default function ClientesScreen({ navigation, route }: any) {
                     <View style={S.pgAlertYellow}>
                       <Text style={S.pgAlertYellowIcon}>⚠</Text>
                       <View style={S.pgAlertYellowTexts}>
-                        <Text style={S.pgAlertYellowTitle}>{t.saldoAnterior || 'Saldo anterior de'} parcela(s)</Text>
-                        <Text style={S.pgAlertYellowDesc}>{t.valorPendente || 'Valor pendente:'} {fmt(dadosPagamento.saldo_parcelas_anteriores)}</Text>
+                        <Text style={S.pgAlertYellowTitle}>{t.saldoAnterior} {t.saldoAnteriorParcelas}</Text>
+                        <Text style={S.pgAlertYellowDesc}>{t.valorPendente} {fmt(dadosPagamento.saldo_parcelas_anteriores)}</Text>
                       </View>
                       {/* Botão para incluir atrasos no pagamento */}
                       <TouchableOpacity 
@@ -1050,7 +1085,7 @@ export default function ClientesScreen({ navigation, route }: any) {
                           setValorPagamento(valorFinal.toFixed(2).replace('.', ','));
                         }}
                       >
-                        <Text style={S.pgAlertYellowBtnTx}>+ Incluir atraso ({fmt(dadosPagamento.saldo_parcelas_anteriores)})</Text>
+                        <Text style={S.pgAlertYellowBtnTx}>+ {t.incluirAtraso} ({fmt(dadosPagamento.saldo_parcelas_anteriores)})</Text>
                       </TouchableOpacity>
                     </View>
                   )}
@@ -1112,7 +1147,7 @@ export default function ClientesScreen({ navigation, route }: any) {
                   <View style={S.pgFormRow}>
                     <Text style={S.pgFormLabel}>{t.forma}</Text>
                     <TouchableOpacity style={S.pgFormSelect} onPress={() => setFormaPagamento(formaPagamento === 'DINHEIRO' ? 'TRANSFERENCIA' : 'DINHEIRO')}>
-                      <Text style={S.pgFormSelectTx}>{formaPagamento === 'DINHEIRO' ? 'Dinheiro' : 'Transferência'}</Text>
+                      <Text style={S.pgFormSelectTx}>{formaPagamento === 'DINHEIRO' ? t.dinheiro : t.transferencia}</Text>
                       <Text style={S.pgFormSelectChev}>▼</Text>
                     </TouchableOpacity>
                     <View style={[S.pgGpsStatus, gpsStatus === 'ok' ? S.pgGpsOk : S.pgGpsErro]}>
@@ -1153,7 +1188,7 @@ export default function ClientesScreen({ navigation, route }: any) {
           <View style={S.estHeader}><Text style={S.estHeaderIcon}>↩</Text><Text style={S.estHeaderTitle}>{t.estornarPagamento}</Text><TouchableOpacity onPress={() => setModalEstornoVisible(false)} style={S.modalClose}><Text style={S.modalCloseX}>✕</Text></TouchableOpacity></View>
           {parcelaEstorno && (<>
             <View style={S.estInfo}><Text style={S.estInfoParcela}>{t.parcela} {parcelaEstorno.numero_parcela}</Text><Text style={S.estInfoCliente}>{clienteModal?.nome || ''}</Text><Text style={S.estInfoValor}>{t.pago} {fmt(parcelaEstorno.valor_pago || parcelaEstorno.valor_parcela)}</Text></View>
-            <View style={S.estInputBox}><Text style={S.estInputLabel}>{t.motivoEstorno}</Text><TextInput style={S.estInput} value={motivoEstorno} onChangeText={setMotivoEstorno} placeholder="Digite o motivo..." multiline numberOfLines={3} /></View>
+            <View style={S.estInputBox}><Text style={S.estInputLabel}>{t.motivoEstorno}</Text><TextInput style={S.estInput} value={motivoEstorno} onChangeText={setMotivoEstorno} placeholder={lang === 'es' ? 'Escriba el motivo...' : 'Digite o motivo...'} multiline numberOfLines={3} /></View>
             <View style={S.estBtns}><TouchableOpacity style={S.estBtnCancel} onPress={() => setModalEstornoVisible(false)}><Text style={S.estBtnCancelTx}>{t.cancelar}</Text></TouchableOpacity><TouchableOpacity style={[S.estBtnConfirm, (!motivoEstorno.trim() || processando) && S.estBtnDisabled]} onPress={confirmarEstorno} disabled={!motivoEstorno.trim() || processando}>{processando ? (<ActivityIndicator color="#fff" />) : (<Text style={S.estBtnConfirmTx}>{t.confirmarEstorno}</Text>)}</TouchableOpacity></View>
           </>)}
         </View></View>
@@ -1249,21 +1284,21 @@ const S = StyleSheet.create({
   creditoIcon: { fontSize: 18, marginRight: 10 },
   creditoText: { fontSize: 13, fontWeight: '600', color: '#1D4ED8' },
   mParcela: { backgroundColor: '#FAFAFA', borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#E5E7EB', borderLeftWidth: 4 },
-  mParcelaRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  mParcelaIcon: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+  mParcelaRow: { flexDirection: 'row', alignItems: 'center' },
+  mParcelaIcon: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
   mParcelaInfo: { flex: 1 },
   mParcelaNum: { fontSize: 14, fontWeight: '700', color: '#1F2937' },
-  mParcelaVenc: { fontSize: 11, color: '#6B7280', marginTop: 2 },
+  mParcelaVenc: { fontSize: 11, color: '#6B7280', marginTop: 1 },
   mParcelaValores: { alignItems: 'flex-end' },
   mParcelaOriginal: { fontSize: 10, color: '#9CA3AF' },
-  mParcelaValor: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
-  mParcelaPago: { fontSize: 14, fontWeight: '700', color: '#10B981' },
-  mParcelaRestante: { fontSize: 12, fontWeight: '600', color: '#D97706', marginTop: 2 },
+  mParcelaValor: { fontSize: 15, fontWeight: '700', color: '#1F2937', marginTop: 2 },
+  mParcelaPago: { fontSize: 13, fontWeight: '700', color: '#10B981' },
+  mParcelaRestante: { fontSize: 11, fontWeight: '600', color: '#D97706', marginTop: 1 },
   mParcelaCredito: { fontSize: 10, color: '#2563EB' },
-  mParcelaStatus: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, marginTop: 4 },
+  mParcelaStatus: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
   mParcelaStatusTx: { fontSize: 9, fontWeight: '700' },
-  mParcelaDataPg: { fontSize: 9, color: '#6B7280', marginTop: 2 },
-  mParcelaBtns: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 10 },
+  mParcelaDataPg: { fontSize: 9, color: '#6B7280', marginTop: 1 },
+  mParcelaBtns: { marginLeft: 8, justifyContent: 'center' },
   mBtnPagar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#10B981', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, gap: 6 },
   mBtnPagarIcon: { fontSize: 14 },
   mBtnPagarTx: { color: '#fff', fontSize: 12, fontWeight: '600' },
@@ -1341,7 +1376,7 @@ const S = StyleSheet.create({
   pgAlertYellowBtn: { alignSelf: 'flex-start', marginTop: 8, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: '#F59E0B' },
   pgAlertYellowBtnTx: { fontSize: 12, fontWeight: '600', color: '#fff' },
   // Alerta vermelho (bloqueio)
-  pgAlertRed: { backgroundColor: '#FEF2F2', marginHorizontal: 16, marginTop: 12, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#FECACA' },
+  pgAlertRed: { backgroundColor: '#FEF2F2', marginHorizontal: 16, marginTop: 12, marginBottom: 16, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#FECACA' },
   pgAlertRedIcon: { fontSize: 16, marginRight: 10 },
   pgAlertRedTexts: { marginBottom: 10 },
   pgAlertRedTitle: { fontSize: 13, fontWeight: '700', color: '#DC2626' },

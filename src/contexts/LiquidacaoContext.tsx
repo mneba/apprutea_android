@@ -3,6 +3,8 @@ import { supabase } from '../services/supabase';
 import { LiquidacaoDiaria } from '../types';
 import { useAuth } from './AuthContext';
 
+export type Language = 'pt-BR' | 'es';
+
 interface LiquidacaoContextType {
   // Liquidação atual (ABERTA/REABERTA)
   liquidacaoAtual: LiquidacaoDiaria | null;
@@ -18,6 +20,10 @@ interface LiquidacaoContextType {
   setDataVisualizacao: (d: string | null) => void;
   liquidacaoIdVisualizacao: string | null;
   setLiquidacaoIdVisualizacao: (id: string | null) => void;
+
+  // Idioma global
+  language: Language;
+  setLanguage: (lang: Language) => void;
 }
 
 const LiquidacaoContext = createContext<LiquidacaoContextType>({
@@ -33,6 +39,9 @@ const LiquidacaoContext = createContext<LiquidacaoContextType>({
   setDataVisualizacao: () => {},
   liquidacaoIdVisualizacao: null,
   setLiquidacaoIdVisualizacao: () => {},
+
+  language: 'pt-BR',
+  setLanguage: () => {},
 });
 
 export function LiquidacaoProvider({ children }: { children: ReactNode }) {
@@ -46,6 +55,9 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
   const [modoVisualizacao, setModoVisualizacao] = useState(false);
   const [dataVisualizacao, setDataVisualizacao] = useState<string | null>(null);
   const [liquidacaoIdVisualizacao, setLiquidacaoIdVisualizacao] = useState<string | null>(null);
+
+  // Idioma global
+  const [language, setLanguage] = useState<Language>('pt-BR');
 
   // Computed
   const temLiquidacaoAberta = !!(
@@ -99,6 +111,9 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
       setDataVisualizacao,
       liquidacaoIdVisualizacao,
       setLiquidacaoIdVisualizacao,
+
+      language,
+      setLanguage,
     }}>
       {children}
     </LiquidacaoContext.Provider>
