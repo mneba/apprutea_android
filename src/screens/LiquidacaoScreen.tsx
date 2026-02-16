@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import { ModalExtrato, ModalFinanceiro, ModalMicroseguro, ModalPagamentos } from '../components/LiquidacaoDetalhes';
 import { useAuth } from '../contexts/AuthContext';
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
@@ -156,6 +157,13 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const [modalFecharVisible, setModalFecharVisible] = useState(false);
   const [contaRota, setContaRota] = useState<ContaRota | null>(null);
   const [salvando, setSalvando] = useState(false);
+  
+  // Estados dos modais de detalhe
+  const [modalExtratoVisible, setModalExtratoVisible] = useState(false);
+  const [modalPagamentosVisible, setModalPagamentosVisible] = useState(false);
+  const [modalFinanceiroVisible, setModalFinanceiroVisible] = useState(false);
+  const [tipoFinanceiro, setTipoFinanceiro] = useState<'VENDAS' | 'RECEITAS' | 'DESPESAS'>('VENDAS');
+  const [modalMicroseguroVisible, setModalMicroseguroVisible] = useState(false);
   
   // Estados do Calendário
   const [mostrarCalendario, setMostrarCalendario] = useState(false);
@@ -861,7 +869,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
             <Text style={styles.sectionTitleOutside}>{t.controlesFinanceiros}</Text>
 
             {/* Caixa */}
-            <View style={[styles.card, styles.cardCaixa]}>
+            <TouchableOpacity style={[styles.card, styles.cardCaixa]} onPress={() => setModalExtratoVisible(true)} activeOpacity={0.7}>
               <View style={styles.financeiroContent}>
                 <View>
                   <Text style={styles.financeiroLabel}>{t.caixa}</Text>
@@ -870,10 +878,10 @@ export default function LiquidacaoScreen({ navigation }: any) {
                 </View>
                 <View style={styles.indicadorVerde} />
               </View>
-            </View>
+            </TouchableOpacity>
 
             {/* Pagamentos */}
-            <View style={[styles.card, styles.cardPagamentos]}>
+            <TouchableOpacity style={[styles.card, styles.cardPagamentos]} onPress={() => setModalPagamentosVisible(true)} activeOpacity={0.7}>
               <View style={styles.financeiroContent}>
                 <View>
                   <Text style={styles.financeiroLabel}>{t.pagamentos}</Text>
@@ -882,30 +890,30 @@ export default function LiquidacaoScreen({ navigation }: any) {
                 </View>
                 <View style={styles.indicadorVermelho} />
               </View>
-            </View>
+            </TouchableOpacity>
 
             {/* Outras Operações */}
             <Text style={styles.sectionTitleOutside}>{t.outrasOperacoes}</Text>
             <View style={styles.operacoesRow}>
-              <View style={[styles.operacaoCard, styles.operacaoVendas]}>
+              <TouchableOpacity style={[styles.operacaoCard, styles.operacaoVendas]} onPress={() => { setTipoFinanceiro('VENDAS'); setModalFinanceiroVisible(true); }} activeOpacity={0.7}>
                 <Text style={styles.opLabelVerde}>{t.vendas}</Text>
                 <Text style={styles.opValorVerde}>{formatarMoedaCompacta(liquidacao.total_emprestado_dia)}</Text>
                 <Text style={styles.opDetalheVerde}>{liquidacao.qtd_emprestimos_dia || 0} emp.</Text>
-              </View>
-              <View style={[styles.operacaoCard, styles.operacaoReceitas]}>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.operacaoCard, styles.operacaoReceitas]} onPress={() => { setTipoFinanceiro('RECEITAS'); setModalFinanceiroVisible(true); }} activeOpacity={0.7}>
                 <Text style={styles.opLabelAzul}>{t.receitas}</Text>
-                <Text style={styles.opValorAzul}>{formatarMoedaCompacta(liquidacao.valor_recebido_dia)}</Text>
-                <Text style={styles.opDetalheAzul}>{liquidacao.pagamentos_pagos || 0} pag.</Text>
-              </View>
-              <View style={[styles.operacaoCard, styles.operacaoDespesas]}>
+                <Text style={styles.opValorAzul}>{formatarMoedaCompacta(liquidacao.total_receitas_dia)}</Text>
+                <Text style={styles.opDetalheAzul}>{liquidacao.qtd_receitas_dia || 0} lanç.</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.operacaoCard, styles.operacaoDespesas]} onPress={() => { setTipoFinanceiro('DESPESAS'); setModalFinanceiroVisible(true); }} activeOpacity={0.7}>
                 <Text style={styles.opLabelVermelho}>{t.despesas}</Text>
                 <Text style={styles.opValorVermelho}>{formatarMoedaCompacta(liquidacao.total_despesas_dia)}</Text>
                 <Text style={styles.opDetalheVermelho}>{liquidacao.qtd_despesas_dia || 0} desp.</Text>
-              </View>
+              </TouchableOpacity>
             </View>
 
             {/* Micro Seguro */}
-            <TouchableOpacity style={styles.microSeguroCard}>
+            <TouchableOpacity style={styles.microSeguroCard} onPress={() => setModalMicroseguroVisible(true)} activeOpacity={0.7}>
               <View style={styles.microSeguroHeader}>
                 <Text style={styles.microSeguroIcon}>🛡️</Text>
                 <Text style={styles.microSeguroTitle}>{t.microSeguro}</Text>
@@ -1079,6 +1087,50 @@ export default function LiquidacaoScreen({ navigation }: any) {
           </View>
         </View>
       </Modal>
+
+      {/* ═══ MODAIS DE DETALHE ═══ */}
+      {liquidacao && (
+        <>
+          <ModalExtrato
+            visible={modalExtratoVisible}
+            onClose={() => setModalExtratoVisible(false)}
+            liquidacaoId={liquidacao.id}
+            caixaInicial={liquidacao.caixa_inicial}
+            caixaFinal={liquidacao.caixa_final}
+          />
+          <ModalPagamentos
+            visible={modalPagamentosVisible}
+            onClose={() => setModalPagamentosVisible(false)}
+            liquidacaoId={liquidacao.id}
+            totalPagos={liquidacao.pagamentos_pagos || 0}
+            totalNaoPagos={liquidacao.pagamentos_nao_pagos || 0}
+            valorRecebido={liquidacao.valor_recebido_dia || 0}
+          />
+          <ModalFinanceiro
+            visible={modalFinanceiroVisible}
+            onClose={() => setModalFinanceiroVisible(false)}
+            liquidacaoId={liquidacao.id}
+            tipo={tipoFinanceiro}
+            totalValor={
+              tipoFinanceiro === 'VENDAS' ? (liquidacao.total_emprestado_dia || 0) :
+              tipoFinanceiro === 'RECEITAS' ? (liquidacao.total_receitas_dia || 0) :
+              (liquidacao.total_despesas_dia || 0)
+            }
+            totalQtd={
+              tipoFinanceiro === 'VENDAS' ? (liquidacao.qtd_emprestimos_dia || 0) :
+              tipoFinanceiro === 'RECEITAS' ? (liquidacao.qtd_receitas_dia || 0) :
+              (liquidacao.qtd_despesas_dia || 0)
+            }
+          />
+          <ModalMicroseguro
+            visible={modalMicroseguroVisible}
+            onClose={() => setModalMicroseguroVisible(false)}
+            liquidacaoId={liquidacao.id}
+            totalValor={liquidacao.total_microseguro_dia || 0}
+            totalQtd={liquidacao.qtd_microseguros_dia || 0}
+          />
+        </>
+      )}
     </View>
   );
 }

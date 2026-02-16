@@ -67,6 +67,238 @@ const DDI_LIST: DDIOption[] = [
 ];
 
 // ============================================================
+// COMPONENTE CALENDÁRIO
+// ============================================================
+
+const MESES_NOME = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
+];
+const DIAS_SEMANA_CURTO = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+
+function CalendarioSelector({
+  dataSelecionada,
+  onSelect,
+}: {
+  dataSelecionada: string;
+  onSelect: (dateStr: string) => void;
+}) {
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+
+  const [mesVis, setMesVis] = useState(
+    dataSelecionada
+      ? new Date(dataSelecionada + 'T00:00:00').getMonth()
+      : hoje.getMonth()
+  );
+  const [anoVis, setAnoVis] = useState(
+    dataSelecionada
+      ? new Date(dataSelecionada + 'T00:00:00').getFullYear()
+      : hoje.getFullYear()
+  );
+
+  // Gerar dias do mês
+  const gerarDias = () => {
+    const primeiroDia = new Date(anoVis, mesVis, 1);
+    const ultimoDia = new Date(anoVis, mesVis + 1, 0);
+    const diasNoMes = ultimoDia.getDate();
+    const inicioSemana = primeiroDia.getDay(); // 0=Dom
+
+    const dias: Array<{ dia: number; dateStr: string; ehHoje: boolean; ehPassado: boolean } | null> = [];
+
+    // Espaços vazios antes do dia 1
+    for (let i = 0; i < inicioSemana; i++) {
+      dias.push(null);
+    }
+
+    // Dias do mês
+    for (let d = 1; d <= diasNoMes; d++) {
+      const date = new Date(anoVis, mesVis, d);
+      const dateStr = `${anoVis}-${String(mesVis + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      dias.push({
+        dia: d,
+        dateStr,
+        ehHoje: date.getTime() === hoje.getTime(),
+        ehPassado: date < hoje,
+      });
+    }
+
+    return dias;
+  };
+
+  const navMes = (dir: number) => {
+    let novoMes = mesVis + dir;
+    let novoAno = anoVis;
+    if (novoMes > 11) { novoMes = 0; novoAno++; }
+    if (novoMes < 0) { novoMes = 11; novoAno--; }
+    setMesVis(novoMes);
+    setAnoVis(novoAno);
+  };
+
+  const dias = gerarDias();
+
+  return (
+    <View style={calStyles.container}>
+      {/* Navegação mês/ano */}
+      <View style={calStyles.navRow}>
+        <TouchableOpacity onPress={() => navMes(-1)} style={calStyles.navBtn} activeOpacity={0.6}>
+          <Text style={calStyles.navBtnText}>◀</Text>
+        </TouchableOpacity>
+        <Text style={calStyles.navTitle}>{MESES_NOME[mesVis]} {anoVis}</Text>
+        <TouchableOpacity onPress={() => navMes(1)} style={calStyles.navBtn} activeOpacity={0.6}>
+          <Text style={calStyles.navBtnText}>▶</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Header dias da semana */}
+      <View style={calStyles.weekRow}>
+        {DIAS_SEMANA_CURTO.map((dia, i) => (
+          <View key={i} style={calStyles.weekCell}>
+            <Text style={[calStyles.weekText, i === 0 && { color: '#EF4444' }]}>{dia}</Text>
+          </View>
+        ))}
+      </View>
+
+      {/* Grid de dias */}
+      <View style={calStyles.daysGrid}>
+        {dias.map((item, index) => {
+          if (!item) {
+            return <View key={`empty-${index}`} style={calStyles.dayCell} />;
+          }
+
+          const selecionado = item.dateStr === dataSelecionada;
+
+          return (
+            <TouchableOpacity
+              key={item.dateStr}
+              style={[
+                calStyles.dayCell,
+                item.ehHoje && calStyles.dayCellHoje,
+                selecionado && calStyles.dayCellSelecionado,
+              ]}
+              onPress={() => onSelect(item.dateStr)}
+              activeOpacity={0.6}
+            >
+              <Text style={[
+                calStyles.dayText,
+                item.ehPassado && !item.ehHoje && calStyles.dayTextPassado,
+                item.ehHoje && calStyles.dayTextHoje,
+                selecionado && calStyles.dayTextSelecionado,
+              ]}>
+                {item.dia}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {/* Botão Hoje */}
+      <TouchableOpacity
+        style={calStyles.hojeBtn}
+        onPress={() => {
+          const hojeStr = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`;
+          setMesVis(hoje.getMonth());
+          setAnoVis(hoje.getFullYear());
+          onSelect(hojeStr);
+        }}
+        activeOpacity={0.7}
+      >
+        <Text style={calStyles.hojeBtnText}>📅 Hoje ({hoje.toLocaleDateString('pt-BR')})</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const calStyles = StyleSheet.create({
+  container: {
+    padding: 16,
+  },
+  navRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  navBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F3F4F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  navBtnText: {
+    fontSize: 16,
+    color: '#374151',
+  },
+  navTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  weekRow: {
+    flexDirection: 'row',
+    marginBottom: 8,
+  },
+  weekCell: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  weekText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#6B7280',
+  },
+  daysGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  dayCell: {
+    width: '14.28%',
+    aspectRatio: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 20,
+  },
+  dayCellHoje: {
+    borderWidth: 2,
+    borderColor: '#2563EB',
+  },
+  dayCellSelecionado: {
+    backgroundColor: '#2563EB',
+  },
+  dayText: {
+    fontSize: 15,
+    color: '#111827',
+    fontWeight: '500',
+  },
+  dayTextPassado: {
+    color: '#C0C5CE',
+  },
+  dayTextHoje: {
+    color: '#2563EB',
+    fontWeight: '700',
+  },
+  dayTextSelecionado: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  hojeBtn: {
+    marginTop: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 10,
+  },
+  hojeBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2563EB',
+  },
+});
+
+// ============================================================
 // COMPONENTE PRINCIPAL
 // ============================================================
 
@@ -1572,42 +1804,24 @@ export default function NovaVendaScreen({ navigation }: any) {
       </Modal>
 
       {/* ================================================ */}
-      {/* MODAL: Date Picker simplificado                  */}
+      {/* MODAL: Calendário para seleção de data           */}
       {/* ================================================ */}
       <Modal visible={showDatePicker} transparent animationType="fade" onRequestClose={() => setShowDatePicker(false)}>
         <Pressable style={styles.pickerOverlay} onPress={() => setShowDatePicker(false)}>
-          <View style={styles.pickerCard} onStartShouldSetResponder={() => true}>
+          <View style={[styles.pickerCard, { maxHeight: '80%' }]} onStartShouldSetResponder={() => true}>
             <View style={styles.pickerHeader}>
               <Text style={styles.pickerTitle}>Data do 1º vencimento</Text>
               <TouchableOpacity onPress={() => setShowDatePicker(false)}>
                 <Text style={styles.pickerCloseText}>✕</Text>
               </TouchableOpacity>
             </View>
-            <View style={{ padding: 20 }}>
-              <TextInput
-                style={styles.input}
-                value={dataPrimeiroVencimento}
-                onChangeText={(text) => {
-                  // Aceitar formato YYYY-MM-DD
-                  const clean = text.replace(/[^\d-]/g, '');
-                  setDataPrimeiroVencimento(clean);
-                }}
-                placeholder="AAAA-MM-DD"
-                placeholderTextColor="#9CA3AF"
-                keyboardType="numeric"
-                maxLength={10}
-              />
-              <Text style={[styles.infoBoxText, { marginTop: 8 }]}>
-                Formato: AAAA-MM-DD (ex: 2026-02-15)
-              </Text>
-              <TouchableOpacity
-                style={[styles.confirmButton, { marginTop: 16 }]}
-                onPress={() => setShowDatePicker(false)}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.confirmButtonText}>Confirmar</Text>
-              </TouchableOpacity>
-            </View>
+            <CalendarioSelector
+              dataSelecionada={dataPrimeiroVencimento}
+              onSelect={(dateStr) => {
+                setDataPrimeiroVencimento(dateStr);
+                setShowDatePicker(false);
+              }}
+            />
           </View>
         </Pressable>
       </Modal>

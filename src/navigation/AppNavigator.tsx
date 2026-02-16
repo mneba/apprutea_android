@@ -10,6 +10,7 @@ import { LiquidacaoProvider, useLiquidacaoContext } from '../contexts/Liquidacao
 import ClientesScreen from '../screens/ClientesScreen';
 import LiquidacaoScreen from '../screens/LiquidacaoScreen';
 import LoginScreen from '../screens/LoginScreen';
+import NovaMovimentacaoScreen from '../screens/NovaMovimentacaoScreen';
 import NovaVendaScreen from '../screens/NovaVendaScreen';
 import PagamentoScreen from '../screens/PagamentoScreen';
 import PerfilScreen from '../screens/PerfilScreen';
@@ -259,6 +260,11 @@ function AppStack() {
       <Stack.Screen 
         name="NovoCliente" 
         component={NovaVendaScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen 
+        name="NovaMovimentacao" 
+        component={NovaMovimentacaoScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen 
