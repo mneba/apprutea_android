@@ -9,10 +9,12 @@ import {
   Dimensions,
   FlatList,
   Modal,
+  Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
+  View,
 } from 'react-native';
 import { supabase } from '../services/supabase';
 
@@ -72,9 +74,24 @@ interface ExtratoProps {
   caixaFinal: number;
 }
 
-export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, caixaFinal }: ExtratoProps) {
+// =====================================================
+// 1. MODAL EXTRATO (CAIXA) - ESTILO CUPOM FISCAL
+// =====================================================
+interface ExtratoProps {
+  visible: boolean;
+  onClose: () => void;
+  liquidacaoId: string;
+  caixaInicial: number;
+  caixaFinal: number;
+  rotaNome?: string;
+}
+
+export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, caixaFinal, rotaNome }: ExtratoProps) {
   const [registros, setRegistros] = useState<any[]>([]);
+  const [pagamentos, setPagamentos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const scrollRef = React.useRef<ScrollView>(null);
+  const extratoRef = React.useRef<View>(null);
 
   useEffect(() => {
     if (visible && liquidacaoId) carregarExtrato();
@@ -83,6 +100,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const carregarExtrato = async () => {
     setLoading(true);
     try {
+      // Busca movimentações financeiras
       const { data, error } = await supabase
         .from('financeiro')
         .select('id, tipo, categoria, descricao, valor, data_lancamento, created_at, forma_pagamento, cliente_nome, status')
@@ -91,6 +109,19 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         .order('created_at', { ascending: true });
 
       if (!error) setRegistros(data || []);
+
+      // Busca pagamentos de parcelas (cobranças)
+      const { data: pags, error: errPag } = await supabase
+        .from('pagamentos_parcelas')
+        .select(`
+          id, numero_parcela, valor_pago_total, forma_pagamento, created_at,
+          cliente:cliente_id(nome, consecutivo)
+        `)
+        .eq('liquidacao_id', liquidacaoId)
+        .eq('estornado', false)
+        .order('created_at', { ascending: true });
+
+      if (!errPag) setPagamentos(pags || []);
     } catch (e) {
       console.error('Erro extrato:', e);
     } finally {
@@ -100,92 +131,231 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
 
   const totalEntradas = registros.filter(r => r.tipo === 'RECEBER').reduce((s, r) => s + parseFloat(r.valor), 0);
   const totalSaidas = registros.filter(r => r.tipo === 'PAGAR').reduce((s, r) => s + parseFloat(r.valor), 0);
+  const totalPagamentos = pagamentos.reduce((s, p) => s + parseFloat(p.valor_pago_total || 0), 0);
+  const dataHoje = new Date().toLocaleDateString('pt-BR');
+  const horaAgora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
-  const renderItem = ({ item, index }: any) => {
-    const isEntrada = item.tipo === 'RECEBER';
-    return (
-      <View style={[dStyles.extratoItem, index === 0 && { borderTopWidth: 0 }]}>
-        <View style={dStyles.extratoItemLeft}>
-          <View style={[dStyles.extratoIconCircle, { backgroundColor: isEntrada ? '#D1FAE5' : '#FEE2E2' }]}>
-            <Text style={{ fontSize: 12 }}>{isEntrada ? '↓' : '↑'}</Text>
-          </View>
-          <View style={{ flex: 1, marginLeft: 10 }}>
-            <Text style={dStyles.extratoCategoria}>{formatarCategoria(item.categoria)}</Text>
-            {item.cliente_nome ? (
-              <Text style={dStyles.extratoCliente}>{item.cliente_nome}</Text>
-            ) : item.descricao ? (
-              <Text style={dStyles.extratoCliente}>{item.descricao}</Text>
-            ) : null}
-            <Text style={dStyles.extratoHora}>{fmtHora(item.created_at)}</Text>
-          </View>
-        </View>
-        <Text style={[dStyles.extratoValor, { color: isEntrada ? '#059669' : '#DC2626' }]}>
-          {isEntrada ? '+' : '-'} {fmt(parseFloat(item.valor))}
-        </Text>
-      </View>
-    );
+  const DIV = '- - - - - - - - - - - -';
+  const DDIV = '= = = = = = = = = = = =';
+
+  const compartilharExtrato = async () => {
+    try {
+      let txt = '';
+      txt += `${rotaNome || 'Rota'}\n`;
+      txt += `EXTRATO LIQUIDAÇÃO DIÁRIA\n`;
+      txt += `= = = = = = = = = = = =\n`;
+      txt += `${dataHoje}  ${horaAgora}\n`;
+      txt += `- - - - - - - - - - - -\n`;
+      txt += `CAIXA INICIAL     ${fmt(caixaInicial)}\n`;
+      txt += `- - - - - - - - - - - -\n`;
+      txt += `(+) ENTRADAS      ${fmt(totalEntradas)}\n`;
+      txt += `(-) SAIDAS        ${fmt(totalSaidas)}\n`;
+      txt += `(+) COBRANÇAS     ${fmt(totalPagamentos)}\n`;
+      txt += `= = = = = = = = = = = =\n`;
+      txt += `CAIXA FINAL       ${fmt(caixaFinal)}\n`;
+      txt += `= = = = = = = = = = = =\n\n`;
+
+      txt += `MOVIMENTAÇÕES (${registros.length})\n`;
+      txt += `- - - - - - - - - - - -\n`;
+      registros.forEach((item, idx) => {
+        const sinal = item.tipo === 'RECEBER' ? '+' : '-';
+        txt += `${String(idx + 1).padStart(2, '0')} ${formatarCategoria(item.categoria)}\n`;
+        txt += `   ${sinal}${fmt(parseFloat(item.valor))}  ${fmtHora(item.created_at)}\n`;
+      });
+
+      if (pagamentos.length > 0) {
+        txt += `\nCOBRANÇAS (${pagamentos.length})\n`;
+        txt += `- - - - - - - - - - - -\n`;
+        pagamentos.forEach((p) => {
+          const nome = p.cliente?.nome || 'Cliente';
+          txt += `${nome}  +${fmt(parseFloat(p.valor_pago_total))}\n`;
+        });
+      }
+
+      txt += `= = = = = = = = = = = =\n`;
+      txt += `TOTAL ENTRADAS:  ${fmt(totalEntradas)}\n`;
+      txt += `TOTAL COBRANÇAS: ${fmt(totalPagamentos)}\n`;
+      txt += `TOTAL SAIDAS:    ${fmt(totalSaidas)}\n`;
+      txt += `- - - - - - - - - - - -\n`;
+      txt += `SALDO FINAL:     ${fmt(caixaFinal)}\n`;
+      txt += `= = = = = = = = = = = =\n`;
+      txt += `*** FIM DO EXTRATO ***\n`;
+
+      const { Share } = require('react-native');
+      await Share.share({ message: txt, title: `Extrato ${dataHoje}` });
+    } catch (e) {
+      console.error('Erro compartilhar:', e);
+    }
   };
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={dStyles.container}>
-        <ModalHeader titulo="Extrato do Dia" icone="📊" cor="#10B981" onClose={onClose} />
-
-        {/* Resumo */}
-        <View style={dStyles.extratoResumo}>
-          <View style={dStyles.extratoResumoRow}>
-            <Text style={dStyles.extratoResumoLabel}>Caixa Inicial</Text>
-            <Text style={dStyles.extratoResumoValue}>{fmt(caixaInicial)}</Text>
-          </View>
-          <View style={dStyles.extratoDivider} />
-          <View style={dStyles.extratoResumoRow}>
-            <Text style={[dStyles.extratoResumoLabel, { color: '#059669' }]}>+ Entradas</Text>
-            <Text style={[dStyles.extratoResumoValue, { color: '#059669' }]}>{fmt(totalEntradas)}</Text>
-          </View>
-          <View style={dStyles.extratoResumoRow}>
-            <Text style={[dStyles.extratoResumoLabel, { color: '#DC2626' }]}>- Saídas</Text>
-            <Text style={[dStyles.extratoResumoValue, { color: '#DC2626' }]}>{fmt(totalSaidas)}</Text>
-          </View>
-          <View style={dStyles.extratoDivider} />
-          <View style={dStyles.extratoResumoRow}>
-            <Text style={[dStyles.extratoResumoLabel, { fontWeight: '700', fontSize: 15 }]}>Caixa Final</Text>
-            <Text style={[dStyles.extratoResumoValue, { fontWeight: '700', fontSize: 18, color: '#10B981' }]}>{fmt(caixaFinal)}</Text>
-          </View>
+      <View style={cupom.container}>
+        {/* Header */}
+        <View style={cupom.header}>
+          <Text style={cupom.headerTxt}>EXTRATO DO DIA</Text>
+          <TouchableOpacity onPress={onClose} style={cupom.closeBtn}>
+            <Text style={cupom.closeTxt}>✕</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Lista de Movimentos */}
-        <View style={dStyles.extratoListHeader}>
-          <Text style={dStyles.extratoListTitle}>Movimentações ({registros.length})</Text>
-        </View>
+        <ScrollView ref={scrollRef} style={cupom.scroll} showsVerticalScrollIndicator={false}>
+          <View ref={extratoRef} style={cupom.papel}>
+            {/* Cabeçalho */}
+            <Text style={cupom.centro}>{rotaNome || 'Rota'}</Text>
+            <Text style={cupom.centroSub}>EXTRATO LIQUIDAÇÃO DIÁRIA</Text>
+            <Text style={cupom.div2}>{DDIV}</Text>
+            <Text style={cupom.centro}>{dataHoje}  {horaAgora}</Text>
+            <Text style={cupom.div1}>{DIV}</Text>
 
-        {loading ? (
-          <ActivityIndicator size="large" color="#10B981" style={{ marginTop: 40 }} />
-        ) : registros.length === 0 ? (
-          <View style={dStyles.emptyState}>
-            <Text style={dStyles.emptyIcon}>📋</Text>
-            <Text style={dStyles.emptyText}>Nenhuma movimentação registrada</Text>
+            {/* Resumo */}
+            <View style={cupom.linha}>
+              <Text style={cupom.txt}>CAIXA INICIAL</Text>
+              <Text style={cupom.txt}>{fmt(caixaInicial)}</Text>
+            </View>
+            <Text style={cupom.div1}>{DIV}</Text>
+            <View style={cupom.linha}>
+              <Text style={cupom.txtVerde}>(+) ENTRADAS</Text>
+              <Text style={cupom.txtVerde}>{fmt(totalEntradas)}</Text>
+            </View>
+            <View style={cupom.linha}>
+              <Text style={cupom.txtVerde}>(+) COBRANÇAS</Text>
+              <Text style={cupom.txtVerde}>{fmt(totalPagamentos)}</Text>
+            </View>
+            <View style={cupom.linha}>
+              <Text style={cupom.txtVerm}>(-) SAIDAS</Text>
+              <Text style={cupom.txtVerm}>{fmt(totalSaidas)}</Text>
+            </View>
+            <Text style={cupom.div2}>{DDIV}</Text>
+            <View style={cupom.linha}>
+              <Text style={cupom.txtBold}>CAIXA FINAL</Text>
+              <Text style={cupom.txtBold}>{fmt(caixaFinal)}</Text>
+            </View>
+            <Text style={cupom.div2}>{DDIV}</Text>
+
+            {loading ? (
+              <ActivityIndicator size="small" color="#333" style={{ marginVertical: 20 }} />
+            ) : (
+              <>
+                {/* Movimentações */}
+                <Text style={[cupom.centro, { marginTop: 10 }]}>MOVIMENTAÇÕES ({registros.length})</Text>
+                <Text style={cupom.div1}>{DIV}</Text>
+
+                {registros.length === 0 ? (
+                  <Text style={cupom.centro}>Nenhuma movimentação</Text>
+                ) : (
+                  registros.map((item, idx) => {
+                    const isEntrada = item.tipo === 'RECEBER';
+                    const sinal = isEntrada ? '+' : '-';
+                    return (
+                      <View key={item.id}>
+                        <View style={cupom.itemRow}>
+                          <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
+                          <Text style={cupom.itemCat} numberOfLines={1}>{formatarCategoria(item.categoria)}</Text>
+                          <Text style={[cupom.itemVal, { color: isEntrada ? '#059669' : '#DC2626' }]}>{sinal}{fmt(parseFloat(item.valor))}</Text>
+                        </View>
+                        {(item.cliente_nome || item.descricao) && (
+                          <Text style={cupom.itemSub} numberOfLines={1}>   {item.cliente_nome || item.descricao}</Text>
+                        )}
+                        <View style={cupom.itemMeta}>
+                          <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
+                          {item.forma_pagamento && <Text style={cupom.itemHora}>{item.forma_pagamento}</Text>}
+                        </View>
+                        {idx < registros.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
+                      </View>
+                    );
+                  })
+                )}
+
+                {/* Cobranças (Pagamentos de Parcelas) */}
+                {pagamentos.length > 0 && (
+                  <>
+                    <Text style={cupom.div1}>{DIV}</Text>
+                    <Text style={[cupom.centro, { marginTop: 4 }]}>COBRANÇAS ({pagamentos.length})</Text>
+                    <Text style={cupom.div1}>{DIV}</Text>
+                    {pagamentos.map((p, idx) => {
+                      const nome = p.cliente?.nome || 'Cliente';
+                      return (
+                        <View key={p.id} style={cupom.linha}>
+                          <Text style={cupom.txtSmall} numberOfLines={1}>{nome}</Text>
+                          <Text style={cupom.txtSmallVerde}>+{fmt(parseFloat(p.valor_pago_total || 0))}</Text>
+                        </View>
+                      );
+                    })}
+                  </>
+                )}
+
+                {/* Totais finais */}
+                <Text style={cupom.div2}>{DDIV}</Text>
+                <View style={cupom.linha}>
+                  <Text style={cupom.txt}>TOTAL ENTRADAS</Text>
+                  <Text style={cupom.txtVerde}>{fmt(totalEntradas)}</Text>
+                </View>
+                <View style={cupom.linha}>
+                  <Text style={cupom.txt}>TOTAL COBRANÇAS</Text>
+                  <Text style={cupom.txtVerde}>{fmt(totalPagamentos)}</Text>
+                </View>
+                <View style={cupom.linha}>
+                  <Text style={cupom.txt}>TOTAL SAIDAS</Text>
+                  <Text style={cupom.txtVerm}>{fmt(totalSaidas)}</Text>
+                </View>
+                <Text style={cupom.div1}>{DIV}</Text>
+                <View style={cupom.linha}>
+                  <Text style={cupom.txtBold}>SALDO FINAL</Text>
+                  <Text style={cupom.txtBold}>{fmt(caixaFinal)}</Text>
+                </View>
+                <Text style={cupom.div2}>{DDIV}</Text>
+                <Text style={[cupom.centro, { marginTop: 8, fontSize: 10 }]}>*** FIM DO EXTRATO ***</Text>
+              </>
+            )}
+            <View style={{ height: 24 }} />
           </View>
-        ) : (
-          <FlatList
-            data={registros}
-            keyExtractor={(item) => item.id}
-            renderItem={renderItem}
-            contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}
-            showsVerticalScrollIndicator={false}
-          />
-        )}
+        </ScrollView>
 
         {/* Botão Compartilhar */}
-        <View style={dStyles.shareBar}>
-          <TouchableOpacity style={dStyles.shareButton} onPress={() => {/* TODO: compartilhar */}}>
-            <Text style={dStyles.shareIcon}>📤</Text>
-            <Text style={dStyles.shareText}>Compartilhar Extrato</Text>
+        <View style={cupom.shareBar}>
+          <TouchableOpacity style={cupom.shareBtn} onPress={compartilharExtrato}>
+            <Text style={cupom.shareTxt}>📤 Compartilhar Extrato</Text>
           </TouchableOpacity>
         </View>
       </View>
     </Modal>
   );
 }
+
+const MONO = Platform.OS === 'ios' ? 'Courier' : 'monospace';
+
+const cupom = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#E8E4DF' },
+  header: { backgroundColor: '#333', paddingTop: 50, paddingBottom: 14, paddingHorizontal: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  headerTxt: { color: '#fff', fontSize: 16, fontWeight: '700', fontFamily: MONO },
+  closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
+  closeTxt: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  scroll: { flex: 1, paddingHorizontal: 12, paddingTop: 12 },
+  papel: { backgroundColor: '#FFFEF7', borderRadius: 4, paddingHorizontal: 14, paddingVertical: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
+  centro: { textAlign: 'center', fontSize: 12, color: '#1F2937', fontFamily: MONO, fontWeight: '700' },
+  centroSub: { textAlign: 'center', fontSize: 10, color: '#6B7280', fontFamily: MONO, marginTop: 2 },
+  linha: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 },
+  txt: { fontSize: 11, color: '#1F2937', fontFamily: MONO },
+  txtBold: { fontSize: 12, color: '#1F2937', fontFamily: MONO, fontWeight: '700' },
+  txtVerde: { fontSize: 11, color: '#059669', fontFamily: MONO },
+  txtVerm: { fontSize: 11, color: '#DC2626', fontFamily: MONO },
+  txtSmall: { fontSize: 10, color: '#1F2937', fontFamily: MONO, flex: 1 },
+  txtSmallVerde: { fontSize: 10, color: '#059669', fontFamily: MONO, fontWeight: '600' },
+  div1: { textAlign: 'center', fontSize: 9, color: '#D1D5DB', fontFamily: MONO, marginVertical: 3 },
+  div2: { textAlign: 'center', fontSize: 9, color: '#9CA3AF', fontFamily: MONO, marginVertical: 3 },
+  divPonto: { textAlign: 'center', fontSize: 8, color: '#E5E7EB', fontFamily: MONO, marginVertical: 1 },
+  itemRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
+  itemIdx: { fontSize: 10, color: '#9CA3AF', width: 20, fontFamily: MONO },
+  itemCat: { flex: 1, fontSize: 11, color: '#1F2937', fontFamily: MONO, fontWeight: '600' },
+  itemVal: { fontSize: 11, fontWeight: '700', fontFamily: MONO },
+  itemSub: { fontSize: 10, color: '#6B7280', fontFamily: MONO },
+  itemMeta: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 1 },
+  itemHora: { fontSize: 9, color: '#9CA3AF', fontFamily: MONO },
+  shareBar: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#E8E4DF' },
+  shareBtn: { backgroundColor: '#333', paddingVertical: 14, borderRadius: 8, alignItems: 'center' },
+  shareTxt: { color: '#fff', fontSize: 14, fontWeight: '600' },
+});
 
 // =====================================================
 // 2. MODAL PAGAMENTOS (PARCELAS)
@@ -329,7 +499,7 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
             data={registros}
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
-            contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}
+            contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 40 }}
             showsVerticalScrollIndicator={false}
           />
         )}
@@ -442,7 +612,7 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
             data={registros}
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
-            contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}
+            contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 40 }}
             showsVerticalScrollIndicator={false}
           />
         )}
@@ -557,7 +727,7 @@ export function ModalMicroseguro({ visible, onClose, liquidacaoId, totalValor, t
             data={vendas}
             keyExtractor={(item) => item.id}
             renderItem={renderItem}
-            contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 40 }}
+            contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 40 }}
             showsVerticalScrollIndicator={false}
           />
         )}

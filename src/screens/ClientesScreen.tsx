@@ -206,6 +206,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [raw, setRaw] = useState<ClienteRotaDia[]>([]);
   const [pagasSet, setPagasSet] = useState<Set<string>>(new Set());
   const [pagMap, setPagMap] = useState<Map<string, PagamentoParcela>>(new Map());
+  const [clientesPagosNaLiq, setClientesPagosNaLiq] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<string | null>(null);
   const [empIdxMap, setEmpIdxMap] = useState<Record<string, number>>({});
   const [filtro, setFiltro] = useState<FiltroLiquidacao>('todos');
@@ -217,6 +218,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [loadTodos, setLoadTodos] = useState(false);
   const [expandedTodos, setExpandedTodos] = useState<string | null>(null);
   const [empIdxTodos, setEmpIdxTodos] = useState<Record<string, number>>({});
+  const [todosCount, setTodosCount] = useState<number | null>(null);
 
   // Estados dos Modais
   const [modalParcelasVisible, setModalParcelasVisible] = useState(false);
@@ -377,16 +379,32 @@ export default function ClientesScreen({ navigation, route }: any) {
         // Busca pagamentos NÃO estornados
         const { data: pags } = await supabase
           .from('pagamentos_parcelas')
-          .select('parcela_id, cliente_id, valor_pago_atual, valor_credito_gerado, valor_parcela, data_pagamento')
+          .select('parcela_id, cliente_id, valor_pago_atual, valor_credito_gerado, valor_parcela, data_pagamento, liquidacao_id')
           .in('parcela_id', ids)
           .eq('estornado', false);
         
         const m = new Map<string, PagamentoParcela>();
         const s = new Set<string>();
+        const cliPagos = new Set<string>();
+        
         (pags || []).forEach((p: any) => { 
           m.set(p.parcela_id, p); 
-          if (p.valor_pago_atual >= p.valor_parcela) s.add(p.parcela_id); 
+          if (p.valor_pago_atual >= p.valor_parcela) s.add(p.parcela_id);
+          // Se o pagamento foi feito NA liquidação atual → cliente "visitado/pago"
+          if (liqId && p.liquidacao_id === liqId) {
+            cliPagos.add(p.cliente_id);
+          }
         });
+        
+        // Também busca clientes pagos que NÃO estão no allData (parcelas já saíram da view)
+        if (liqId) {
+          const { data: todosPagLiq } = await supabase
+            .from('pagamentos_parcelas')
+            .select('cliente_id')
+            .eq('liquidacao_id', liqId)
+            .eq('estornado', false);
+          (todosPagLiq || []).forEach((p: any) => cliPagos.add(p.cliente_id));
+        }
         
         // Também adiciona ao pagasSet as parcelas que vieram como PAGO no allData
         allData.forEach((r: any) => {
@@ -396,9 +414,11 @@ export default function ClientesScreen({ navigation, route }: any) {
         });
         
         console.log('📋 PagasSet:', { total: s.size, ids: Array.from(s).slice(0, 5) });
+        console.log('📋 ClientesPagosNaLiq:', { total: cliPagos.size, ids: Array.from(cliPagos).slice(0, 5) });
         setPagMap(m); 
         setPagasSet(s);
-      } else { setPagMap(new Map()); setPagasSet(new Set()); }
+        setClientesPagosNaLiq(cliPagos);
+      } else { setPagMap(new Map()); setPagasSet(new Set()); setClientesPagosNaLiq(new Set()); }
     } catch (e) { console.error('Erro loadLiq:', e); }
     finally { setLoading(false); setRefreshing(false); }
   }, [rotaId, dataLiq, liqId]);
@@ -429,6 +449,21 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   useEffect(() => { loadLiq(); }, [loadLiq]);
   useEffect(() => { if (tab === 'todos') loadTodosClientes(); }, [tab, loadTodosClientes]);
+  
+  // Contagem rápida de clientes para exibir no tab "Todos" antes de carregar
+  useEffect(() => {
+    if (!rotaId || todosCount !== null) return;
+    (async () => {
+      try {
+        const { count } = await supabase
+          .from('emprestimos')
+          .select('cliente_id', { count: 'exact', head: true })
+          .eq('rota_id', rotaId)
+          .in('status', ['ATIVO', 'VENCIDO']);
+        setTodosCount(count || 0);
+      } catch { }
+    })();
+  }, [rotaId, todosCount]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -678,16 +713,50 @@ export default function ClientesScreen({ navigation, route }: any) {
     raw.forEach(r => {
       let g = m.get(r.cliente_id);
       if (!g) { g = { cliente_id: r.cliente_id, consecutivo: r.consecutivo, nome: r.nome, telefone_celular: r.telefone_celular, endereco: r.endereco, latitude: r.latitude, longitude: r.longitude, rota_id: r.rota_id, emprestimos: [], qtd_emprestimos: 0, tem_multiplos_vencimentos: false }; m.set(r.cliente_id, g); }
-      if (!g.emprestimos.some(e => e.parcela_id === r.parcela_id)) {
+      
+      // Verifica se já existe uma entrada para este empréstimo
+      const existente = g.emprestimos.find(e => e.emprestimo_id === r.emprestimo_id);
+      
+      if (existente) {
+        // Mesmo empréstimo — prefere parcela PENDENTE sobre PAGO
+        const pi = pagMap.get(r.parcela_id);
+        const rPago = isPaga(r.parcela_id, r.status_dia, pagasSet);
+        const existentePago = isPaga(existente.parcela_id, existente.status_dia, pagasSet);
+        
+        // Substitui se a existente é paga e esta é pendente, ou se esta tem menor número de parcela e ambas são pendentes
+        if ((existentePago && !rPago) || (!existentePago && !rPago && r.numero_parcela < existente.numero_parcela)) {
+          Object.assign(existente, {
+            parcela_id: r.parcela_id, numero_parcela: r.numero_parcela,
+            valor_parcela: r.valor_parcela, valor_pago_parcela: r.valor_pago_parcela,
+            saldo_parcela: r.saldo_parcela, status_parcela: r.status_parcela,
+            data_vencimento: r.data_vencimento, ordem_visita_dia: r.ordem_visita_dia,
+            tem_parcelas_vencidas: r.tem_parcelas_vencidas,
+            total_parcelas_vencidas: r.total_parcelas_vencidas,
+            valor_total_vencido: r.valor_total_vencido,
+            status_dia: r.status_dia, is_parcela_atrasada: r.is_parcela_atrasada,
+            saldo_emprestimo: r.saldo_emprestimo,
+            pagamento_info: pi ? { valorPago: pi.valor_pago_atual, creditoGerado: pi.valor_credito_gerado, valorParcela: pi.valor_parcela } : undefined,
+          });
+        }
+        // Acumula atrasadas
+        if (r.tem_parcelas_vencidas && r.total_parcelas_vencidas > existente.total_parcelas_vencidas) {
+          existente.tem_parcelas_vencidas = r.tem_parcelas_vencidas;
+          existente.total_parcelas_vencidas = r.total_parcelas_vencidas;
+          existente.valor_total_vencido = r.valor_total_vencido;
+        }
+      } else {
+        // Novo empréstimo para este cliente
         const pi = pagMap.get(r.parcela_id);
         g.emprestimos.push({ emprestimo_id: r.emprestimo_id, saldo_emprestimo: r.saldo_emprestimo, valor_principal: r.valor_principal, numero_parcelas: r.numero_parcelas, status_emprestimo: r.status_emprestimo, frequencia_pagamento: r.frequencia_pagamento, parcela_id: r.parcela_id, numero_parcela: r.numero_parcela, valor_parcela: r.valor_parcela, valor_pago_parcela: r.valor_pago_parcela, saldo_parcela: r.saldo_parcela, status_parcela: r.status_parcela, data_vencimento: r.data_vencimento, ordem_visita_dia: r.ordem_visita_dia, tem_parcelas_vencidas: r.tem_parcelas_vencidas, total_parcelas_vencidas: r.total_parcelas_vencidas, valor_total_vencido: r.valor_total_vencido, status_dia: r.status_dia, is_parcela_atrasada: r.is_parcela_atrasada, pagamento_info: pi ? { valorPago: pi.valor_pago_atual, creditoGerado: pi.valor_credito_gerado, valorParcela: pi.valor_parcela } : undefined });
       }
     });
     m.forEach(g => { g.qtd_emprestimos = g.emprestimos.length; g.tem_multiplos_vencimentos = g.emprestimos.length > 1; });
     return Array.from(m.values());
-  }, [raw, pagMap]);
+  }, [raw, pagMap, pagasSet]);
 
-  const isCliPago = useCallback((c: ClienteAgrupado) => c.emprestimos.every(e => isPaga(e.parcela_id, e.status_dia, pagasSet)), [pagasSet]);
+  // Cliente é considerado "pago/visitado" se recebeu QUALQUER pagamento na liquidação atual
+  // Regra de negócio: vendedor visitou, cobrou (mesmo parcial/atrasada) → sai da lista
+  const isCliPago = useCallback((c: ClienteAgrupado) => clientesPagosNaLiq.has(c.cliente_id), [clientesPagosNaLiq]);
 
   const filtered = useMemo(() => {
     let r = [...grouped];
@@ -881,7 +950,7 @@ export default function ClientesScreen({ navigation, route }: any) {
           onPress={() => setTab('todos')}
         >
           <Text style={S.tbI}>👥</Text>
-          <Text style={[S.tbTx, tab === 'todos' && S.tbTxOn]}>{t.todosList} ({todosList.length})</Text>
+          <Text style={[S.tbTx, tab === 'todos' && S.tbTxOn]}>{t.todosList} ({todosList.length > 0 ? todosList.length : todosCount ?? '...'})</Text>
         </TouchableOpacity>
       </View>
       <View style={S.srR}><View style={S.srB}><Text style={S.srI}>🔍</Text><TextInput style={S.srIn} placeholder={t.buscar} placeholderTextColor="#9CA3AF" value={busca} onChangeText={setBusca} /></View>{tab === 'liquidacao' && <TouchableOpacity style={S.orB} onPress={() => setShowOrd(!showOrd)}><Text style={S.orI}>↕️</Text><Text style={S.orTx}>{ord === 'rota' ? t.ordemRota : t.ordemNome}</Text><Text style={S.orCh}>▼</Text></TouchableOpacity>}</View>

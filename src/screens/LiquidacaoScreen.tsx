@@ -24,6 +24,7 @@ type Language = 'pt-BR' | 'es';
 interface ContaRota {
   id: string;
   saldo_atual: number;
+  nome: string;
 }
 
 interface DiaCalendario {
@@ -258,7 +259,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
       // Buscar saldo da conta da rota (será usado como caixa inicial automático)
       const { data: contaData } = await supabase
         .from('contas')
-        .select('id, saldo_atual')
+        .select('id, saldo_atual, nome')
         .eq('rota_id', vendedor.rota_id)
         .eq('tipo_conta', 'ROTA')
         .eq('status', 'ATIVA')
@@ -475,6 +476,13 @@ export default function LiquidacaoScreen({ navigation }: any) {
     if (status === 'ABERTO' || status === 'ABERTA') return '○';
     if (status === 'REABERTO' || status === 'REABERTA') return '⟳';
     return '✓';
+  };
+
+  // ==================== SAUDAÇÃO ====================
+  const getSaudacao = () => {
+    const h = new Date().getHours();
+    if (language === 'es') return h < 12 ? 'Buenos días' : h < 18 ? 'Buenas tardes' : 'Buenas noches';
+    return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
   };
 
   // ==================== FORMATADORES ====================
@@ -801,36 +809,31 @@ export default function LiquidacaoScreen({ navigation }: any) {
       >
         {liquidacao ? (
           <>
-            {/* Card Vendedor + Status */}
-            <View style={[styles.card, styles.cardVendedor, { borderTopColor: isReaberto ? '#F59E0B' : isAberto ? '#10B981' : '#EF4444' }]}>
-              <View style={styles.vendedorRow}>
-                <View style={styles.avatar}><Text style={styles.avatarText}>👤</Text></View>
-                <Text style={styles.vendedorNome}>{vendedor?.nome}</Text>
-              </View>
-              
+            {/* Saudação do vendedor */}
+            <Text style={styles.saudacao}>{getSaudacao()}, {vendedor?.nome?.split(' ')[0] || 'Vendedor'}</Text>
+
+            {/* Card Status Liquidação (compacto) */}
+            <View style={[styles.card, styles.cardStatus]}>
               <View style={styles.statusRow}>
-                <View style={styles.dataContainer}>
-                  <Text style={styles.statusIcon}>{isAberto ? '🔓' : isReaberto ? '🔄' : '🔒'}</Text>
-                  <Text style={styles.dataText}>{formatarData(liquidacao.data_abertura)}</Text>
-                </View>
+                <Text style={styles.statusIcon}>{isAberto ? '🔓' : isReaberto ? '🔄' : '🔒'}</Text>
+                <Text style={styles.dataText}>{formatarData(liquidacao.data_abertura)}</Text>
                 <View style={[styles.statusBadge, { backgroundColor: isReaberto ? '#FEF3C7' : isAberto ? '#D1FAE5' : '#FEE2E2' }]}>
                   <Text style={[styles.statusText, { color: isReaberto ? '#D97706' : isAberto ? '#047857' : '#DC2626' }]}>
                     {isReaberto ? 'REABERTO' : isAberto ? t.aberto : t.fechado}
                   </Text>
                 </View>
+                <View style={{ flex: 1 }} />
+                <TouchableOpacity style={styles.calendarBtn} onPress={handleAbrirCalendario}>
+                  <Text style={styles.calendarIcon}>📅</Text>
+                </TouchableOpacity>
               </View>
 
               {/* Aviso REABERTO */}
               {isReaberto && (
                 <View style={styles.avisoReaberto}>
-                  <Text style={styles.avisoReabertoText}>⚠️ Dia reaberto pelo admin. Apenas visualização - novos movimentos vão para a liquidação aberta.</Text>
+                  <Text style={styles.avisoReabertoText}>⚠️ Dia reaberto pelo admin. Apenas visualização.</Text>
                 </View>
               )}
-
-              {/* BOTÃO VER OUTRAS DATAS - AGORA COM onPress! */}
-              <TouchableOpacity style={styles.verDatasButton} onPress={handleAbrirCalendario}>
-                <Text style={styles.verDatasText}>{t.verOutrasDatas}</Text>
-              </TouchableOpacity>
             </View>
 
             {/* Card Meta/Atual/Progresso */}
@@ -1097,6 +1100,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
             liquidacaoId={liquidacao.id}
             caixaInicial={liquidacao.caixa_inicial}
             caixaFinal={liquidacao.caixa_final}
+            rotaNome={contaRota?.nome || 'Rota'}
           />
           <ModalPagamentos
             visible={modalPagamentosVisible}
@@ -1254,18 +1258,27 @@ const styles = StyleSheet.create({
   // Cards originais
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 4, elevation: 3 },
   cardVendedor: { borderTopWidth: 4 },
+  saudacao: { fontSize: 18, fontWeight: '700', color: '#1F2937', marginBottom: 12 },
+  cardStatus: { paddingVertical: 12, elevation: 0, shadowOpacity: 0 },
   vendedorRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+  avatarText: { fontSize: 20 },
+  vendedorNome: { fontSize: 16, fontWeight: '600', color: '#1F2937', flex: 1 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  dataContainer: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  statusIcon: { fontSize: 16 },
+  dataText: { fontSize: 14, color: '#374151', fontWeight: '500' },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
+  statusText: { fontSize: 11, fontWeight: '700' },
+  calendarBtn: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#BFDBFE' },
+  calendarIcon: { fontSize: 18 },
+  verDatasButton: { marginTop: 12, borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 8, paddingVertical: 10, alignItems: 'center', backgroundColor: '#F0F9FF' },
+  verDatasText: { color: '#3B82F6', fontSize: 13, fontWeight: '500' },
   avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   avatarText: { fontSize: 20 },
   vendedorNome: { fontSize: 16, fontWeight: '600', color: '#1F2937', flex: 1 },
   statusRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
   dataContainer: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  statusIcon: { fontSize: 14 },
-  dataText: { fontSize: 12, color: '#6B7280', fontWeight: '500' },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
-  statusText: { fontSize: 11, fontWeight: '700' },
-  verDatasButton: { marginTop: 12, borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 8, paddingVertical: 10, alignItems: 'center', backgroundColor: '#F0F9FF' },
-  verDatasText: { color: '#3B82F6', fontSize: 13, fontWeight: '500' },
   metaRow: { flexDirection: 'row', marginBottom: 12 },
   metaItem: { flex: 1, alignItems: 'center' },
   metaLabel: { fontSize: 10, color: '#6B7280', fontWeight: '600', textTransform: 'uppercase', marginBottom: 4 },
