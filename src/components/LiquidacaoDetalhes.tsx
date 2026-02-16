@@ -5,14 +5,14 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Dimensions,
-    FlatList,
-    Modal,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Dimensions,
+  FlatList,
+  Modal,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { supabase } from '../services/supabase';
 
@@ -476,14 +476,20 @@ export function ModalMicroseguro({ visible, onClose, liquidacaoId, totalValor, t
       const { data, error } = await supabase
         .from('microseguro_vendas')
         .select(`
-          id, valor, data_venda, created_at, status,
+          id, valor, data_venda, created_at,
           cliente:cliente_id(nome, consecutivo),
-          emprestimo:emprestimo_id(valor_principal, numero_parcelas)
+          emprestimo:emprestimo_id(valor_principal, numero_parcelas),
+          vendedor:vendedor_id(nome)
         `)
         .eq('liquidacao_id', liquidacaoId)
         .order('created_at', { ascending: false });
 
-      if (!error) setVendas(data || []);
+      if (error) {
+        console.error('Erro query microseguro:', error);
+        setVendas([]);
+      } else {
+        setVendas(data || []);
+      }
     } catch (e) {
       console.error('Erro microseguro:', e);
     } finally {
@@ -494,10 +500,10 @@ export function ModalMicroseguro({ visible, onClose, liquidacaoId, totalValor, t
   const renderItem = ({ item }: any) => {
     const clienteNome = item.cliente?.nome || 'Cliente';
     const clienteCod = item.cliente?.consecutivo || '';
-    const isCancelado = item.status === 'CANCELADO';
+    const vendedorNome = item.vendedor?.nome || '';
 
     return (
-      <View style={[dStyles.microItem, isCancelado && { opacity: 0.5 }]}>
+      <View style={dStyles.microItem}>
         <View style={dStyles.microItemLeft}>
           <View style={dStyles.microItemAvatar}>
             <Text style={{ fontSize: 18 }}>🛡️</Text>
@@ -510,18 +516,12 @@ export function ModalMicroseguro({ visible, onClose, liquidacaoId, totalValor, t
                 Empréstimo: {fmt(item.emprestimo.valor_principal)} ({item.emprestimo.numero_parcelas}x)
               </Text>
             )}
+            {vendedorNome ? <Text style={dStyles.microItemVendedor}>Vendedor: {vendedorNome}</Text> : null}
           </View>
-        </View>
-        <View style={dStyles.microItemRight}>
-          <Text style={[dStyles.microItemValor, isCancelado && { textDecorationLine: 'line-through' }]}>
-            {fmt(parseFloat(item.valor))}
-          </Text>
-          <Text style={dStyles.microItemHora}>{fmtHora(item.created_at)}</Text>
-          {isCancelado && (
-            <View style={dStyles.microItemCancelado}>
-              <Text style={dStyles.microItemCanceladoText}>CANCELADO</Text>
-            </View>
-          )}
+          <View style={dStyles.microItemRight}>
+            <Text style={dStyles.microItemValor}>{fmt(parseFloat(item.valor))}</Text>
+            <Text style={dStyles.microItemHora}>{fmtHora(item.created_at)}</Text>
+          </View>
         </View>
       </View>
     );
@@ -681,6 +681,7 @@ const dStyles = StyleSheet.create({
   microItemNome: { fontSize: 15, fontWeight: '600', color: '#1F2937' },
   microItemCod: { fontSize: 12, color: '#9CA3AF', marginTop: 1 },
   microItemEmprestimo: { fontSize: 12, color: '#6B7280', marginTop: 3 },
+  microItemVendedor: { fontSize: 11, color: '#9CA3AF', marginTop: 2, fontStyle: 'italic' },
   microItemRight: { alignItems: 'flex-end' },
   microItemValor: { fontSize: 16, fontWeight: '700', color: '#D97706' },
   microItemHora: { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
