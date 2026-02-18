@@ -20,7 +20,7 @@ import { supabase } from '../services/supabase';
 
 // Language importado do LiquidacaoContext
 type TabAtiva = 'liquidacao' | 'todos';
-type FiltroLiquidacao = 'todos' | 'atrasados';
+type FiltroLiquidacao = 'todos' | 'atrasados' | 'pagas';
 type OrdenacaoLiquidacao = 'rota' | 'nome';
 
 interface ClienteRotaDia {
@@ -107,6 +107,9 @@ const textos = {
     empAtivo: 'Empréstimo Ativo', empVencido: 'Empréstimo Vencido',
     valorParcela: 'Valor Parcela', saldoDevedor: 'Saldo Devedor',
     empAdicional: 'Empréstimo Adicional', detalhes: 'Detalhes',
+    novoEmprestimo: 'Novo Empréstimo',
+    confirmarNovoEmprestimo: 'Deseja criar um novo empréstimo para este cliente? Os dados cadastrais serão pré-preenchidos.',
+    sim: 'Sim', nao: 'Não',
     modoVisualizacao: 'Modo Visualização',
     modoVisualizacaoDesc: 'Visualizando dados de',
     modoVisualizacaoSair: 'Sair',
@@ -167,6 +170,9 @@ const textos = {
     empAtivo: 'Préstamo Activo', empVencido: 'Préstamo Vencido',
     valorParcela: 'Valor Cuota', saldoDevedor: 'Saldo Deudor',
     empAdicional: 'Préstamo Adicional', detalhes: 'Detalles',
+    novoEmprestimo: 'Nuevo Préstamo',
+    confirmarNovoEmprestimo: '¿Desea crear un nuevo préstamo para este cliente? Los datos de registro se completarán automáticamente.',
+    sim: 'Sí', nao: 'No',
     modoVisualizacao: 'Modo Visualización',
     modoVisualizacaoDesc: 'Visualizando datos de',
     modoVisualizacaoSair: 'Salir',
@@ -232,7 +238,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   const { vendedor } = useAuth();
   const liqCtx = useLiquidacaoContext();
   const rotaId = route?.params?.rotaId || vendedor?.rota_id;
-  const dataLiq = liqCtx.dataVisualizacao || route?.params?.dataLiquidacao || new Date().toISOString().split('T')[0];
+  const dataLiq = liqCtx.dataVisualizacao || route?.params?.dataLiquidacao || (liqCtx.liquidacaoAtual?.data_abertura ? liqCtx.liquidacaoAtual.data_abertura.split('T')[0] : new Date().toISOString().split('T')[0]);
   const liqId = liqCtx.liquidacaoIdVisualizacao || route?.params?.liquidacaoId;
   const isViz = liqCtx.modoVisualizacao || route?.params?.isVisualizacao || false;
 
@@ -244,15 +250,13 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [busca, setBusca] = useState('');
 
   const [raw, setRaw] = useState<ClienteRotaDia[]>([]);
-  const [pagasSet, setPagasSet] = useState<Set<string>>(new Set());
-  const [pagMap, setPagMap] = useState<Map<string, PagamentoParcela>>(new Map());
+  const [pagasSet, setPagasSet] = useState<Set<string>>(new Set());  const [pagMap, setPagMap] = useState<Map<string, PagamentoParcela>>(new Map());
   const [clientesPagosNaLiq, setClientesPagosNaLiq] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<string | null>(null);
   const [empIdxMap, setEmpIdxMap] = useState<Record<string, number>>({});
   const [filtro, setFiltro] = useState<FiltroLiquidacao>('todos');
   const [ord, setOrd] = useState<OrdenacaoLiquidacao>('rota');
   const [showOrd, setShowOrd] = useState(false);
-  const [mostrarPagas, setMostrarPagas] = useState(false);
 
   const [todosList, setTodosList] = useState<ClienteTodos[]>([]);
   const [loadTodos, setLoadTodos] = useState(false);
@@ -303,12 +307,17 @@ export default function ClientesScreen({ navigation, route }: any) {
     }
     console.log('🔍 loadLiq: Buscando clientes...', { rotaId, dataLiq, liqId });
     try {
-      // 1. Busca parcelas pendentes/vencidas com data_vencimento <= dataLiq
+      // 1. Busca clientes para a liquidação do dia via function
+      // A function fn_clientes_liquidacao_dia recebe a data como parâmetro
+      // para calcular corretamente dia da semana/mês:
+      //   DIARIO: aparece todo dia
+      //   SEMANAL: aparece se mesmo dia da semana da data de referência
+      //   MENSAL/QUINZENAL/FLEXIVEL: aparece se mesmo dia do mês
       const { data, error } = await supabase
-        .from('vw_clientes_rota_dia')
-        .select('*')
-        .eq('rota_id', rotaId)
-        .lte('data_vencimento', dataLiq);
+        .rpc('fn_clientes_liquidacao_dia', {
+          p_rota_id: rotaId,
+          p_data_referencia: dataLiq
+        });
       
       if (error) throw error;
       
@@ -467,20 +476,32 @@ export default function ClientesScreen({ navigation, route }: any) {
     if (!rotaId || todosList.length > 0) return;
     setLoadTodos(true);
     try {
-      const { data: emps } = await supabase.from('emprestimos').select(`id, valor_principal, valor_saldo, valor_parcela, numero_parcelas, status, frequencia_pagamento, clientes!inner(id, nome, telefone_celular, status, consecutivo)`).eq('rota_id', rotaId).in('status', ['ATIVO', 'VENCIDO']);
-      if (!emps) return;
+      // Query 1: Todos os empréstimos da rota com dados do cliente
+      const { data: emps } = await supabase.from('emprestimos').select(`id, valor_principal, valor_saldo, valor_parcela, numero_parcelas, status, frequencia_pagamento, clientes!inner(id, nome, telefone_celular, status, consecutivo)`).eq('rota_id', rotaId).in('status', ['ATIVO', 'VENCIDO', 'QUITADO']);
+      if (!emps || emps.length === 0) { setTodosList([]); return; }
+
+      // Query 2: Todas as parcelas dos empréstimos de uma vez
+      const empIds = (emps as any[]).map(e => e.id);
+      const { data: allParcs } = await supabase.from('emprestimo_parcelas').select('emprestimo_id, numero_parcela, valor_parcela, status').in('emprestimo_id', empIds);
+
+      // Agrupa parcelas por empréstimo
+      const parcMap = new Map<string, { maxParcela: number; vencidas: number; totalVencido: number }>();
+      (allParcs || []).forEach((p: any) => {
+        let info = parcMap.get(p.emprestimo_id);
+        if (!info) { info = { maxParcela: 0, vencidas: 0, totalVencido: 0 }; parcMap.set(p.emprestimo_id, info); }
+        if (p.numero_parcela > info.maxParcela) info.maxParcela = p.numero_parcela;
+        if (p.status === 'VENCIDO' || p.status === 'VENCIDA') { info.vencidas++; info.totalVencido += (p.valor_parcela || 0); }
+      });
+
+      // Monta clientes
       const cliMap = new Map<string, ClienteTodos>();
       for (const e of emps as any[]) {
         const c = e.clientes; if (!c) continue;
         let cli = cliMap.get(c.id);
         if (!cli) { cli = { id: c.id, consecutivo: c.consecutivo, nome: c.nome, telefone_celular: c.telefone_celular, status: c.status, tem_atraso: false, emprestimos: [] }; cliMap.set(c.id, cli); }
-        const { data: parc } = await supabase.from('emprestimo_parcelas').select('numero_parcela').eq('emprestimo_id', e.id).order('numero_parcela', { ascending: false }).limit(1);
-        const np = parc?.[0]?.numero_parcela || 1;
-        const { count: vcnt } = await supabase.from('emprestimo_parcelas').select('*', { count: 'exact', head: true }).eq('emprestimo_id', e.id).eq('status', 'VENCIDO');
-        const { data: vsum } = await supabase.from('emprestimo_parcelas').select('valor_parcela').eq('emprestimo_id', e.id).eq('status', 'VENCIDO');
-        const vtot = (vsum || []).reduce((a: number, p: any) => a + (p.valor_parcela || 0), 0);
-        if ((vcnt || 0) > 0) cli.tem_atraso = true;
-        cli.emprestimos.push({ id: e.id, valor_principal: e.valor_principal, saldo_emprestimo: e.valor_saldo, valor_parcela: e.valor_parcela, numero_parcelas: e.numero_parcelas, numero_parcela_atual: np, status: e.status, frequencia_pagamento: e.frequencia_pagamento, total_parcelas_vencidas: vcnt || 0, valor_total_vencido: vtot });
+        const info = parcMap.get(e.id) || { maxParcela: 1, vencidas: 0, totalVencido: 0 };
+        if (info.vencidas > 0) cli.tem_atraso = true;
+        cli.emprestimos.push({ id: e.id, valor_principal: e.valor_principal, saldo_emprestimo: e.valor_saldo, valor_parcela: e.valor_parcela, numero_parcelas: e.numero_parcelas, numero_parcela_atual: info.maxParcela, status: e.status, frequencia_pagamento: e.frequencia_pagamento, total_parcelas_vencidas: info.vencidas, valor_total_vencido: info.totalVencido });
       }
       setTodosList(Array.from(cliMap.values()));
     } catch (e) { console.error('Erro loadTodos:', e); }
@@ -499,7 +520,7 @@ export default function ClientesScreen({ navigation, route }: any) {
           .from('emprestimos')
           .select('cliente_id', { count: 'exact', head: true })
           .eq('rota_id', rotaId)
-          .in('status', ['ATIVO', 'VENCIDO']);
+          .in('status', ['ATIVO', 'VENCIDO', 'QUITADO']);
         setTodosCount(count || 0);
       } catch { }
     })();
@@ -800,12 +821,13 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   const filtered = useMemo(() => {
     let r = [...grouped];
-    if (!mostrarPagas) r = r.filter(c => !isCliPago(c));
     if (busca.trim()) { const b = busca.toLowerCase().trim(); r = r.filter(c => c.nome.toLowerCase().includes(b) || (c.telefone_celular && c.telefone_celular.includes(b)) || (c.endereco && c.endereco.toLowerCase().includes(b))); }
-    if (filtro === 'atrasados') r = r.filter(c => c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas));
+    if (filtro === 'atrasados') r = r.filter(c => !isCliPago(c) && c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas));
+    else if (filtro === 'pagas') r = r.filter(c => isCliPago(c));
+    // 'todos' mostra todos (pendentes + pagos)
     r.sort(ord === 'rota' ? (a, b) => (a.emprestimos[0]?.ordem_visita_dia ?? 9999) - (b.emprestimos[0]?.ordem_visita_dia ?? 9999) : (a, b) => a.nome.localeCompare(b.nome));
     return r;
-  }, [grouped, busca, filtro, ord, mostrarPagas, isCliPago]);
+  }, [grouped, busca, filtro, ord, isCliPago]);
 
   const cntTotal = grouped.length;
   const cntAtraso = grouped.filter(c => c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas)).length;
@@ -944,7 +966,21 @@ export default function ClientesScreen({ navigation, route }: any) {
           {emp.total_parcelas_vencidas > 0 && <View style={S.aR}><Text style={S.aRT}>⚠ {emp.total_parcelas_vencidas} {t.parcelasVencidas}</Text><Text style={S.aRS}>{t.totalAtraso} {fmt(emp.valor_total_vencido)}</Text></View>}
           <View style={S.tEmpCard}><View style={S.tEmpHead}><Text style={S.tEmpTitle}>{isVencido ? t.empVencido : t.empAtivo}</Text><Text style={S.tEmpParcela}>{emp.numero_parcela_atual}/{emp.numero_parcelas}</Text></View><View style={S.tEmpBody}><View><Text style={S.tEmpLbl}>{t.valorParcela}</Text><Text style={S.tEmpVal}>{fmt(emp.valor_parcela)}</Text></View><View style={{ alignItems: 'flex-end' }}><Text style={S.tEmpLbl}>{t.saldoDevedor}</Text><Text style={[S.tEmpVal, { color: emp.saldo_emprestimo > 0 ? '#F59E0B' : '#10B981' }]}>{fmt(emp.saldo_emprestimo)}</Text></View></View></View>
           {c.emprestimos.length > 1 && (<View style={S.eNav}><TouchableOpacity onPress={() => setEmpIdxTodos(p => ({ ...p, [c.id]: Math.max(0, ei - 1) }))} disabled={ei === 0} style={[S.eNBtn, ei === 0 && S.eNOff]}><Text style={S.eNBTx}>◀</Text></TouchableOpacity>{c.emprestimos.map((_, i) => <View key={i} style={[S.eDot, i === ei && S.eDotOn]} />)}<TouchableOpacity onPress={() => setEmpIdxTodos(p => ({ ...p, [c.id]: Math.min(c.emprestimos.length - 1, ei + 1) }))} disabled={ei >= c.emprestimos.length - 1} style={[S.eNBtn, ei >= c.emprestimos.length - 1 && S.eNOff]}><Text style={S.eNBTx}>▶</Text></TouchableOpacity><Text style={S.eNLbl}> {t.emprestimo} {ei + 1}/{c.emprestimos.length}</Text></View>)}
-          {c.emprestimos.length === 1 && <View style={S.tAddRow}><Text style={S.tAddIcon}>⊕</Text><Text style={S.tAddText}>{t.empAdicional}</Text></View>}
+          {(() => {
+            const temAtivo = c.emprestimos.some(e => e.status === 'ATIVO' || e.status === 'VENCIDO');
+            if (!temAtivo) {
+              return (<TouchableOpacity style={S.tAddRowActive} onPress={() => {
+                Alert.alert(t.novoEmprestimo, t.confirmarNovoEmprestimo, [
+                  { text: t.nao, style: 'cancel' },
+                  { text: t.sim, onPress: () => navigation.navigate('NovaVenda', { clienteExistente: { id: c.id, nome: c.nome, telefone_celular: c.telefone_celular, documento: c.consecutivo?.toString() || '' } }) }
+                ]);
+              }}><Text style={S.tAddIconActive}>＋</Text><Text style={S.tAddTextActive}>{t.novoEmprestimo}</Text></TouchableOpacity>);
+            }
+            if (c.emprestimos.length === 1) {
+              return (<View style={S.tAddRow}><Text style={S.tAddIcon}>⊕</Text><Text style={S.tAddText}>{t.empAdicional}</Text></View>);
+            }
+            return null;
+          })()}
           <View style={S.btR}><TouchableOpacity style={[S.bt, S.btRed]} onPress={() => c.telefone_celular && Linking.openURL(`tel:${c.telefone_celular.replace(/\D/g, '')}`)} disabled={!c.telefone_celular}><Text style={S.btI}>💬</Text><Text style={S.btW}>{t.contato}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btBl]} onPress={() => abrirParcelas(c.id, c.nome, emp.id)}><Text style={S.btI}>👁</Text><Text style={S.btW}>{t.detalhes}</Text></TouchableOpacity></View>
         </View>)}
       </TouchableOpacity>);
@@ -990,7 +1026,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       </View>
       <View style={S.srR}><View style={S.srB}><Text style={S.srI}>🔍</Text><TextInput style={S.srIn} placeholder={t.buscar} placeholderTextColor="#9CA3AF" value={busca} onChangeText={setBusca} /></View>{tab === 'liquidacao' && <TouchableOpacity style={S.orB} onPress={() => setShowOrd(!showOrd)}><Text style={S.orI}>↕️</Text><Text style={S.orTx}>{ord === 'rota' ? t.ordemRota : t.ordemNome}</Text><Text style={S.orCh}>▼</Text></TouchableOpacity>}</View>
       {showOrd && tab === 'liquidacao' && <View style={S.orDr}>{(['rota', 'nome'] as OrdenacaoLiquidacao[]).map(o => (<TouchableOpacity key={o} style={[S.orOp, ord === o && S.orOpOn]} onPress={() => { setOrd(o); setShowOrd(false); }}><Text style={[S.orOpTx, ord === o && S.orOpTxOn]}>{o === 'rota' ? t.ordemRota : t.ordemNome}</Text></TouchableOpacity>))}</View>}
-      {tab === 'liquidacao' && (<View style={S.chs}><TouchableOpacity style={[S.ch, filtro === 'todos' && S.chOn]} onPress={() => setFiltro('todos')}><Text style={[S.chTx, filtro === 'todos' && S.chTxOn]}>{t.filtroTodos} {filtered.length}</Text></TouchableOpacity><TouchableOpacity style={[S.ch, filtro === 'atrasados' && S.chOn]} onPress={() => setFiltro('atrasados')}><Text style={[S.chTx, filtro === 'atrasados' && S.chTxOn]}>{t.filtroAtrasados} {cntAtraso}</Text></TouchableOpacity><TouchableOpacity style={[S.ch, mostrarPagas ? S.chPOn : S.chPOff]} onPress={() => setMostrarPagas(!mostrarPagas)}><Text style={[S.chTx, mostrarPagas ? S.chPTxOn : S.chPTxOff]}>{t.filtroPagas} {cntPagas}</Text></TouchableOpacity><Text style={S.chCh}>▼</Text></View>)}
+      {tab === 'liquidacao' && (<View style={S.chs}><TouchableOpacity style={[S.ch, filtro === 'todos' && S.chOn]} onPress={() => setFiltro('todos')}><Text style={[S.chTx, filtro === 'todos' && S.chTxOn]}>{t.filtroTodos} {cntTotal}</Text></TouchableOpacity><TouchableOpacity style={[S.ch, filtro === 'atrasados' && S.chOn]} onPress={() => setFiltro('atrasados')}><Text style={[S.chTx, filtro === 'atrasados' && S.chTxOn]}>{t.filtroAtrasados} {cntAtraso}</Text></TouchableOpacity><TouchableOpacity style={[S.ch, filtro === 'pagas' && S.chPOn, filtro !== 'pagas' && S.chPOff]} onPress={() => setFiltro(filtro === 'pagas' ? 'todos' : 'pagas')}><Text style={[S.chTx, filtro === 'pagas' ? S.chPTxOn : S.chPTxOff]}>{t.filtroPagas} {cntPagas}</Text></TouchableOpacity><Text style={S.chCh}>▼</Text></View>)}
       {tab === 'todos' && (<View style={S.tF}><TouchableOpacity style={S.tFB}><Text style={S.tFBT}>{t.tipoFiltro}</Text><Text style={S.tFC}>▼</Text></TouchableOpacity><TouchableOpacity style={S.tFB}><Text style={S.tFBT}>{t.statusFiltro}</Text><Text style={S.tFC}>▼</Text></TouchableOpacity><Text style={S.tCnt}>{todosFilt.length} {t.clientes}</Text><Text style={S.tChv}>▼</Text></View>)}
       <ScrollView style={S.ls} contentContainerStyle={S.lsI} refreshControl={!isViz ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined} showsVerticalScrollIndicator={false}>
         {tab === 'liquidacao' ? (filtered.length === 0 ? <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View> : filtered.map(renderCard)) : (loadTodos ? <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} /> : todosFilt.length === 0 ? <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View> : todosFilt.map(renderTodos))}
@@ -1271,6 +1307,8 @@ const S = StyleSheet.create({
   tEmpLbl: { fontSize: 10, color: '#9CA3AF', marginBottom: 2 }, tEmpVal: { fontSize: 14, fontWeight: '700', color: '#1F2937' },
   tAddRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, marginBottom: 10, opacity: 0.35 },
   tAddIcon: { fontSize: 16, color: '#9CA3AF', marginRight: 6 }, tAddText: { fontSize: 12, color: '#9CA3AF' },
+  tAddRowActive: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, marginBottom: 10, backgroundColor: '#EFF6FF', borderRadius: 8, borderWidth: 1, borderColor: '#3B82F6' },
+  tAddIconActive: { fontSize: 16, color: '#3B82F6', marginRight: 6, fontWeight: '700' as const }, tAddTextActive: { fontSize: 13, color: '#3B82F6', fontWeight: '600' as const },
   // MODAIS
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   modalContainer: { width: '92%', maxHeight: '85%', backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden' },

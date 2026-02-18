@@ -302,28 +302,29 @@ const calStyles = StyleSheet.create({
 // COMPONENTE PRINCIPAL
 // ============================================================
 
-export default function NovaVendaScreen({ navigation }: any) {
+export default function NovaVendaScreen({ navigation, route }: any) {
   const { vendedor } = useAuth();
   const liqCtx = useLiquidacaoContext();
+  const clienteExistente = route?.params?.clienteExistente || null;
 
   // -----------------------------------------------------------
   // ESTADOS - CLIENTE
   // -----------------------------------------------------------
-  const [nome, setNome] = useState('');
-  const [documento, setDocumento] = useState('');
+  const [nome, setNome] = useState(clienteExistente?.nome || '');
+  const [documento, setDocumento] = useState(clienteExistente?.documento || '');
   const [ddiCelular, setDdiCelular] = useState('+55');
-  const [telefoneCelular, setTelefoneCelular] = useState('');
+  const [telefoneCelular, setTelefoneCelular] = useState(clienteExistente?.telefone_celular || '');
   const [ddiFixo, setDdiFixo] = useState('+55');
   const [telefoneFixo, setTelefoneFixo] = useState('');
   const [email, setEmail] = useState('');
-  const [endereco, setEndereco] = useState('');
+  const [endereco, setEndereco] = useState(clienteExistente?.endereco || '');
   const [enderecoComercial, setEnderecoComercial] = useState('');
   const [segmentoId, setSegmentoId] = useState<string | null>(null);
   const [fotoCliente, setFotoCliente] = useState<string | null>(null);
   const [observacoesCliente, setObservacoesCliente] = useState('');
 
-  // Seções colapsáveis
-  const [clienteExpanded, setClienteExpanded] = useState(true);
+  // Seções colapsáveis - Se cliente existente, colapsa dados e expande empréstimo
+  const [clienteExpanded, setClienteExpanded] = useState(!clienteExistente);
   const [emprestimoExpanded, setEmprestimoExpanded] = useState(true);
   const [microseguroExpanded, setMicroseguroExpanded] = useState(true);
 
@@ -765,7 +766,7 @@ export default function NovaVendaScreen({ navigation }: any) {
       // ETAPA 5 - Montar e enviar parâmetros
       const params: Record<string, any> = {
         // Cliente
-        p_cliente_id: null,
+        p_cliente_id: clienteExistente?.id || null,
         p_cliente_nome: nome.trim(),
         p_cliente_documento: documento.trim() || null,
         p_cliente_telefone: telefoneCelular ? `${ddiCelular}${telefoneCelular}` : null,
