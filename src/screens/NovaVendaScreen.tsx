@@ -306,14 +306,16 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   const { vendedor } = useAuth();
   const liqCtx = useLiquidacaoContext();
   const clienteExistente = route?.params?.clienteExistente || null;
+  const renegociacao = route?.params?.renegociacao || null;
+  const isRenegociacao = !!renegociacao;
 
   // -----------------------------------------------------------
   // ESTADOS - CLIENTE
   // -----------------------------------------------------------
-  const [nome, setNome] = useState(clienteExistente?.nome || '');
+  const [nome, setNome] = useState(clienteExistente?.nome || renegociacao?.cliente_nome || '');
   const [documento, setDocumento] = useState(clienteExistente?.documento || '');
   const [ddiCelular, setDdiCelular] = useState('+55');
-  const [telefoneCelular, setTelefoneCelular] = useState(clienteExistente?.telefone_celular || '');
+  const [telefoneCelular, setTelefoneCelular] = useState(clienteExistente?.telefone_celular || renegociacao?.telefone_celular || '');
   const [ddiFixo, setDdiFixo] = useState('+55');
   const [telefoneFixo, setTelefoneFixo] = useState('');
   const [email, setEmail] = useState('');
@@ -323,8 +325,8 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   const [fotoCliente, setFotoCliente] = useState<string | null>(null);
   const [observacoesCliente, setObservacoesCliente] = useState('');
 
-  // Seções colapsáveis - Se cliente existente, colapsa dados e expande empréstimo
-  const [clienteExpanded, setClienteExpanded] = useState(!clienteExistente);
+  // Seções colapsáveis
+  const [clienteExpanded, setClienteExpanded] = useState(!clienteExistente && !isRenegociacao);
   const [emprestimoExpanded, setEmprestimoExpanded] = useState(true);
   const [microseguroExpanded, setMicroseguroExpanded] = useState(true);
 
@@ -371,6 +373,32 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   // Resultado do backend (pós-confirmação)
   const [resultado, setResultado] = useState<any>(null);
   const [showResultado, setShowResultado] = useState(false);
+
+  // -----------------------------------------------------------
+  // CARREGAR DADOS DO EMPRÉSTIMO ORIGINAL (RENEGOCIAÇÃO)
+  // -----------------------------------------------------------
+  useEffect(() => {
+    if (!isRenegociacao || !renegociacao?.emprestimo_id) return;
+    (async () => {
+      try {
+        const { data: emp } = await supabase
+          .from('emprestimos')
+          .select('valor_saldo, valor_parcela, numero_parcelas, taxa_juros, frequencia_pagamento, dia_semana_cobranca, dia_mes_cobranca, dias_mes_cobranca')
+          .eq('id', renegociacao.emprestimo_id)
+          .single();
+        if (emp) {
+          setValorEmprestimo(String(Math.round(emp.valor_saldo || 0)));
+          setNumeroParcelas(String(emp.numero_parcelas || 12));
+          if (emp.taxa_juros != null) setTaxaJuros(String(emp.taxa_juros));
+          if (emp.frequencia_pagamento) setFrequencia(emp.frequencia_pagamento);
+          if (emp.dia_semana_cobranca != null) setDiaSemanaPagamento(String(emp.dia_semana_cobranca));
+          if (emp.dia_mes_cobranca != null) setDiaMesPagamento(String(emp.dia_mes_cobranca));
+          if (emp.dias_mes_cobranca) setDiasMesFlexivel(emp.dias_mes_cobranca);
+          console.log('📋 Dados do empréstimo original carregados:', { saldo: emp.valor_saldo, freq: emp.frequencia_pagamento, parcelas: emp.numero_parcelas });
+        }
+      } catch (e) { console.error('Erro ao carregar empréstimo original:', e); }
+    })();
+  }, [isRenegociacao, renegociacao?.emprestimo_id]);
 
   // -----------------------------------------------------------
   // CARREGAR SEGMENTOS E TAXAS PERMITIDAS
@@ -764,50 +792,146 @@ export default function NovaVendaScreen({ navigation, route }: any) {
       }
 
       // ETAPA 5 - Montar e enviar parâmetros
-      const params: Record<string, any> = {
-        // Cliente
-        p_cliente_id: clienteExistente?.id || null,
-        p_cliente_nome: nome.trim(),
-        p_cliente_documento: documento.trim() || null,
-        p_cliente_telefone: telefoneCelular ? `${ddiCelular}${telefoneCelular}` : null,
-        p_cliente_telefone_fixo: telefoneFixo ? `${ddiFixo}${telefoneFixo}` : null,
-        p_cliente_email: email.trim() || null,
-        p_cliente_endereco: endereco.trim() || null,
-        p_cliente_endereco_comercial: enderecoComercial.trim() || null,
-        p_cliente_segmento_id: segmentoId || null,
-        p_cliente_foto_url: fotoCliente || null,
-        p_cliente_observacoes: observacoesCliente.trim() || null,
-        // Empréstimo
-        p_valor_principal: valorPrincipal,
-        p_numero_parcelas: parseInt(numeroParcelas),
-        p_taxa_juros: parseFloat(taxaJuros.replace(',', '.')) || 0,
-        p_frequencia: frequencia,
-        p_data_primeiro_vencimento: dataPrimeiroVencimento,
-        p_dia_semana_cobranca: frequencia === 'SEMANAL' ? parseInt(diaSemanaPagamento) : null,
-        p_dia_mes_cobranca: frequencia === 'MENSAL' ? parseInt(diaMesPagamento) : null,
-        p_dias_mes_cobranca: frequencia === 'FLEXIVEL' ? diasMesFlexivel : null,
-        p_iniciar_proximo_mes: frequencia === 'FLEXIVEL' ? iniciarProximoMes : null,
-        p_observacoes: observacoesEmprestimo.trim() || null,
-        // Microseguro
-        p_microseguro_valor: microValor > 0 ? microValor : null,
-        // Contexto
-        p_empresa_id: empresaId,
-        p_rota_id: rotaId,
-        p_vendedor_id: vendedorId,
-        p_user_id: userId,
-        p_latitude: latitude,
-        p_longitude: longitude,
-      };
+      let data: any, error: any;
 
-      const { data, error } = await supabase.rpc('fn_nova_venda_completa', params);
+      if (isRenegociacao) {
+        // RENEGOCIAÇÃO - empréstimo existente com atraso
+        const paramsReneg: Record<string, any> = {
+          p_emprestimo_original_id: renegociacao.emprestimo_id,
+          p_novo_valor_principal: valorPrincipal,
+          p_numero_parcelas: parseInt(numeroParcelas),
+          p_taxa_juros: parseFloat(taxaJuros.replace(',', '.')) || 0,
+          p_frequencia_pagamento: frequencia,
+          p_data_primeiro_vencimento: dataPrimeiroVencimento,
+          p_user_id: userId,
+          p_liquidacao_id: liqCtx.liquidacaoAtual?.id || null,
+          p_observacoes: observacoesEmprestimo.trim() || null,
+          p_dia_semana_cobranca: frequencia === 'SEMANAL' ? parseInt(diaSemanaPagamento) : null,
+          p_dia_mes_cobranca: frequencia === 'MENSAL' ? parseInt(diaMesPagamento) : null,
+          p_dias_mes_cobranca: frequencia === 'FLEXIVEL' ? diasMesFlexivel : null,
+          p_iniciar_proximo_mes: frequencia === 'FLEXIVEL' ? iniciarProximoMes : false,
+          p_latitude: latitude,
+          p_longitude: longitude,
+          p_microseguro_valor: microValor > 0 ? microValor : null,
+        };
+        console.log('🔄 Renegociação - chamando fn_renegociar_emprestimo para:', renegociacao.cliente_nome);
+        ({ data, error } = await supabase.rpc('fn_renegociar_emprestimo', paramsReneg));
+      } else if (clienteExistente?.id) {
+        // RENOVAÇÃO - cliente já existe, usa fn_renovar_emprestimo
+        const paramsRenov: Record<string, any> = {
+          p_cliente_id: clienteExistente.id,
+          p_valor_principal: valorPrincipal,
+          p_numero_parcelas: parseInt(numeroParcelas),
+          p_taxa_juros: parseFloat(taxaJuros.replace(',', '.')) || 0,
+          p_frequencia: frequencia,
+          p_data_primeiro_vencimento: dataPrimeiroVencimento,
+          p_dia_semana_cobranca: frequencia === 'SEMANAL' ? parseInt(diaSemanaPagamento) : null,
+          p_dia_mes_cobranca: frequencia === 'MENSAL' ? parseInt(diaMesPagamento) : null,
+          p_dias_mes_cobranca: frequencia === 'FLEXIVEL' ? diasMesFlexivel : null,
+          p_iniciar_proximo_mes: frequencia === 'FLEXIVEL' ? iniciarProximoMes : false,
+          p_observacoes: observacoesEmprestimo.trim() || null,
+          p_microseguro_valor: microValor > 0 ? microValor : null,
+          p_empresa_id: empresaId,
+          p_rota_id: rotaId,
+          p_vendedor_id: vendedorId,
+          p_user_id: userId,
+          p_latitude: latitude,
+          p_longitude: longitude,
+        };
+        console.log('🔄 Renovação - chamando fn_renovar_emprestimo para:', clienteExistente.nome);
+        
+        // Atualiza dados cadastrais do cliente (email, telefone, endereço, etc. podem ter sido editados)
+        const updateData: Record<string, any> = {};
+        if (nome.trim()) updateData.nome = nome.trim();
+        if (documento.trim()) updateData.documento = documento.trim();
+        if (telefoneCelular) updateData.telefone_celular = `${ddiCelular}${telefoneCelular}`;
+        if (telefoneFixo) updateData.telefone_fixo = `${ddiFixo}${telefoneFixo}`;
+        if (email.trim()) updateData.email = email.trim();
+        if (endereco.trim()) updateData.endereco = endereco.trim();
+        if (enderecoComercial.trim()) updateData.endereco_comercial = enderecoComercial.trim();
+        if (observacoesCliente.trim()) updateData.observacoes = observacoesCliente.trim();
+        
+        if (Object.keys(updateData).length > 0) {
+          await supabase.from('clientes').update(updateData).eq('id', clienteExistente.id);
+          console.log('📝 Dados do cliente atualizados:', Object.keys(updateData));
+        }
+        
+        ({ data, error } = await supabase.rpc('fn_renovar_emprestimo', paramsRenov));
+      } else {
+        // VENDA NOVA - cliente novo
+        const params: Record<string, any> = {
+          p_cliente_id: null,
+          p_cliente_nome: nome.trim(),
+          p_cliente_documento: documento.trim() || null,
+          p_cliente_telefone: telefoneCelular ? `${ddiCelular}${telefoneCelular}` : null,
+          p_cliente_telefone_fixo: telefoneFixo ? `${ddiFixo}${telefoneFixo}` : null,
+          p_cliente_email: email.trim() || null,
+          p_cliente_endereco: endereco.trim() || null,
+          p_cliente_endereco_comercial: enderecoComercial.trim() || null,
+          p_cliente_segmento_id: segmentoId || null,
+          p_cliente_foto_url: fotoCliente || null,
+          p_cliente_observacoes: observacoesCliente.trim() || null,
+          p_valor_principal: valorPrincipal,
+          p_numero_parcelas: parseInt(numeroParcelas),
+          p_taxa_juros: parseFloat(taxaJuros.replace(',', '.')) || 0,
+          p_frequencia: frequencia,
+          p_data_primeiro_vencimento: dataPrimeiroVencimento,
+          p_dia_semana_cobranca: frequencia === 'SEMANAL' ? parseInt(diaSemanaPagamento) : null,
+          p_dia_mes_cobranca: frequencia === 'MENSAL' ? parseInt(diaMesPagamento) : null,
+          p_dias_mes_cobranca: frequencia === 'FLEXIVEL' ? diasMesFlexivel : null,
+          p_iniciar_proximo_mes: frequencia === 'FLEXIVEL' ? iniciarProximoMes : null,
+          p_observacoes: observacoesEmprestimo.trim() || null,
+          p_microseguro_valor: microValor > 0 ? microValor : null,
+          p_empresa_id: empresaId,
+          p_rota_id: rotaId,
+          p_vendedor_id: vendedorId,
+          p_user_id: userId,
+          p_latitude: latitude,
+          p_longitude: longitude,
+        };
+        console.log('🆕 Venda nova - chamando fn_nova_venda_completa');
+        ({ data, error } = await supabase.rpc('fn_nova_venda_completa', params));
+      }
 
       if (error) throw error;
 
       // ETAPA 6 - Tratamento da resposta
-      const res = Array.isArray(data) ? data[0] : data;
+      const raw = Array.isArray(data) ? data[0] : data;
+      
+      // Normaliza campos - fn_renovar/renegociar retornam com campos diferentes
+      const res = isRenegociacao ? {
+        sucesso: raw?.sucesso,
+        mensagem: raw?.mensagem,
+        cliente_id: renegociacao.cliente_id,
+        cliente_nome: renegociacao.cliente_nome,
+        cliente_codigo: null,
+        emprestimo_id: raw?.novo_emprestimo_id,
+        valor_total: raw?.novo_valor_principal,
+        valor_parcela: null,
+        microseguro_id: null,
+        microseguro_valor: null,
+        parcelas: null,
+        saldo_anterior: raw?.saldo_anterior,
+        parcelas_canceladas: raw?.parcelas_canceladas,
+      } : clienteExistente?.id ? {
+        sucesso: raw?.sucesso,
+        mensagem: raw?.mensagem,
+        cliente_id: raw?.out_cliente_id || raw?.cliente_id,
+        cliente_nome: raw?.out_cliente_nome || raw?.cliente_nome,
+        cliente_codigo: raw?.out_cliente_codigo || raw?.cliente_codigo || null,
+        emprestimo_id: raw?.out_novo_emprestimo_id || raw?.emprestimo_id,
+        valor_total: raw?.out_valor_total || raw?.valor_total,
+        valor_parcela: raw?.out_valor_parcela || raw?.valor_parcela,
+        microseguro_id: raw?.out_microseguro_id || raw?.microseguro_id,
+        microseguro_valor: raw?.out_microseguro_valor || raw?.microseguro_valor,
+        parcelas: raw?.out_parcelas || raw?.parcelas,
+      } : raw;
 
       if (!res?.sucesso) {
-        Alert.alert('Erro', res?.mensagem || 'Erro ao registrar venda.');
+        const msg = res?.mensagem || 'Erro ao registrar venda.';
+        console.error('❌ Erro da RPC:', msg);
+        if (Platform.OS === 'web') { window.alert(msg); }
+        else { Alert.alert('Erro', msg); }
         return;
       }
 
@@ -816,8 +940,10 @@ export default function NovaVendaScreen({ navigation, route }: any) {
       setResultado(res);
       setShowResultado(true);
     } catch (err: any) {
-      console.error('Erro ao registrar venda:', err);
-      Alert.alert('Erro', err?.message || 'Erro inesperado ao registrar venda.');
+      console.error('❌ Erro ao registrar venda:', err);
+      const msg = err?.message || 'Erro inesperado ao registrar venda.';
+      if (Platform.OS === 'web') { window.alert(msg); }
+      else { Alert.alert('Erro', msg); }
     } finally {
       setSubmitting(false);
     }
@@ -836,20 +962,25 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   // FECHAR TELA
   // -----------------------------------------------------------
   const handleClose = () => {
-    // Se tem algum campo preenchido, pedir confirmação
+    // Se é renovação/renegociação, dados já vêm preenchidos — não pedir confirmação
+    if (clienteExistente || isRenegociacao) {
+      navigation.goBack();
+      return;
+    }
+    // Se tem algum campo preenchido manualmente, pedir confirmação
     const temDados = nome || documento || telefoneCelular || telefoneFixo || 
                      email || endereco || enderecoComercial || segmentoId || 
                      fotoCliente || observacoesCliente;
     
     if (temDados) {
-      Alert.alert(
-        'Cancelar venda?',
-        'Os dados preenchidos serão perdidos.',
-        [
+      if (Platform.OS === 'web') {
+        if (window.confirm('Os dados preenchidos serão perdidos. Cancelar?')) navigation.goBack();
+      } else {
+        Alert.alert('Cancelar venda?', 'Os dados preenchidos serão perdidos.', [
           { text: 'Não', style: 'cancel' },
           { text: 'Sim, cancelar', style: 'destructive', onPress: () => navigation.goBack() },
-        ]
-      );
+        ]);
+      }
     } else {
       navigation.goBack();
     }
@@ -862,7 +993,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>NOVA VENDA</Text>
+        <Text style={styles.headerTitle}>{isRenegociacao ? 'RENEGOCIAÇÃO' : clienteExistente ? 'RENOVAÇÃO' : 'NOVA VENDA'}</Text>
         <TouchableOpacity style={styles.headerCloseBtn} onPress={handleClose} activeOpacity={0.7}>
           <Text style={styles.headerCloseBtnText}>✕</Text>
         </TouchableOpacity>
@@ -1488,6 +1619,11 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                 <Text style={styles.resumoTotalLabel}>💵 TOTAL A RECEBER:</Text>
                 <Text style={styles.resumoTotalValue}>$ {fmt(valorTotal + microValor)}</Text>
               </View>
+              {isRenegociacao && renegociacao?.saldo_devedor > 0 && (
+                <View style={{ backgroundColor: '#FFF7ED', padding: 12, borderRadius: 8, marginTop: 8, borderWidth: 1, borderColor: '#F97316' }}>
+                  <Text style={{ fontSize: 12, color: '#9A3412', fontWeight: '600' }}>⚠ Saldo devedor do empréstimo anterior: $ {fmt(renegociacao.saldo_devedor)}</Text>
+                </View>
+              )}
             </View>
           </View>
 
@@ -1518,7 +1654,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
               styles.confirmButtonText,
               !isValido() && styles.confirmButtonTextDisabled,
             ]}>
-              ✓ CONFIRMAR VENDA
+              ✓ {isRenegociacao ? 'CONFIRMAR RENEGOCIAÇÃO' : 'CONFIRMAR VENDA'}
             </Text>
           )}
         </TouchableOpacity>

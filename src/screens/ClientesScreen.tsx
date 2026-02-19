@@ -60,6 +60,7 @@ interface ClienteAgrupado {
 interface ClienteTodos {
   id: string; consecutivo: number | null; nome: string;
   telefone_celular: string | null; status: string; tem_atraso: boolean;
+  permite_renegociacao: boolean;
   emprestimos: EmprestimoTodos[];
 }
 
@@ -110,6 +111,8 @@ const textos = {
     novoEmprestimo: 'Novo Empréstimo',
     confirmarNovoEmprestimo: 'Deseja criar um novo empréstimo para este cliente? Os dados cadastrais serão pré-preenchidos.',
     sim: 'Sim', nao: 'Não',
+    renegociar: 'Renegociar',
+    renegociacaoNaoPermitida: 'Renegociação não autorizada para este cliente. Solicite autorização ao administrador.',
     modoVisualizacao: 'Modo Visualização',
     modoVisualizacaoDesc: 'Visualizando dados de',
     modoVisualizacaoSair: 'Sair',
@@ -173,6 +176,8 @@ const textos = {
     novoEmprestimo: 'Nuevo Préstamo',
     confirmarNovoEmprestimo: '¿Desea crear un nuevo préstamo para este cliente? Los datos de registro se completarán automáticamente.',
     sim: 'Sí', nao: 'No',
+    renegociar: 'Renegociar',
+    renegociacaoNaoPermitida: 'Renegociación no autorizada para este cliente. Solicite autorización al administrador.',
     modoVisualizacao: 'Modo Visualización',
     modoVisualizacaoDesc: 'Visualizando datos de',
     modoVisualizacaoSair: 'Salir',
@@ -477,7 +482,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     setLoadTodos(true);
     try {
       // Query 1: Todos os empréstimos da rota com dados do cliente
-      const { data: emps } = await supabase.from('emprestimos').select(`id, valor_principal, valor_saldo, valor_parcela, numero_parcelas, status, frequencia_pagamento, clientes!inner(id, nome, telefone_celular, status, consecutivo)`).eq('rota_id', rotaId).in('status', ['ATIVO', 'VENCIDO', 'QUITADO']);
+      const { data: emps } = await supabase.from('emprestimos').select(`id, valor_principal, valor_saldo, valor_parcela, numero_parcelas, status, frequencia_pagamento, clientes!inner(id, nome, telefone_celular, status, consecutivo, permite_renegociacao)`).eq('rota_id', rotaId).in('status', ['ATIVO', 'VENCIDO', 'QUITADO']);
       if (!emps || emps.length === 0) { setTodosList([]); return; }
 
       // Query 2: Todas as parcelas dos empréstimos de uma vez
@@ -498,7 +503,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       for (const e of emps as any[]) {
         const c = e.clientes; if (!c) continue;
         let cli = cliMap.get(c.id);
-        if (!cli) { cli = { id: c.id, consecutivo: c.consecutivo, nome: c.nome, telefone_celular: c.telefone_celular, status: c.status, tem_atraso: false, emprestimos: [] }; cliMap.set(c.id, cli); }
+        if (!cli) { cli = { id: c.id, consecutivo: c.consecutivo, nome: c.nome, telefone_celular: c.telefone_celular, status: c.status, tem_atraso: false, permite_renegociacao: c.permite_renegociacao || false, emprestimos: [] }; cliMap.set(c.id, cli); }
         const info = parcMap.get(e.id) || { maxParcela: 1, vencidas: 0, totalVencido: 0 };
         if (info.vencidas > 0) cli.tem_atraso = true;
         cli.emprestimos.push({ id: e.id, valor_principal: e.valor_principal, saldo_emprestimo: e.valor_saldo, valor_parcela: e.valor_parcela, numero_parcelas: e.numero_parcelas, numero_parcela_atual: info.maxParcela, status: e.status, frequencia_pagamento: e.frequencia_pagamento, total_parcelas_vencidas: info.vencidas, valor_total_vencido: info.totalVencido });
@@ -947,6 +952,20 @@ export default function ClientesScreen({ navigation, route }: any) {
           {c.tem_multiplos_vencimentos && (<View style={S.eNav}><TouchableOpacity onPress={() => eSet(c.cliente_id, Math.max(0, ei - 1))} disabled={ei === 0} style={[S.eNBtn, ei === 0 && S.eNOff]}><Text style={S.eNBTx}>◀</Text></TouchableOpacity>{c.emprestimos.map((_, i) => <View key={i} style={[S.eDot, i === ei && S.eDotOn]} />)}<TouchableOpacity onPress={() => eSet(c.cliente_id, Math.min(c.emprestimos.length - 1, ei + 1))} disabled={ei >= c.emprestimos.length - 1} style={[S.eNBtn, ei >= c.emprestimos.length - 1 && S.eNOff]}><Text style={S.eNBTx}>▶</Text></TouchableOpacity><Text style={S.eNLbl}> {t.emprestimo} {ei + 1}/{c.qtd_emprestimos}</Text></View>)}
           <View style={S.res}><View style={S.resH}><Text style={S.resT}>{t.emprestimo} {ei + 1}/{c.qtd_emprestimos}</Text><View style={[S.stB, { backgroundColor: e.status_dia === 'EM_ATRASO' ? '#FEE2E2' : pg ? '#D1FAE5' : '#F3F4F6' }]}><Text style={[S.stBT, { color: e.status_dia === 'EM_ATRASO' ? '#DC2626' : pg ? '#059669' : '#6B7280' }]}>{pg ? t.pagoStatus : e.status_dia}</Text></View></View><View style={S.g3}><View style={S.gi}><Text style={S.gl}>{t.principal}</Text><Text style={S.gv}>{fmt(e.valor_principal)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.juros}</Text><Text style={[S.gv, { color: '#F59E0B' }]}>{fmt(juros)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.total}</Text><Text style={S.gv}>{fmt(totalE)}</Text></View></View><View style={S.g3}><View style={S.gi}><Text style={S.gl}>{t.jaPago}</Text><Text style={[S.gv, { color: '#10B981' }]}>{fmt(totalE - e.saldo_emprestimo)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.saldo}</Text><Text style={[S.gv, { color: '#EF4444' }]}>{fmt(e.saldo_emprestimo)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.parcelas}</Text><Text style={S.gv}>{pp}/{e.numero_parcelas}</Text></View></View><Text style={S.prL}>{t.progresso}</Text><View style={S.prB}><View style={[S.prF, { width: `${pct}%` }]} /></View><Text style={S.prR}>{pr} {t.restantes}</Text></View>
           <View style={S.btR}><TouchableOpacity style={[S.bt, S.btG, (!liqId || isViz || pg) && S.btOff]} onPress={() => { if (liqId && !isViz && !pg) abrirPagamento({ parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0 }); }} disabled={!liqId || isViz || pg}><Text style={S.btI}>💰</Text><Text style={S.btW}>{t.pagar}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btBl]} onPress={() => abrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}><Text style={S.btI}>👁</Text><Text style={S.btW}>{t.verParcelas}</Text></TouchableOpacity></View>
+          {e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && (
+            <TouchableOpacity style={[S.btReneg, (!liqId || isViz) && S.btOff]} onPress={async () => {
+              if (!liqId || isViz) return;
+              // Verificar permite_renegociacao
+              const { data: cli } = await supabase.from('clientes').select('permite_renegociacao').eq('id', c.cliente_id).single();
+              if (!cli?.permite_renegociacao) {
+                if (Platform.OS === 'web') { window.alert(t.renegociacaoNaoPermitida); }
+                else { Alert.alert(t.atencao, t.renegociacaoNaoPermitida); }
+                return;
+              }
+              const nav = navigation.getParent() || navigation;
+              nav.navigate('NovoCliente', { renegociacao: { emprestimo_id: e.emprestimo_id, cliente_id: c.cliente_id, cliente_nome: c.nome, saldo_devedor: e.saldo_emprestimo, telefone_celular: c.telefone_celular } });
+            }} disabled={!liqId || isViz}><Text style={S.btRenegI}>🔄</Text><Text style={S.btRenegT}>{t.renegociar}</Text></TouchableOpacity>
+          )}
           <View style={S.btR}><TouchableOpacity style={[S.bt, S.btOG]} onPress={() => c.telefone_celular && Linking.openURL(`tel:${c.telefone_celular.replace(/\D/g, '')}`)} disabled={!c.telefone_celular}><Text style={S.btI}>📱</Text><Text style={S.btTG}>{t.contato}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btOB]} onPress={() => { if (c.latitude && c.longitude) Linking.openURL(Platform.OS === 'ios' ? `maps:?daddr=${c.latitude},${c.longitude}` : `google.navigation:q=${c.latitude},${c.longitude}`); }} disabled={!c.latitude}><Text style={S.btI}>🧭</Text><Text style={S.btTB}>{t.ir}</Text></TouchableOpacity></View>
         </View>)}
       </TouchableOpacity>);
@@ -968,15 +987,36 @@ export default function ClientesScreen({ navigation, route }: any) {
           {c.emprestimos.length > 1 && (<View style={S.eNav}><TouchableOpacity onPress={() => setEmpIdxTodos(p => ({ ...p, [c.id]: Math.max(0, ei - 1) }))} disabled={ei === 0} style={[S.eNBtn, ei === 0 && S.eNOff]}><Text style={S.eNBTx}>◀</Text></TouchableOpacity>{c.emprestimos.map((_, i) => <View key={i} style={[S.eDot, i === ei && S.eDotOn]} />)}<TouchableOpacity onPress={() => setEmpIdxTodos(p => ({ ...p, [c.id]: Math.min(c.emprestimos.length - 1, ei + 1) }))} disabled={ei >= c.emprestimos.length - 1} style={[S.eNBtn, ei >= c.emprestimos.length - 1 && S.eNOff]}><Text style={S.eNBTx}>▶</Text></TouchableOpacity><Text style={S.eNLbl}> {t.emprestimo} {ei + 1}/{c.emprestimos.length}</Text></View>)}
           {(() => {
             const temAtivo = c.emprestimos.some(e => e.status === 'ATIVO' || e.status === 'VENCIDO');
+            const temAtraso = c.tem_atraso;
             if (!temAtivo) {
+              // Sem empréstimo ativo → Novo Empréstimo (Renovação)
               return (<TouchableOpacity style={S.tAddRowActive} onPress={() => {
-                Alert.alert(t.novoEmprestimo, t.confirmarNovoEmprestimo, [
-                  { text: t.nao, style: 'cancel' },
-                  { text: t.sim, onPress: () => navigation.navigate('NovaVenda', { clienteExistente: { id: c.id, nome: c.nome, telefone_celular: c.telefone_celular, documento: c.consecutivo?.toString() || '' } }) }
-                ]);
+                const confirmar = () => { 
+                  const nav = navigation.getParent() || navigation; 
+                  nav.navigate('NovoCliente', { clienteExistente: { id: c.id, nome: c.nome, telefone_celular: c.telefone_celular, documento: c.consecutivo?.toString() || '' } }); 
+                };
+                if (Platform.OS === 'web') {
+                  if (window.confirm(t.confirmarNovoEmprestimo)) confirmar();
+                } else {
+                  Alert.alert(t.novoEmprestimo, t.confirmarNovoEmprestimo, [
+                    { text: t.nao, style: 'cancel' },
+                    { text: t.sim, onPress: confirmar }
+                  ]);
+                }
               }}><Text style={S.tAddIconActive}>＋</Text><Text style={S.tAddTextActive}>{t.novoEmprestimo}</Text></TouchableOpacity>);
             }
+            if (temAtivo && temAtraso) {
+              // Com empréstimo ativo + atraso → Renegociar (se autorizado)
+              if (!c.permite_renegociacao) {
+                return (<View style={[S.btReneg, { opacity: 0.4 }]}><Text style={S.btRenegI}>🔄</Text><Text style={S.btRenegT}>{t.renegociar}</Text></View>);
+              }
+              return (<TouchableOpacity style={S.btReneg} onPress={() => {
+                const nav = navigation.getParent() || navigation;
+                nav.navigate('NovoCliente', { renegociacao: { emprestimo_id: emp.id, cliente_id: c.id, cliente_nome: c.nome, saldo_devedor: emp.saldo_emprestimo, telefone_celular: c.telefone_celular } });
+              }}><Text style={S.btRenegI}>🔄</Text><Text style={S.btRenegT}>{t.renegociar}</Text></TouchableOpacity>);
+            }
             if (c.emprestimos.length === 1) {
+              // Ativo sem atraso → Adicional desabilitado
               return (<View style={S.tAddRow}><Text style={S.tAddIcon}>⊕</Text><Text style={S.tAddText}>{t.empAdicional}</Text></View>);
             }
             return null;
@@ -1309,6 +1349,8 @@ const S = StyleSheet.create({
   tAddIcon: { fontSize: 16, color: '#9CA3AF', marginRight: 6 }, tAddText: { fontSize: 12, color: '#9CA3AF' },
   tAddRowActive: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, marginBottom: 10, backgroundColor: '#EFF6FF', borderRadius: 8, borderWidth: 1, borderColor: '#3B82F6' },
   tAddIconActive: { fontSize: 16, color: '#3B82F6', marginRight: 6, fontWeight: '700' as const }, tAddTextActive: { fontSize: 13, color: '#3B82F6', fontWeight: '600' as const },
+  btReneg: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, marginBottom: 10, backgroundColor: '#FFF7ED', borderRadius: 8, borderWidth: 1, borderColor: '#F97316' },
+  btRenegI: { fontSize: 16, marginRight: 6 }, btRenegT: { fontSize: 13, color: '#F97316', fontWeight: '600' as const },
   // MODAIS
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   modalContainer: { width: '92%', maxHeight: '85%', backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden' },
