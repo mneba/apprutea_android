@@ -67,7 +67,7 @@ interface ClienteTodos {
 interface EmprestimoTodos {
   id: string; valor_principal: number; saldo_emprestimo: number;
   valor_parcela: number; numero_parcelas: number; numero_parcela_atual: number;
-  status: string; frequencia_pagamento: string;
+  status: string; frequencia_pagamento: string; tipo_emprestimo: string;
   total_parcelas_vencidas: number; valor_total_vencido: number;
 }
 
@@ -106,7 +106,8 @@ const textos = {
     tipoFiltro: 'Tipo:...', statusFiltro: 'Status:...',
     pago: 'Pago:', original: 'Original:', credito: 'Crédito:',
     empAtivo: 'Empréstimo Ativo', empVencido: 'Empréstimo Vencido',
-    valorParcela: 'Valor Parcela', saldoDevedor: 'Saldo Devedor',
+    empRenegociado: 'Renegociado', empQuitado: 'Quitado',
+    valorParcela: 'Valor Parcela', saldoDevedor: 'Saldo Devedor', saldoRenegociado: 'Saldo Renegociado',
     empAdicional: 'Empréstimo Adicional', detalhes: 'Detalhes',
     novoEmprestimo: 'Novo Empréstimo',
     confirmarNovoEmprestimo: 'Deseja criar um novo empréstimo para este cliente? Os dados cadastrais serão pré-preenchidos.',
@@ -171,7 +172,8 @@ const textos = {
     tipoFiltro: 'Tipo:...', statusFiltro: 'Estado:...',
     pago: 'Pagado:', original: 'Original:', credito: 'Crédito:',
     empAtivo: 'Préstamo Activo', empVencido: 'Préstamo Vencido',
-    valorParcela: 'Valor Cuota', saldoDevedor: 'Saldo Deudor',
+    empRenegociado: 'Renegociado', empQuitado: 'Liquidado',
+    valorParcela: 'Valor Cuota', saldoDevedor: 'Saldo Deudor', saldoRenegociado: 'Saldo Renegociado',
     empAdicional: 'Préstamo Adicional', detalhes: 'Detalles',
     novoEmprestimo: 'Nuevo Préstamo',
     confirmarNovoEmprestimo: '¿Desea crear un nuevo préstamo para este cliente? Los datos de registro se completarán automáticamente.',
@@ -276,7 +278,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [parcelasModal, setParcelasModal] = useState<ParcelaModal[]>([]);
   const [loadingParcelas, setLoadingParcelas] = useState(false);
   const [creditoDisponivel, setCreditoDisponivel] = useState(0);
-  const [clienteModal, setClienteModal] = useState<{ id: string; nome: string; emprestimo_id: string } | null>(null);
+  const [clienteModal, setClienteModal] = useState<{ id: string; nome: string; emprestimo_id: string; emprestimo_status?: string } | null>(null);
   
   const [parcelaPagamento, setParcelaPagamento] = useState<ParcelaModal | null>(null);
   const [dadosPagamento, setDadosPagamento] = useState<any>(null);
@@ -482,7 +484,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     setLoadTodos(true);
     try {
       // Query 1: Todos os empréstimos da rota com dados do cliente
-      const { data: emps } = await supabase.from('emprestimos').select(`id, valor_principal, valor_saldo, valor_parcela, numero_parcelas, status, frequencia_pagamento, clientes!inner(id, nome, telefone_celular, status, consecutivo, permite_renegociacao)`).eq('rota_id', rotaId).in('status', ['ATIVO', 'VENCIDO', 'QUITADO']);
+      const { data: emps } = await supabase.from('emprestimos').select(`id, valor_principal, valor_saldo, valor_parcela, numero_parcelas, status, frequencia_pagamento, tipo_emprestimo, clientes!inner(id, nome, telefone_celular, status, consecutivo, permite_renegociacao)`).eq('rota_id', rotaId).in('status', ['ATIVO', 'VENCIDO', 'QUITADO', 'RENEGOCIADO']);
       if (!emps || emps.length === 0) { setTodosList([]); return; }
 
       // Query 2: Todas as parcelas dos empréstimos de uma vez
@@ -506,7 +508,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         if (!cli) { cli = { id: c.id, consecutivo: c.consecutivo, nome: c.nome, telefone_celular: c.telefone_celular, status: c.status, tem_atraso: false, permite_renegociacao: c.permite_renegociacao || false, emprestimos: [] }; cliMap.set(c.id, cli); }
         const info = parcMap.get(e.id) || { maxParcela: 1, vencidas: 0, totalVencido: 0 };
         if (info.vencidas > 0) cli.tem_atraso = true;
-        cli.emprestimos.push({ id: e.id, valor_principal: e.valor_principal, saldo_emprestimo: e.valor_saldo, valor_parcela: e.valor_parcela, numero_parcelas: e.numero_parcelas, numero_parcela_atual: info.maxParcela, status: e.status, frequencia_pagamento: e.frequencia_pagamento, total_parcelas_vencidas: info.vencidas, valor_total_vencido: info.totalVencido });
+        cli.emprestimos.push({ id: e.id, valor_principal: e.valor_principal, saldo_emprestimo: e.valor_saldo, valor_parcela: e.valor_parcela, numero_parcelas: e.numero_parcelas, numero_parcela_atual: info.maxParcela, status: e.status, frequencia_pagamento: e.frequencia_pagamento, tipo_emprestimo: (e as any).tipo_emprestimo || 'NOVO', total_parcelas_vencidas: info.vencidas, valor_total_vencido: info.totalVencido });
       }
       setTodosList(Array.from(cliMap.values()));
     } catch (e) { console.error('Erro loadTodos:', e); }
@@ -537,8 +539,8 @@ export default function ClientesScreen({ navigation, route }: any) {
     else { setTodosList([]); loadTodosClientes(); }
   }, [tab, loadLiq, loadTodosClientes]);
 
-  const abrirParcelas = useCallback(async (clienteId: string, clienteNome: string, emprestimoId: string) => {
-    setClienteModal({ id: clienteId, nome: clienteNome, emprestimo_id: emprestimoId });
+  const abrirParcelas = useCallback(async (clienteId: string, clienteNome: string, emprestimoId: string, empStatus?: string) => {
+    setClienteModal({ id: clienteId, nome: clienteNome, emprestimo_id: emprestimoId, emprestimo_status: empStatus });
     setModalParcelasVisible(true);
     setLoadingParcelas(true);
     setParcelasModal([]);
@@ -845,12 +847,13 @@ export default function ClientesScreen({ navigation, route }: any) {
     const isPago = p.status === 'PAGO';
     const isParcial = p.status === 'PARCIAL';
     const isVencida = p.status === 'VENCIDO' || p.status === 'VENCIDA';
+    const isCancelado = p.status === 'CANCELADO';
     
-    const iconColor = isPago ? '#10B981' : isParcial ? '#F59E0B' : isVencida ? '#EF4444' : '#6B7280';
-    const iconBg = isPago ? '#D1FAE5' : isParcial ? '#FEF3C7' : isVencida ? '#FEE2E2' : '#F3F4F6';
-    const statusColor = isPago ? '#10B981' : isParcial ? '#D97706' : isVencida ? '#EF4444' : '#F97316';
-    const statusBg = isPago ? '#D1FAE5' : isParcial ? '#FEF3C7' : isVencida ? '#FEE2E2' : '#FFEDD5';
-    const statusText = isPago ? t.pagoStatus : isParcial ? t.parcialStatus : isVencida ? t.vencidaStatus : t.pendente;
+    const iconColor = isPago ? '#10B981' : isParcial ? '#F59E0B' : isCancelado ? '#9CA3AF' : isVencida ? '#EF4444' : '#6B7280';
+    const iconBg = isPago ? '#D1FAE5' : isParcial ? '#FEF3C7' : isCancelado ? '#F3F4F6' : isVencida ? '#FEE2E2' : '#F3F4F6';
+    const statusColor = isPago ? '#10B981' : isParcial ? '#D97706' : isCancelado ? '#9CA3AF' : isVencida ? '#EF4444' : '#F97316';
+    const statusBg = isPago ? '#D1FAE5' : isParcial ? '#FEF3C7' : isCancelado ? '#F3F4F6' : isVencida ? '#FEE2E2' : '#FFEDD5';
+    const statusText = isPago ? t.pagoStatus : isParcial ? t.parcialStatus : isCancelado ? 'CANCELADO' : isVencida ? t.vencidaStatus : t.pendente;
     
     const valorPago = p.valor_pago || 0;
     const valorRestante = isParcial ? (p.valor_parcela - valorPago) : p.valor_parcela;
@@ -904,7 +907,7 @@ export default function ClientesScreen({ navigation, route }: any) {
           </View>
           {/* Lado direito: botão */}
           <View style={S.mParcelaBtns}>
-            {!isPago && p.parcela_id && (
+            {!isPago && p.parcela_id && !['RENEGOCIADO', 'QUITADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '') && p.status !== 'CANCELADO' && (
               <TouchableOpacity 
                 style={[S.mBtnPagar, (!liqId || isViz) && S.mBtnPagarDisabled]} 
                 onPress={() => abrirPagamento(p)} 
@@ -978,12 +981,16 @@ export default function ClientesScreen({ navigation, route }: any) {
     const ex = expandedTodos === c.id; const ei = empIdxTodos[c.id] || 0;
     const emp = c.emprestimos[Math.min(ei, c.emprestimos.length - 1)];
     const isVencido = emp?.status === 'VENCIDO';
+    const isRenegociado = emp?.status === 'RENEGOCIADO';
+    const isQuitado = emp?.status === 'QUITADO';
+    const empStatusLabel = isRenegociado ? t.empRenegociado : isQuitado ? t.empQuitado : isVencido ? t.empVencido : t.empAtivo;
+    const empStatusColor = isRenegociado ? '#9333EA' : isQuitado ? '#10B981' : isVencido ? '#EF4444' : '#1F2937';
     return (
       <TouchableOpacity key={c.id} activeOpacity={0.7} onPress={() => setExpandedTodos(p => p === c.id ? null : c.id)} style={[S.card, { borderLeftColor: cor }]}>
         <View style={S.cardRow}><View style={[S.av, { backgroundColor: cor }]}><Text style={S.avTx}>{getIni(c.nome)}</Text></View><View style={S.cardInfo}><View style={S.nameRow}><Text style={S.nome} numberOfLines={1}>{c.nome.toLowerCase()}</Text>{a && <Text style={[S.tSt, { color: '#EF4444' }]}>{t.statusAtraso}</Text>}<Text style={S.dots}>⋮</Text></View></View></View>
         {ex && emp && (<View style={S.exp}>
           {emp.total_parcelas_vencidas > 0 && <View style={S.aR}><Text style={S.aRT}>⚠ {emp.total_parcelas_vencidas} {t.parcelasVencidas}</Text><Text style={S.aRS}>{t.totalAtraso} {fmt(emp.valor_total_vencido)}</Text></View>}
-          <View style={S.tEmpCard}><View style={S.tEmpHead}><Text style={S.tEmpTitle}>{isVencido ? t.empVencido : t.empAtivo}</Text><Text style={S.tEmpParcela}>{emp.numero_parcela_atual}/{emp.numero_parcelas}</Text></View><View style={S.tEmpBody}><View><Text style={S.tEmpLbl}>{t.valorParcela}</Text><Text style={S.tEmpVal}>{fmt(emp.valor_parcela)}</Text></View><View style={{ alignItems: 'flex-end' }}><Text style={S.tEmpLbl}>{t.saldoDevedor}</Text><Text style={[S.tEmpVal, { color: emp.saldo_emprestimo > 0 ? '#F59E0B' : '#10B981' }]}>{fmt(emp.saldo_emprestimo)}</Text></View></View></View>
+          <View style={S.tEmpCard}><View style={S.tEmpHead}><Text style={[S.tEmpTitle, { color: empStatusColor }]}>{empStatusLabel}</Text><Text style={S.tEmpParcela}>{emp.numero_parcela_atual}/{emp.numero_parcelas}</Text></View><View style={S.tEmpBody}><View><Text style={S.tEmpLbl}>{t.valorParcela}</Text><Text style={S.tEmpVal}>{fmt(emp.valor_parcela)}</Text></View><View style={{ alignItems: 'flex-end' }}><Text style={S.tEmpLbl}>{isRenegociado ? t.saldoRenegociado : t.saldoDevedor}</Text><Text style={[S.tEmpVal, { color: isRenegociado ? '#9333EA' : emp.saldo_emprestimo > 0 ? '#F59E0B' : '#10B981' }]}>{fmt(isRenegociado ? emp.valor_principal : emp.saldo_emprestimo)}</Text></View></View></View>
           {c.emprestimos.length > 1 && (<View style={S.eNav}><TouchableOpacity onPress={() => setEmpIdxTodos(p => ({ ...p, [c.id]: Math.max(0, ei - 1) }))} disabled={ei === 0} style={[S.eNBtn, ei === 0 && S.eNOff]}><Text style={S.eNBTx}>◀</Text></TouchableOpacity>{c.emprestimos.map((_, i) => <View key={i} style={[S.eDot, i === ei && S.eDotOn]} />)}<TouchableOpacity onPress={() => setEmpIdxTodos(p => ({ ...p, [c.id]: Math.min(c.emprestimos.length - 1, ei + 1) }))} disabled={ei >= c.emprestimos.length - 1} style={[S.eNBtn, ei >= c.emprestimos.length - 1 && S.eNOff]}><Text style={S.eNBTx}>▶</Text></TouchableOpacity><Text style={S.eNLbl}> {t.emprestimo} {ei + 1}/{c.emprestimos.length}</Text></View>)}
           {(() => {
             const temAtivo = c.emprestimos.some(e => e.status === 'ATIVO' || e.status === 'VENCIDO');
@@ -1021,7 +1028,7 @@ export default function ClientesScreen({ navigation, route }: any) {
             }
             return null;
           })()}
-          <View style={S.btR}><TouchableOpacity style={[S.bt, S.btRed]} onPress={() => c.telefone_celular && Linking.openURL(`tel:${c.telefone_celular.replace(/\D/g, '')}`)} disabled={!c.telefone_celular}><Text style={S.btI}>💬</Text><Text style={S.btW}>{t.contato}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btBl]} onPress={() => abrirParcelas(c.id, c.nome, emp.id)}><Text style={S.btI}>👁</Text><Text style={S.btW}>{t.detalhes}</Text></TouchableOpacity></View>
+          <View style={S.btR}><TouchableOpacity style={[S.bt, S.btRed]} onPress={() => c.telefone_celular && Linking.openURL(`tel:${c.telefone_celular.replace(/\D/g, '')}`)} disabled={!c.telefone_celular}><Text style={S.btI}>💬</Text><Text style={S.btW}>{t.contato}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btBl]} onPress={() => abrirParcelas(c.id, c.nome, emp.id, emp.status)}><Text style={S.btI}>👁</Text><Text style={S.btW}>{t.detalhes}</Text></TouchableOpacity></View>
         </View>)}
       </TouchableOpacity>);
   };

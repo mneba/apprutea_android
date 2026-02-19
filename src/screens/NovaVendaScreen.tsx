@@ -796,6 +796,23 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
       if (isRenegociacao) {
         // RENEGOCIAÇÃO - empréstimo existente com atraso
+        // Buscar liquidação aberta da rota
+        let liqId = liqCtx.liquidacaoAtual?.id || null;
+        if (!liqId) {
+          const { data: liqData } = await supabase
+            .from('liquidacoes_diarias')
+            .select('id')
+            .eq('rota_id', rotaId)
+            .in('status', ['ABERTO', 'REABERTO'])
+            .limit(1)
+            .single();
+          liqId = liqData?.id || null;
+        }
+        if (!liqId) {
+          const msg = 'Não há liquidação aberta para esta rota. Inicie o dia primeiro.';
+          if (Platform.OS === 'web') { window.alert(msg); } else { Alert.alert('Erro', msg); }
+          return;
+        }
         const paramsReneg: Record<string, any> = {
           p_emprestimo_original_id: renegociacao.emprestimo_id,
           p_novo_valor_principal: valorPrincipal,
@@ -804,7 +821,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
           p_frequencia_pagamento: frequencia,
           p_data_primeiro_vencimento: dataPrimeiroVencimento,
           p_user_id: userId,
-          p_liquidacao_id: liqCtx.liquidacaoAtual?.id || null,
+          p_liquidacao_id: liqId,
           p_observacoes: observacoesEmprestimo.trim() || null,
           p_dia_semana_cobranca: frequencia === 'SEMANAL' ? parseInt(diaSemanaPagamento) : null,
           p_dia_mes_cobranca: frequencia === 'MENSAL' ? parseInt(diaMesPagamento) : null,
@@ -814,7 +831,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
           p_longitude: longitude,
           p_microseguro_valor: microValor > 0 ? microValor : null,
         };
-        console.log('🔄 Renegociação - chamando fn_renegociar_emprestimo para:', renegociacao.cliente_nome);
+        console.log('🔄 Renegociação - chamando fn_renegociar_emprestimo para:', renegociacao.cliente_nome, 'liqId:', liqId);
         ({ data, error } = await supabase.rpc('fn_renegociar_emprestimo', paramsReneg));
       } else if (clienteExistente?.id) {
         // RENOVAÇÃO - cliente já existe, usa fn_renovar_emprestimo
