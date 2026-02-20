@@ -6,6 +6,7 @@ import {
   Dimensions,
   Image,
   Modal,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -567,10 +568,12 @@ export default function LiquidacaoScreen({ navigation }: any) {
       }
 
       setModalFecharVisible(false);
-      Alert.alert('Sucesso', `Liquidação fechada! Recebido: ${formatarMoeda(resultado.valor_recebido_dia)}`);
+      const msg = `Liquidação fechada! Recebido: ${formatarMoeda(resultado.valor_recebido_dia)}`;
+      if (Platform.OS === 'web') { window.alert(msg); } else { Alert.alert('Sucesso', msg); }
       carregarLiquidacoes();
     } catch (error: any) {
-      Alert.alert('Erro', error.message || 'Não foi possível encerrar o dia');
+      const msg = error.message || 'Não foi possível encerrar o dia';
+      if (Platform.OS === 'web') { window.alert(msg); } else { Alert.alert('Erro', msg); }
     } finally {
       setFechando(false);
     }

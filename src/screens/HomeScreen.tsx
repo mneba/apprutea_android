@@ -4,6 +4,7 @@ import {
   Alert,
   Dimensions,
   Modal,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -303,10 +304,18 @@ export default function HomeScreen({ navigation }: any) {
       });
       if (error) throw error;
       if (data?.[0]?.sucesso) {
-        Alert.alert('Sucesso', `Dia encerrado!\nRecebido: $ ${data[0].valor_recebido_dia?.toFixed(2) || '0,00'}`);
-        setModalFecharVisible(false); setObservacoesFechamento(''); carregarDados();
-      } else { Alert.alert('Erro', data?.[0]?.mensagem || 'Erro ao fechar'); }
-    } catch (e: any) { Alert.alert('Erro', e.message); }
+        setModalFecharVisible(false); setObservacoesFechamento('');
+        const msg = `Dia encerrado!\nRecebido: $ ${data[0].valor_recebido_dia?.toFixed(2) || '0.00'}`;
+        if (Platform.OS === 'web') { window.alert(msg); } else { Alert.alert('Sucesso', msg); }
+        carregarDados();
+      } else {
+        const errMsg = data?.[0]?.mensagem || 'Erro ao fechar';
+        if (Platform.OS === 'web') { window.alert(errMsg); } else { Alert.alert('Erro', errMsg); }
+      }
+    } catch (e: any) {
+      const errMsg = e.message || 'Erro inesperado';
+      if (Platform.OS === 'web') { window.alert(errMsg); } else { Alert.alert('Erro', errMsg); }
+    }
     finally { setProcessando(false); }
   };
 

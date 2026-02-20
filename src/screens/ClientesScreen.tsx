@@ -24,7 +24,7 @@ type FiltroLiquidacao = 'todos' | 'atrasados' | 'pagas';
 type OrdenacaoLiquidacao = 'rota' | 'nome';
 
 interface ClienteRotaDia {
-  cliente_id: string; consecutivo: number | null; nome: string;
+  cliente_id: string; codigo_cliente: number | null; nome: string;
   telefone_celular: string | null; endereco: string | null;
   latitude: number | null; longitude: number | null;
   emprestimo_id: string; saldo_emprestimo: number; valor_principal: number;
@@ -51,14 +51,14 @@ interface EmprestimoData {
 }
 
 interface ClienteAgrupado {
-  cliente_id: string; consecutivo: number | null; nome: string;
+  cliente_id: string; codigo_cliente: number | null; nome: string;
   telefone_celular: string | null; endereco: string | null;
   latitude: number | null; longitude: number | null; rota_id: string;
   emprestimos: EmprestimoData[]; qtd_emprestimos: number; tem_multiplos_vencimentos: boolean;
 }
 
 interface ClienteTodos {
-  id: string; consecutivo: number | null; nome: string;
+  id: string; codigo_cliente: number | null; nome: string;
   telefone_celular: string | null; status: string; tem_atraso: boolean;
   permite_renegociacao: boolean;
   emprestimos: EmprestimoTodos[];
@@ -328,7 +328,10 @@ export default function ClientesScreen({ navigation, route }: any) {
       
       if (error) throw error;
       
-      let allData = (data || []) as ClienteRotaDia[];
+      let allData = ((data || []) as any[]).map(r => ({
+        ...r,
+        codigo_cliente: r.codigo_cliente ?? r.consecutivo ?? null,
+      })) as ClienteRotaDia[];
       const existingParcelaIds = new Set(allData.map(r => r.parcela_id));
       
       // 2. Busca parcelas que foram pagas NA liquidação atual (para mostrar como "pagas")
@@ -355,7 +358,7 @@ export default function ClientesScreen({ navigation, route }: any) {
             const clienteIds = [...new Set(pagamentosNovos.map(p => p.cliente_id))];
             const { data: clientes } = await supabase
               .from('clientes')
-              .select('id, nome, telefone_celular, endereco, latitude, longitude, consecutivo')
+              .select('id, nome, telefone_celular, endereco, latitude, longitude, codigo_cliente')
               .in('id', clienteIds);
             const cliMap = new Map((clientes || []).map(c => [c.id, c]));
             
@@ -389,7 +392,7 @@ export default function ClientesScreen({ navigation, route }: any) {
                 endereco: cli.endereco,
                 latitude: cli.latitude,
                 longitude: cli.longitude,
-                consecutivo: cli.consecutivo,
+                codigo_cliente: cli.codigo_cliente,
                 emprestimo_id: emp.id,
                 saldo_emprestimo: emp.valor_saldo,
                 valor_principal: emp.valor_principal,
@@ -484,7 +487,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     setLoadTodos(true);
     try {
       // Query 1: Todos os empréstimos da rota com dados do cliente
-      const { data: emps } = await supabase.from('emprestimos').select(`id, valor_principal, valor_saldo, valor_parcela, numero_parcelas, status, frequencia_pagamento, tipo_emprestimo, clientes!inner(id, nome, telefone_celular, status, consecutivo, permite_renegociacao)`).eq('rota_id', rotaId).in('status', ['ATIVO', 'VENCIDO', 'QUITADO', 'RENEGOCIADO']);
+      const { data: emps } = await supabase.from('emprestimos').select(`id, valor_principal, valor_saldo, valor_parcela, numero_parcelas, status, frequencia_pagamento, tipo_emprestimo, clientes!inner(id, nome, telefone_celular, status, codigo_cliente, permite_renegociacao)`).eq('rota_id', rotaId).in('status', ['ATIVO', 'VENCIDO', 'QUITADO', 'RENEGOCIADO']);
       if (!emps || emps.length === 0) { setTodosList([]); return; }
 
       // Query 2: Todas as parcelas dos empréstimos de uma vez
@@ -505,7 +508,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       for (const e of emps as any[]) {
         const c = e.clientes; if (!c) continue;
         let cli = cliMap.get(c.id);
-        if (!cli) { cli = { id: c.id, consecutivo: c.consecutivo, nome: c.nome, telefone_celular: c.telefone_celular, status: c.status, tem_atraso: false, permite_renegociacao: c.permite_renegociacao || false, emprestimos: [] }; cliMap.set(c.id, cli); }
+        if (!cli) { cli = { id: c.id, codigo_cliente: c.codigo_cliente, nome: c.nome, telefone_celular: c.telefone_celular, status: c.status, tem_atraso: false, permite_renegociacao: c.permite_renegociacao || false, emprestimos: [] }; cliMap.set(c.id, cli); }
         const info = parcMap.get(e.id) || { maxParcela: 1, vencidas: 0, totalVencido: 0 };
         if (info.vencidas > 0) cli.tem_atraso = true;
         cli.emprestimos.push({ id: e.id, valor_principal: e.valor_principal, saldo_emprestimo: e.valor_saldo, valor_parcela: e.valor_parcela, numero_parcelas: e.numero_parcelas, numero_parcela_atual: info.maxParcela, status: e.status, frequencia_pagamento: e.frequencia_pagamento, tipo_emprestimo: (e as any).tipo_emprestimo || 'NOVO', total_parcelas_vencidas: info.vencidas, valor_total_vencido: info.totalVencido });
@@ -780,7 +783,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     const m = new Map<string, ClienteAgrupado>();
     raw.forEach(r => {
       let g = m.get(r.cliente_id);
-      if (!g) { g = { cliente_id: r.cliente_id, consecutivo: r.consecutivo, nome: r.nome, telefone_celular: r.telefone_celular, endereco: r.endereco, latitude: r.latitude, longitude: r.longitude, rota_id: r.rota_id, emprestimos: [], qtd_emprestimos: 0, tem_multiplos_vencimentos: false }; m.set(r.cliente_id, g); }
+      if (!g) { g = { cliente_id: r.cliente_id, codigo_cliente: r.codigo_cliente, nome: r.nome, telefone_celular: r.telefone_celular, endereco: r.endereco, latitude: r.latitude, longitude: r.longitude, rota_id: r.rota_id, emprestimos: [], qtd_emprestimos: 0, tem_multiplos_vencimentos: false }; m.set(r.cliente_id, g); }
       
       // Verifica se já existe uma entrada para este empréstimo
       const existente = g.emprestimos.find(e => e.emprestimo_id === r.emprestimo_id);
@@ -966,7 +969,7 @@ export default function ClientesScreen({ navigation, route }: any) {
                 return;
               }
               const nav = navigation.getParent() || navigation;
-              nav.navigate('NovoCliente', { renegociacao: { emprestimo_id: e.emprestimo_id, cliente_id: c.cliente_id, cliente_nome: c.nome, saldo_devedor: e.saldo_emprestimo, telefone_celular: c.telefone_celular } });
+              nav.navigate('NovoCliente', { renegociacao: { emprestimo_id: e.emprestimo_id, cliente_id: c.cliente_id, cliente_nome: c.nome, saldo_devedor: e.saldo_emprestimo, telefone_celular: c.telefone_celular, codigo_cliente: c.codigo_cliente } });
             }} disabled={!liqId || isViz}><Text style={S.btRenegI}>🔄</Text><Text style={S.btRenegT}>{t.renegociar}</Text></TouchableOpacity>
           )}
           <View style={S.btR}><TouchableOpacity style={[S.bt, S.btOG]} onPress={() => c.telefone_celular && Linking.openURL(`tel:${c.telefone_celular.replace(/\D/g, '')}`)} disabled={!c.telefone_celular}><Text style={S.btI}>📱</Text><Text style={S.btTG}>{t.contato}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btOB]} onPress={() => { if (c.latitude && c.longitude) Linking.openURL(Platform.OS === 'ios' ? `maps:?daddr=${c.latitude},${c.longitude}` : `google.navigation:q=${c.latitude},${c.longitude}`); }} disabled={!c.latitude}><Text style={S.btI}>🧭</Text><Text style={S.btTB}>{t.ir}</Text></TouchableOpacity></View>
@@ -1000,7 +1003,7 @@ export default function ClientesScreen({ navigation, route }: any) {
               return (<TouchableOpacity style={S.tAddRowActive} onPress={() => {
                 const confirmar = () => { 
                   const nav = navigation.getParent() || navigation; 
-                  nav.navigate('NovoCliente', { clienteExistente: { id: c.id, nome: c.nome, telefone_celular: c.telefone_celular, documento: c.consecutivo?.toString() || '' } }); 
+                  nav.navigate('NovoCliente', { clienteExistente: { id: c.id, nome: c.nome, telefone_celular: c.telefone_celular, documento: c.codigo_cliente?.toString() || '' } }); 
                 };
                 if (Platform.OS === 'web') {
                   if (window.confirm(t.confirmarNovoEmprestimo)) confirmar();
@@ -1019,7 +1022,7 @@ export default function ClientesScreen({ navigation, route }: any) {
               }
               return (<TouchableOpacity style={S.btReneg} onPress={() => {
                 const nav = navigation.getParent() || navigation;
-                nav.navigate('NovoCliente', { renegociacao: { emprestimo_id: emp.id, cliente_id: c.id, cliente_nome: c.nome, saldo_devedor: emp.saldo_emprestimo, telefone_celular: c.telefone_celular } });
+                nav.navigate('NovoCliente', { renegociacao: { emprestimo_id: emp.id, cliente_id: c.id, cliente_nome: c.nome, saldo_devedor: emp.saldo_emprestimo, telefone_celular: c.telefone_celular, codigo_cliente: c.codigo_cliente } });
               }}><Text style={S.btRenegI}>🔄</Text><Text style={S.btRenegT}>{t.renegociar}</Text></TouchableOpacity>);
             }
             if (c.emprestimos.length === 1) {

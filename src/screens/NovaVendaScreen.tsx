@@ -916,17 +916,22 @@ export default function NovaVendaScreen({ navigation, route }: any) {
       const raw = Array.isArray(data) ? data[0] : data;
       
       // Normaliza campos - fn_renovar/renegociar retornam com campos diferentes
+      let codigoCliente = renegociacao?.codigo_cliente || null;
+      if (isRenegociacao && !codigoCliente) {
+        const { data: cliData } = await supabase.from('clientes').select('codigo_cliente').eq('id', renegociacao.cliente_id).single();
+        codigoCliente = cliData?.codigo_cliente || null;
+      }
       const res = isRenegociacao ? {
         sucesso: raw?.sucesso,
-        mensagem: raw?.mensagem,
+        mensagem: 'Renegociação registrada com sucesso',
         cliente_id: renegociacao.cliente_id,
         cliente_nome: renegociacao.cliente_nome,
-        cliente_codigo: null,
+        cliente_codigo: codigoCliente,
         emprestimo_id: raw?.novo_emprestimo_id,
         valor_total: raw?.novo_valor_principal,
-        valor_parcela: null,
+        valor_parcela: parseInt(numeroParcelas) > 0 ? (raw?.novo_valor_principal || 0) / parseInt(numeroParcelas) : 0,
         microseguro_id: null,
-        microseguro_valor: null,
+        microseguro_valor: microValor > 0 ? microValor : null,
         parcelas: null,
         saldo_anterior: raw?.saldo_anterior,
         parcelas_canceladas: raw?.parcelas_canceladas,
