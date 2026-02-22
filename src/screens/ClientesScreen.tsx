@@ -104,6 +104,8 @@ const textos = {
     semClientes: 'Nenhum cliente encontrado', carregando: 'Carregando clientes...',
     statusAtraso: 'Atraso', statusInativo: 'Inativo',
     tipoFiltro: 'Tipo:...', statusFiltro: 'Status:...',
+    tipoTodos: 'Todos', tipoNovo: 'Novo', tipoRenovacao: 'Renovação', tipoRenegociacao: 'Renegociação',
+    stTodos: 'Todos', stAtivo: 'Ativo', stVencido: 'Vencido', stQuitado: 'Quitado', stRenegociado: 'Renegociado',
     pago: 'Pago:', original: 'Original:', credito: 'Crédito:',
     empAtivo: 'Empréstimo Ativo', empVencido: 'Empréstimo Vencido',
     empRenegociado: 'Renegociado', empQuitado: 'Quitado',
@@ -170,6 +172,8 @@ const textos = {
     semClientes: 'Ningún cliente encontrado', carregando: 'Cargando clientes...',
     statusAtraso: 'Atraso', statusInativo: 'Inactivo',
     tipoFiltro: 'Tipo:...', statusFiltro: 'Estado:...',
+    tipoTodos: 'Todos', tipoNovo: 'Nuevo', tipoRenovacao: 'Renovación', tipoRenegociacao: 'Renegociación',
+    stTodos: 'Todos', stAtivo: 'Activo', stVencido: 'Vencido', stQuitado: 'Liquidado', stRenegociado: 'Renegociado',
     pago: 'Pagado:', original: 'Original:', credito: 'Crédito:',
     empAtivo: 'Préstamo Activo', empVencido: 'Préstamo Vencido',
     empRenegociado: 'Renegociado', empQuitado: 'Liquidado',
@@ -268,6 +272,10 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [todosList, setTodosList] = useState<ClienteTodos[]>([]);
   const [loadTodos, setLoadTodos] = useState(false);
   const [expandedTodos, setExpandedTodos] = useState<string | null>(null);
+  const [filtroTipo, setFiltroTipo] = useState<string>('todos');
+  const [filtroStatus, setFiltroStatus] = useState<string>('todos');
+  const [showFiltroTipo, setShowFiltroTipo] = useState(false);
+  const [showFiltroStatus, setShowFiltroStatus] = useState(false);
   const [empIdxTodos, setEmpIdxTodos] = useState<Record<string, number>>({});
   const [todosCount, setTodosCount] = useState<number | null>(null);
 
@@ -834,12 +842,12 @@ export default function ClientesScreen({ navigation, route }: any) {
     if (busca.trim()) { const b = busca.toLowerCase().trim(); r = r.filter(c => c.nome.toLowerCase().includes(b) || (c.telefone_celular && c.telefone_celular.includes(b)) || (c.endereco && c.endereco.toLowerCase().includes(b))); }
     if (filtro === 'atrasados') r = r.filter(c => !isCliPago(c) && c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas));
     else if (filtro === 'pagas') r = r.filter(c => isCliPago(c));
-    // 'todos' mostra todos (pendentes + pagos)
+    else r = r.filter(c => !isCliPago(c)); // 'todos' mostra apenas pendentes (não pagos)
     r.sort(ord === 'rota' ? (a, b) => (a.emprestimos[0]?.ordem_visita_dia ?? 9999) - (b.emprestimos[0]?.ordem_visita_dia ?? 9999) : (a, b) => a.nome.localeCompare(b.nome));
     return r;
   }, [grouped, busca, filtro, ord, isCliPago]);
 
-  const cntTotal = grouped.length;
+  const cntTotal = grouped.filter(c => !isCliPago(c)).length;
   const cntAtraso = grouped.filter(c => c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas)).length;
   const cntPagas = grouped.filter(c => isCliPago(c)).length;
   const eIdx = (cid: string) => empIdxMap[cid] || 0;
@@ -977,7 +985,18 @@ export default function ClientesScreen({ navigation, route }: any) {
       </TouchableOpacity>);
   };
 
-  const todosFilt = useMemo(() => { if (!busca.trim()) return todosList; const b = busca.toLowerCase().trim(); return todosList.filter(c => c.nome.toLowerCase().includes(b) || (c.telefone_celular && c.telefone_celular.includes(b))); }, [todosList, busca]);
+  const todosFilt = useMemo(() => {
+    let r = [...todosList];
+    // Busca por texto
+    if (busca.trim()) { const b = busca.toLowerCase().trim(); r = r.filter(c => c.nome.toLowerCase().includes(b) || (c.telefone_celular && c.telefone_celular.includes(b))); }
+    // Filtro por tipo de empréstimo
+    if (filtroTipo !== 'todos') { r = r.filter(c => c.emprestimos.some(e => e.tipo_emprestimo === filtroTipo)); }
+    // Filtro por status do empréstimo
+    if (filtroStatus !== 'todos') { r = r.filter(c => c.emprestimos.some(e => e.status === filtroStatus)); }
+    // Ordenação A-Z sempre
+    r.sort((a, b) => a.nome.localeCompare(b.nome));
+    return r;
+  }, [todosList, busca, filtroTipo, filtroStatus]);
 
   const renderTodos = (c: ClienteTodos) => {
     const a = c.tem_atraso; const cor = a ? '#EF4444' : '#3B82F6';
@@ -1077,8 +1096,26 @@ export default function ClientesScreen({ navigation, route }: any) {
       <View style={S.srR}><View style={S.srB}><Text style={S.srI}>🔍</Text><TextInput style={S.srIn} placeholder={t.buscar} placeholderTextColor="#9CA3AF" value={busca} onChangeText={setBusca} /></View>{tab === 'liquidacao' && <TouchableOpacity style={S.orB} onPress={() => setShowOrd(!showOrd)}><Text style={S.orI}>↕️</Text><Text style={S.orTx}>{ord === 'rota' ? t.ordemRota : t.ordemNome}</Text><Text style={S.orCh}>▼</Text></TouchableOpacity>}</View>
       {showOrd && tab === 'liquidacao' && <View style={S.orDr}>{(['rota', 'nome'] as OrdenacaoLiquidacao[]).map(o => (<TouchableOpacity key={o} style={[S.orOp, ord === o && S.orOpOn]} onPress={() => { setOrd(o); setShowOrd(false); }}><Text style={[S.orOpTx, ord === o && S.orOpTxOn]}>{o === 'rota' ? t.ordemRota : t.ordemNome}</Text></TouchableOpacity>))}</View>}
       {tab === 'liquidacao' && (<View style={S.chs}><TouchableOpacity style={[S.ch, filtro === 'todos' && S.chOn]} onPress={() => setFiltro('todos')}><Text style={[S.chTx, filtro === 'todos' && S.chTxOn]}>{t.filtroTodos} {cntTotal}</Text></TouchableOpacity><TouchableOpacity style={[S.ch, filtro === 'atrasados' && S.chOn]} onPress={() => setFiltro('atrasados')}><Text style={[S.chTx, filtro === 'atrasados' && S.chTxOn]}>{t.filtroAtrasados} {cntAtraso}</Text></TouchableOpacity><TouchableOpacity style={[S.ch, filtro === 'pagas' && S.chPOn, filtro !== 'pagas' && S.chPOff]} onPress={() => setFiltro(filtro === 'pagas' ? 'todos' : 'pagas')}><Text style={[S.chTx, filtro === 'pagas' ? S.chPTxOn : S.chPTxOff]}>{t.filtroPagas} {cntPagas}</Text></TouchableOpacity><Text style={S.chCh}>▼</Text></View>)}
-      {tab === 'todos' && (<View style={S.tF}><TouchableOpacity style={S.tFB}><Text style={S.tFBT}>{t.tipoFiltro}</Text><Text style={S.tFC}>▼</Text></TouchableOpacity><TouchableOpacity style={S.tFB}><Text style={S.tFBT}>{t.statusFiltro}</Text><Text style={S.tFC}>▼</Text></TouchableOpacity><Text style={S.tCnt}>{todosFilt.length} {t.clientes}</Text><Text style={S.tChv}>▼</Text></View>)}
-      <ScrollView style={S.ls} contentContainerStyle={S.lsI} refreshControl={!isViz ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined} showsVerticalScrollIndicator={false}>
+      {tab === 'todos' && (<View style={S.tF}>
+        <View style={{ position: 'relative' as const }}>
+          <TouchableOpacity style={[S.tFB, filtroTipo !== 'todos' && { borderColor: '#3B82F6', backgroundColor: '#EFF6FF' }]} onPress={() => { setShowFiltroTipo(!showFiltroTipo); setShowFiltroStatus(false); }}>
+            <Text style={[S.tFBT, filtroTipo !== 'todos' && { color: '#3B82F6' }]}>{filtroTipo === 'todos' ? t.tipoFiltro : filtroTipo === 'NOVO' ? t.tipoNovo : filtroTipo === 'RENOVACAO' ? t.tipoRenovacao : t.tipoRenegociacao}</Text><Text style={S.tFC}>▼</Text>
+          </TouchableOpacity>
+          {showFiltroTipo && (<View style={S.tDD}>{[
+            { k: 'todos', l: t.tipoTodos }, { k: 'NOVO', l: t.tipoNovo }, { k: 'RENOVACAO', l: t.tipoRenovacao }, { k: 'RENEGOCIACAO', l: t.tipoRenegociacao }
+          ].map(o => (<TouchableOpacity key={o.k} style={[S.tDDI, filtroTipo === o.k && S.tDDISel]} onPress={() => { setFiltroTipo(o.k); setShowFiltroTipo(false); }}><Text style={[S.tDDIT, filtroTipo === o.k && S.tDDITSel]}>{o.l}</Text></TouchableOpacity>))}</View>)}
+        </View>
+        <View style={{ position: 'relative' as const }}>
+          <TouchableOpacity style={[S.tFB, filtroStatus !== 'todos' && { borderColor: '#3B82F6', backgroundColor: '#EFF6FF' }]} onPress={() => { setShowFiltroStatus(!showFiltroStatus); setShowFiltroTipo(false); }}>
+            <Text style={[S.tFBT, filtroStatus !== 'todos' && { color: '#3B82F6' }]}>{filtroStatus === 'todos' ? t.statusFiltro : filtroStatus === 'ATIVO' ? t.stAtivo : filtroStatus === 'VENCIDO' ? t.stVencido : filtroStatus === 'QUITADO' ? t.stQuitado : t.stRenegociado}</Text><Text style={S.tFC}>▼</Text>
+          </TouchableOpacity>
+          {showFiltroStatus && (<View style={S.tDD}>{[
+            { k: 'todos', l: t.stTodos }, { k: 'ATIVO', l: t.stAtivo }, { k: 'VENCIDO', l: t.stVencido }, { k: 'QUITADO', l: t.stQuitado }, { k: 'RENEGOCIADO', l: t.stRenegociado }
+          ].map(o => (<TouchableOpacity key={o.k} style={[S.tDDI, filtroStatus === o.k && S.tDDISel]} onPress={() => { setFiltroStatus(o.k); setShowFiltroStatus(false); }}><Text style={[S.tDDIT, filtroStatus === o.k && S.tDDITSel]}>{o.l}</Text></TouchableOpacity>))}</View>)}
+        </View>
+        <Text style={S.tCnt}>{todosFilt.length} {t.clientes}</Text>
+      </View>)}
+      <ScrollView style={S.ls} contentContainerStyle={S.lsI} refreshControl={!isViz ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined} showsVerticalScrollIndicator={false} onScrollBeginDrag={() => { setShowFiltroTipo(false); setShowFiltroStatus(false); }}>
         {tab === 'liquidacao' ? (filtered.length === 0 ? <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View> : filtered.map(renderCard)) : (loadTodos ? <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} /> : todosFilt.length === 0 ? <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View> : todosFilt.map(renderTodos))}
         <View style={{ height: 90 }} />
       </ScrollView>
@@ -1090,8 +1127,13 @@ export default function ClientesScreen({ navigation, route }: any) {
           {creditoDisponivel > 0 && (<View style={S.creditoBanner}><Text style={S.creditoIcon}>💳</Text><Text style={S.creditoText}>{t.creditoDisponivel} {fmt(creditoDisponivel)}</Text></View>)}
           <ScrollView style={S.modalScroll} showsVerticalScrollIndicator={false}>
             {loadingParcelas ? (<ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />) : parcelasModal.length === 0 ? (<Text style={S.modalEmpty}>{ t.nenhumaParcelaEncontrada }</Text>) : (parcelasModal.map(p => renderParcelaItem(p)))}
-            <View style={{ height: 20 }} />
+            <View style={{ height: 10 }} />
           </ScrollView>
+          <View style={S.mBtnFecharWrap}>
+            <TouchableOpacity style={S.mBtnFechar} onPress={() => setModalParcelasVisible(false)}>
+              <Text style={S.mBtnFecharTx}>{t.fechar}</Text>
+            </TouchableOpacity>
+          </View>
         </View></View>
       </Modal>
 
@@ -1312,11 +1354,16 @@ const S = StyleSheet.create({
   chTx: { fontSize: 12, fontWeight: '500', color: '#6B7280' }, chTxOn: { color: '#fff' },
   chPOn: { backgroundColor: '#059669', borderColor: '#059669' }, chPOff: { backgroundColor: '#F3F4F6', borderColor: '#E5E7EB' },
   chPTxOn: { color: '#fff' }, chPTxOff: { color: '#6B7280' }, chCh: { fontSize: 10, color: '#9CA3AF' },
-  tF: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginTop: 10, gap: 8 },
+  tF: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginTop: 10, gap: 8, zIndex: 1000 },
   tFB: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#fff', gap: 4 },
   tFBT: { fontSize: 12, color: '#6B7280' }, tFC: { fontSize: 8, color: '#9CA3AF' },
   tCnt: { flex: 1, textAlign: 'right', fontSize: 12, color: '#6B7280' }, tChv: { fontSize: 10, color: '#9CA3AF' },
-  ls: { flex: 1, marginTop: 10 }, lsI: { paddingHorizontal: 16 },
+  tDD: { position: 'absolute', top: 36, left: 0, zIndex: 999, backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 6, elevation: 8, minWidth: 130 },
+  tDDI: { paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  tDDISel: { backgroundColor: '#EFF6FF' },
+  tDDIT: { fontSize: 13, color: '#374151' },
+  tDDITSel: { color: '#3B82F6', fontWeight: '600' },
+  ls: { flex: 1, marginTop: 10, zIndex: 1 }, lsI: { paddingHorizontal: 16 },
   em: { alignItems: 'center', paddingTop: 60 }, emI: { fontSize: 48, marginBottom: 12 }, emT: { fontSize: 14, color: '#9CA3AF' },
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 12, marginBottom: 8, borderLeftWidth: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 2 },
   cardRow: { flexDirection: 'row' },
@@ -1393,6 +1440,9 @@ const S = StyleSheet.create({
   mBtnPagarIcon: { fontSize: 14 },
   mBtnPagarTx: { color: '#fff', fontSize: 12, fontWeight: '600' },
   mBtnEstornar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#EF4444', gap: 6 },
+  mBtnFecharWrap: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 20, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
+  mBtnFechar: { backgroundColor: '#3B82F6', paddingVertical: 14, borderRadius: 10, alignItems: 'center' },
+  mBtnFecharTx: { fontSize: 15, fontWeight: '700', color: '#fff' },
   mBtnEstornarIcon: { fontSize: 14, color: '#EF4444' },
   mBtnEstornarTx: { color: '#EF4444', fontSize: 12, fontWeight: '600' },
   modalPagamento: { width: '90%', backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden' },
