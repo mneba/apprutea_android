@@ -905,8 +905,8 @@ export default function ClientesScreen({ navigation, route }: any) {
                 )}
               </View>
             )}
-            {/* PARCIAL: pago + restante */}
-            {isParcial && (
+            {/* PARCIAL ou VENCIDA com pagamento parcial: pago + restante */}
+            {!isPago && valorPago > 0 && (
               <View style={{ marginTop: 2 }}>
                 <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
                 <Text style={S.mParcelaRestante}>{lang === 'es' ? 'Restante:' : 'Restante:'} {fmt(valorRestante)}</Text>
@@ -916,7 +916,7 @@ export default function ClientesScreen({ navigation, route }: any) {
               </View>
             )}
           </View>
-          {/* Lado direito: botão */}
+          {/* Lado direito: botões */}
           <View style={S.mParcelaBtns}>
             {!isPago && p.parcela_id && !['RENEGOCIADO', 'QUITADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '') && p.status !== 'CANCELADO' && (
               <TouchableOpacity 
@@ -928,7 +928,8 @@ export default function ClientesScreen({ navigation, route }: any) {
                 <Text style={S.mBtnPagarTx}>{t.pagar}</Text>
               </TouchableOpacity>
             )}
-            {isPago && p.parcela_id && liqId && !isViz && p.liquidacao_id === liqId && (
+            {/* Estorno: PAGO ou qualquer parcela com pagamento (parcial) na liquidação atual */}
+            {(isPago || valorPago > 0) && p.parcela_id && liqId && !isViz && p.liquidacao_id === liqId && (
               <TouchableOpacity style={S.mBtnEstornar} onPress={() => abrirEstorno(p)}>
                 <Text style={S.mBtnEstornarIcon}>↩</Text>
                 <Text style={S.mBtnEstornarTx}>{t.estornar}</Text>
