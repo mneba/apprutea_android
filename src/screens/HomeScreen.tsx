@@ -4,7 +4,6 @@ import {
   Alert,
   Dimensions,
   Modal,
-  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -13,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { ModalExtrato } from '../components/LiquidacaoDetalhes';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
 
@@ -130,6 +130,10 @@ export default function HomeScreen({ navigation }: any) {
   const [caixaInicial, setCaixaInicial] = useState('');
   const [observacoesFechamento, setObservacoesFechamento] = useState('');
   const [processando, setProcessando] = useState(false);
+  const [extratoFechamentoVisible, setExtratoFechamentoVisible] = useState(false);
+  const [liqFechadaId, setLiqFechadaId] = useState<string | null>(null);
+  const [liqFechadaCaixaInicial, setLiqFechadaCaixaInicial] = useState(0);
+  const [liqFechadaCaixaFinal, setLiqFechadaCaixaFinal] = useState(0);
 
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
@@ -304,24 +308,23 @@ export default function HomeScreen({ navigation }: any) {
       });
       if (error) throw error;
       if (data?.[0]?.sucesso) {
-        setModalFecharVisible(false); setObservacoesFechamento('');
-        const msg = `Dia encerrado!\nRecebido: $ ${data[0].valor_recebido_dia?.toFixed(2) || '0.00'}`;
-        if (Platform.OS === 'web') { window.alert(msg); } else { Alert.alert('Sucesso', msg); }
+        // Guardar dados da liquidação para exibir extrato
+        setLiqFechadaId(liquidacao.id);
+        setLiqFechadaCaixaInicial(liquidacao.caixa_inicial || 0);
+        setLiqFechadaCaixaFinal(calcularCaixaAtual());
+        setModalFecharVisible(false);
+        setObservacoesFechamento('');
         carregarDados();
-      } else {
-        const errMsg = data?.[0]?.mensagem || 'Erro ao fechar';
-        if (Platform.OS === 'web') { window.alert(errMsg); } else { Alert.alert('Erro', errMsg); }
-      }
-    } catch (e: any) {
-      const errMsg = e.message || 'Erro inesperado';
-      if (Platform.OS === 'web') { window.alert(errMsg); } else { Alert.alert('Erro', errMsg); }
-    }
+        // Abrir extrato/comprovante automaticamente
+        setExtratoFechamentoVisible(true);
+      } else { Alert.alert('Erro', data?.[0]?.mensagem || 'Erro ao fechar'); }
+    } catch (e: any) { Alert.alert('Erro', e.message); }
     finally { setProcessando(false); }
   };
 
   // ==================== FORMATADORES ====================
   const formatarMoeda = (v: number | null | undefined) => 
-    '$ ' + (v ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    (v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   
   const formatarData = (d: string | Date) => 
     (typeof d === 'string' ? new Date(d) : d).toLocaleDateString('pt-BR');
@@ -769,6 +772,17 @@ export default function HomeScreen({ navigation }: any) {
           </View>
         </View>
       </Modal>
+
+      {/* MODAL EXTRATO PÓS-FECHAMENTO */}
+      {liqFechadaId && (
+        <ModalExtrato
+          visible={extratoFechamentoVisible}
+          onClose={() => { setExtratoFechamentoVisible(false); setLiqFechadaId(null); }}
+          liquidacaoId={liqFechadaId}
+          caixaInicial={liqFechadaCaixaInicial}
+          caixaFinal={liqFechadaCaixaFinal}
+        />
+      )}
     </View>
   );
 }

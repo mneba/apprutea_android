@@ -6,7 +6,6 @@ import {
   Dimensions,
   Image,
   Modal,
-  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -14,17 +13,17 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { ModalExtrato, ModalFinanceiro, ModalMicroseguro, ModalPagamentos } from '../components/LiquidacaoDetalhes';
+import { ModalExtrato } from '../components/LiquidacaoDetalhes';
 import { useAuth } from '../contexts/AuthContext';
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
 import { LiquidacaoDiaria } from '../types';
 
+type Language = 'pt-BR' | 'es';
 
 interface ContaRota {
   id: string;
   saldo_atual: number;
-  nome: string;
 }
 
 interface DiaCalendario {
@@ -148,23 +147,21 @@ const textos = {
 export default function LiquidacaoScreen({ navigation }: any) {
   const { vendedor } = useAuth();
   const liqCtx = useLiquidacaoContext();
-  const { language, setLanguage } = liqCtx;
   const [liquidacao, setLiquidacao] = useState<LiquidacaoDiaria | null>(null);
   const [todasLiquidacoes, setTodasLiquidacoes] = useState<LiquidacaoDiaria[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [language, setLanguage] = useState<Language>('pt-BR');
   const [fechando, setFechando] = useState(false);
+  const [fechandoEtapa, setFechandoEtapa] = useState<'confirmar' | 'processando' | 'gerando'>('confirmar');
   const [modalIniciarVisible, setModalIniciarVisible] = useState(false);
   const [modalFecharVisible, setModalFecharVisible] = useState(false);
+  const [extratoFechamentoVisible, setExtratoFechamentoVisible] = useState(false);
+  const [liqFechadaId, setLiqFechadaId] = useState<string | null>(null);
+  const [liqFechadaCaixaInicial, setLiqFechadaCaixaInicial] = useState(0);
+  const [liqFechadaCaixaFinal, setLiqFechadaCaixaFinal] = useState(0);
   const [contaRota, setContaRota] = useState<ContaRota | null>(null);
   const [salvando, setSalvando] = useState(false);
-  
-  // Estados dos modais de detalhe
-  const [modalExtratoVisible, setModalExtratoVisible] = useState(false);
-  const [modalPagamentosVisible, setModalPagamentosVisible] = useState(false);
-  const [modalFinanceiroVisible, setModalFinanceiroVisible] = useState(false);
-  const [tipoFinanceiro, setTipoFinanceiro] = useState<'VENDAS' | 'RECEITAS' | 'DESPESAS'>('VENDAS');
-  const [modalMicroseguroVisible, setModalMicroseguroVisible] = useState(false);
   
   // Estados do Calendário
   const [mostrarCalendario, setMostrarCalendario] = useState(false);
@@ -259,7 +256,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
       // Buscar saldo da conta da rota (será usado como caixa inicial automático)
       const { data: contaData } = await supabase
         .from('contas')
-        .select('id, saldo_atual, nome')
+        .select('id, saldo_atual')
         .eq('rota_id', vendedor.rota_id)
         .eq('tipo_conta', 'ROTA')
         .eq('status', 'ATIVA')
@@ -478,22 +475,16 @@ export default function LiquidacaoScreen({ navigation }: any) {
     return '✓';
   };
 
-  // ==================== SAUDAÇÃO ====================
-  const getSaudacao = () => {
-    const h = new Date().getHours();
-    if (language === 'es') return h < 12 ? 'Buenos días' : h < 18 ? 'Buenas tardes' : 'Buenas noches';
-    return h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
-  };
-
   // ==================== FORMATADORES ====================
   const formatarMoeda = (valor: number | null) => {
-    if (valor === null || valor === undefined) return '$ 0,00';
-    return '$ ' + valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (valor === null || valor === undefined) return 'R$ 0,00';
+    return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   };
 
   const formatarMoedaCompacta = (valor: number | null) => {
-    if (valor === null || valor === undefined) return '$ 0';
-    return '$ ' + valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (valor === null || valor === undefined) return 'R$0';
+    if (valor >= 1000) return `R$${(valor / 1000).toFixed(1)}k`;
+    return `R$${valor.toFixed(0)}`;
   };
 
   const formatarData = (data: string | Date | null) => {
@@ -552,6 +543,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
     if (!liquidacao || !vendedor) return;
 
     setFechando(true);
+    setFechandoEtapa('processando');
     try {
       const { data, error } = await supabase.rpc('fn_fechar_liquidacao_diaria', {
         p_liquidacao_id: liquidacao.id,
@@ -567,15 +559,29 @@ export default function LiquidacaoScreen({ navigation }: any) {
         throw new Error(resultado?.mensagem || 'Erro ao fechar liquidação');
       }
 
+      // Etapa 2: Gerando extrato
+      setFechandoEtapa('gerando');
+
+      // Guardar dados para extrato
+      setLiqFechadaId(liquidacao.id);
+      setLiqFechadaCaixaInicial(liquidacao.caixa_inicial || 0);
+      setLiqFechadaCaixaFinal(resultado.caixa_final || 0);
+      
+      await carregarLiquidacoes();
+      
+      // Pequeno delay para UX e abrir extrato
+      await new Promise(r => setTimeout(r, 800));
+      
       setModalFecharVisible(false);
-      const msg = `Liquidação fechada! Recebido: ${formatarMoeda(resultado.valor_recebido_dia)}`;
-      if (Platform.OS === 'web') { window.alert(msg); } else { Alert.alert('Sucesso', msg); }
-      carregarLiquidacoes();
-    } catch (error: any) {
-      const msg = error.message || 'Não foi possível encerrar o dia';
-      if (Platform.OS === 'web') { window.alert(msg); } else { Alert.alert('Erro', msg); }
-    } finally {
       setFechando(false);
+      setFechandoEtapa('confirmar');
+      
+      // Abrir extrato
+      setTimeout(() => setExtratoFechamentoVisible(true), 300);
+    } catch (error: any) {
+      setFechando(false);
+      setFechandoEtapa('confirmar');
+      Alert.alert('Erro', error.message || 'Não foi possível encerrar o dia');
     }
   };
 
@@ -810,31 +816,36 @@ export default function LiquidacaoScreen({ navigation }: any) {
       >
         {liquidacao ? (
           <>
-            {/* Saudação do vendedor */}
-            <Text style={styles.saudacao}>{getSaudacao()}, {vendedor?.nome?.split(' ')[0] || 'Vendedor'}</Text>
-
-            {/* Card Status Liquidação (compacto) */}
-            <View style={[styles.card, styles.cardStatus, { elevation: 0, shadowOpacity: 0, borderWidth: 0 }]}>
+            {/* Card Vendedor + Status */}
+            <View style={[styles.card, styles.cardVendedor, { borderTopColor: isReaberto ? '#F59E0B' : isAberto ? '#10B981' : '#EF4444' }]}>
+              <View style={styles.vendedorRow}>
+                <View style={styles.avatar}><Text style={styles.avatarText}>👤</Text></View>
+                <Text style={styles.vendedorNome}>{vendedor?.nome}</Text>
+              </View>
+              
               <View style={styles.statusRow}>
-                <Text style={styles.statusIcon}>{isAberto ? '🔓' : isReaberto ? '🔄' : '🔒'}</Text>
-                <Text style={styles.dataText}>{formatarData(liquidacao.data_abertura)}</Text>
+                <View style={styles.dataContainer}>
+                  <Text style={styles.statusIcon}>{isAberto ? '🔓' : isReaberto ? '🔄' : '🔒'}</Text>
+                  <Text style={styles.dataText}>{formatarData(liquidacao.data_abertura)}</Text>
+                </View>
                 <View style={[styles.statusBadge, { backgroundColor: isReaberto ? '#FEF3C7' : isAberto ? '#D1FAE5' : '#FEE2E2' }]}>
                   <Text style={[styles.statusText, { color: isReaberto ? '#D97706' : isAberto ? '#047857' : '#DC2626' }]}>
                     {isReaberto ? 'REABERTO' : isAberto ? t.aberto : t.fechado}
                   </Text>
                 </View>
-                <View style={{ flex: 1 }} />
-                <TouchableOpacity style={styles.calendarBtn} onPress={handleAbrirCalendario}>
-                  <Text style={styles.calendarIcon}>📅</Text>
-                </TouchableOpacity>
               </View>
 
               {/* Aviso REABERTO */}
               {isReaberto && (
                 <View style={styles.avisoReaberto}>
-                  <Text style={styles.avisoReabertoText}>⚠️ Dia reaberto pelo admin. Apenas visualização.</Text>
+                  <Text style={styles.avisoReabertoText}>⚠️ Dia reaberto pelo admin. Apenas visualização - novos movimentos vão para a liquidação aberta.</Text>
                 </View>
               )}
+
+              {/* BOTÃO VER OUTRAS DATAS - AGORA COM onPress! */}
+              <TouchableOpacity style={styles.verDatasButton} onPress={handleAbrirCalendario}>
+                <Text style={styles.verDatasText}>{t.verOutrasDatas}</Text>
+              </TouchableOpacity>
             </View>
 
             {/* Card Meta/Atual/Progresso */}
@@ -873,7 +884,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
             <Text style={styles.sectionTitleOutside}>{t.controlesFinanceiros}</Text>
 
             {/* Caixa */}
-            <TouchableOpacity style={[styles.card, styles.cardCaixa]} onPress={() => setModalExtratoVisible(true)} activeOpacity={0.7}>
+            <View style={[styles.card, styles.cardCaixa]}>
               <View style={styles.financeiroContent}>
                 <View>
                   <Text style={styles.financeiroLabel}>{t.caixa}</Text>
@@ -882,10 +893,10 @@ export default function LiquidacaoScreen({ navigation }: any) {
                 </View>
                 <View style={styles.indicadorVerde} />
               </View>
-            </TouchableOpacity>
+            </View>
 
             {/* Pagamentos */}
-            <TouchableOpacity style={[styles.card, styles.cardPagamentos]} onPress={() => setModalPagamentosVisible(true)} activeOpacity={0.7}>
+            <View style={[styles.card, styles.cardPagamentos]}>
               <View style={styles.financeiroContent}>
                 <View>
                   <Text style={styles.financeiroLabel}>{t.pagamentos}</Text>
@@ -894,30 +905,30 @@ export default function LiquidacaoScreen({ navigation }: any) {
                 </View>
                 <View style={styles.indicadorVermelho} />
               </View>
-            </TouchableOpacity>
+            </View>
 
             {/* Outras Operações */}
             <Text style={styles.sectionTitleOutside}>{t.outrasOperacoes}</Text>
             <View style={styles.operacoesRow}>
-              <TouchableOpacity style={[styles.operacaoCard, styles.operacaoVendas]} onPress={() => { setTipoFinanceiro('VENDAS'); setModalFinanceiroVisible(true); }} activeOpacity={0.7}>
+              <View style={[styles.operacaoCard, styles.operacaoVendas]}>
                 <Text style={styles.opLabelVerde}>{t.vendas}</Text>
-                <Text style={styles.opValorVerde} numberOfLines={1} adjustsFontSizeToFit>{formatarMoedaCompacta(liquidacao.total_emprestado_dia)}</Text>
+                <Text style={styles.opValorVerde}>{formatarMoedaCompacta(liquidacao.total_emprestado_dia)}</Text>
                 <Text style={styles.opDetalheVerde}>{liquidacao.qtd_emprestimos_dia || 0} emp.</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.operacaoCard, styles.operacaoReceitas]} onPress={() => { setTipoFinanceiro('RECEITAS'); setModalFinanceiroVisible(true); }} activeOpacity={0.7}>
+              </View>
+              <View style={[styles.operacaoCard, styles.operacaoReceitas]}>
                 <Text style={styles.opLabelAzul}>{t.receitas}</Text>
-                <Text style={styles.opValorAzul} numberOfLines={1} adjustsFontSizeToFit>{formatarMoedaCompacta(liquidacao.total_receitas_dia)}</Text>
-                <Text style={styles.opDetalheAzul}>{liquidacao.qtd_receitas_dia || 0} lanç.</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.operacaoCard, styles.operacaoDespesas]} onPress={() => { setTipoFinanceiro('DESPESAS'); setModalFinanceiroVisible(true); }} activeOpacity={0.7}>
+                <Text style={styles.opValorAzul}>{formatarMoedaCompacta(liquidacao.valor_recebido_dia)}</Text>
+                <Text style={styles.opDetalheAzul}>{liquidacao.pagamentos_pagos || 0} pag.</Text>
+              </View>
+              <View style={[styles.operacaoCard, styles.operacaoDespesas]}>
                 <Text style={styles.opLabelVermelho}>{t.despesas}</Text>
-                <Text style={styles.opValorVermelho} numberOfLines={1} adjustsFontSizeToFit>{formatarMoedaCompacta(liquidacao.total_despesas_dia)}</Text>
+                <Text style={styles.opValorVermelho}>{formatarMoedaCompacta(liquidacao.total_despesas_dia)}</Text>
                 <Text style={styles.opDetalheVermelho}>{liquidacao.qtd_despesas_dia || 0} desp.</Text>
-              </TouchableOpacity>
+              </View>
             </View>
 
             {/* Micro Seguro */}
-            <TouchableOpacity style={styles.microSeguroCard} onPress={() => setModalMicroseguroVisible(true)} activeOpacity={0.7}>
+            <TouchableOpacity style={styles.microSeguroCard}>
               <View style={styles.microSeguroHeader}>
                 <Text style={styles.microSeguroIcon}>🛡️</Text>
                 <Text style={styles.microSeguroTitle}>{t.microSeguro}</Text>
@@ -1004,8 +1015,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
                   style={styles.verClientesBtn}
                   onPress={() => navigation.navigate('Clientes', { 
                     dataVisualizacao: dataVisualizacao?.toISOString(),
-                    modoVisualizacao: true,
-                    language: language
+                    modoVisualizacao: true 
                   })}
                 >
                   <Text style={styles.verClientesBtnIcon}>👥</Text>
@@ -1078,68 +1088,49 @@ export default function LiquidacaoScreen({ navigation }: any) {
       <Modal visible={modalFecharVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{t.encerrarDia}</Text>
-            <Text style={styles.modalDescricao}>{t.confirmarEncerramento}</Text>
-            <View style={styles.modalAtencao}><Text style={styles.modalAtencaoText}>⚠️ {t.atencao}</Text></View>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalButtonCancel} onPress={() => setModalFecharVisible(false)} disabled={fechando}>
-                <Text style={styles.modalButtonCancelText}>{t.cancelar}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalButtonConfirm, styles.modalButtonAmber]} onPress={handleEncerrarDia} disabled={fechando}>
-                {fechando ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalButtonConfirmText}>{t.encerrarDia}</Text>}
-              </TouchableOpacity>
-            </View>
+            {fechandoEtapa === 'confirmar' ? (
+              <>
+                <Text style={styles.modalTitle}>{t.encerrarDia}</Text>
+                <Text style={styles.modalDescricao}>{t.confirmarEncerramento}</Text>
+                <View style={styles.modalAtencao}><Text style={styles.modalAtencaoText}>⚠️ {t.atencao}</Text></View>
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity style={styles.modalButtonCancel} onPress={() => setModalFecharVisible(false)}>
+                    <Text style={styles.modalButtonCancelText}>{t.cancelar}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.modalButtonConfirm, styles.modalButtonAmber]} onPress={handleEncerrarDia}>
+                    <Text style={styles.modalButtonConfirmText}>{t.encerrarDia}</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <View style={{ alignItems: 'center', paddingVertical: 30 }}>
+                <ActivityIndicator size="large" color="#F59E0B" style={{ marginBottom: 20 }} />
+                <Text style={{ fontSize: 18, fontWeight: '700', color: '#1F2937', marginBottom: 8 }}>
+                  {fechandoEtapa === 'processando' ? '🔒 Fechando liquidação...' : '📄 Gerando extrato...'}
+                </Text>
+                <Text style={{ fontSize: 14, color: '#6B7280', textAlign: 'center' }}>
+                  {fechandoEtapa === 'processando' 
+                    ? 'Calculando valores e validando caixa'
+                    : 'Aguarde, preparando o comprovante'}
+                </Text>
+                {fechandoEtapa === 'gerando' && (
+                  <Text style={{ fontSize: 12, color: '#9CA3AF', marginTop: 12 }}>✅ Liquidação fechada com sucesso</Text>
+                )}
+              </View>
+            )}
           </View>
         </View>
       </Modal>
 
-      {/* ═══ MODAIS DE DETALHE ═══ */}
-      {liquidacao && (
-        <>
-          <ModalExtrato
-            visible={modalExtratoVisible}
-            onClose={() => setModalExtratoVisible(false)}
-            liquidacaoId={liquidacao.id}
-            caixaInicial={liquidacao.caixa_inicial}
-            caixaFinal={liquidacao.caixa_final}
-            rotaNome={contaRota?.nome || 'Rota'}
-            lang={language}
-          />
-          <ModalPagamentos
-            visible={modalPagamentosVisible}
-            onClose={() => setModalPagamentosVisible(false)}
-            liquidacaoId={liquidacao.id}
-            totalPagos={liquidacao.pagamentos_pagos || 0}
-            totalNaoPagos={liquidacao.pagamentos_nao_pagos || 0}
-            valorRecebido={liquidacao.valor_recebido_dia || 0}
-            lang={language}
-          />
-          <ModalFinanceiro
-            visible={modalFinanceiroVisible}
-            onClose={() => setModalFinanceiroVisible(false)}
-            liquidacaoId={liquidacao.id}
-            tipo={tipoFinanceiro}
-            totalValor={
-              tipoFinanceiro === 'VENDAS' ? (liquidacao.total_emprestado_dia || 0) :
-              tipoFinanceiro === 'RECEITAS' ? (liquidacao.total_receitas_dia || 0) :
-              (liquidacao.total_despesas_dia || 0)
-            }
-            totalQtd={
-              tipoFinanceiro === 'VENDAS' ? (liquidacao.qtd_emprestimos_dia || 0) :
-              tipoFinanceiro === 'RECEITAS' ? (liquidacao.qtd_receitas_dia || 0) :
-              (liquidacao.qtd_despesas_dia || 0)
-            }
-            lang={language}
-          />
-          <ModalMicroseguro
-            visible={modalMicroseguroVisible}
-            onClose={() => setModalMicroseguroVisible(false)}
-            liquidacaoId={liquidacao.id}
-            totalValor={liquidacao.total_microseguro_dia || 0}
-            totalQtd={liquidacao.qtd_microseguros_dia || 0}
-            lang={language}
-          />
-        </>
+      {/* Extrato pós-fechamento */}
+      {liqFechadaId && (
+        <ModalExtrato
+          visible={extratoFechamentoVisible}
+          onClose={() => { setExtratoFechamentoVisible(false); setLiqFechadaId(null); }}
+          liquidacaoId={liqFechadaId}
+          caixaInicial={liqFechadaCaixaInicial}
+          caixaFinal={liqFechadaCaixaFinal}
+        />
       )}
     </View>
   );
@@ -1264,27 +1255,18 @@ const styles = StyleSheet.create({
   // Cards originais
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 4, elevation: 3 },
   cardVendedor: { borderTopWidth: 4 },
-  saudacao: { fontSize: 18, fontWeight: '700', color: '#1F2937', marginBottom: 12 },
-  cardStatus: { paddingVertical: 12, elevation: 0, shadowOpacity: 0 },
   vendedorRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center', marginRight: 10 },
-  avatarText: { fontSize: 20 },
-  vendedorNome: { fontSize: 16, fontWeight: '600', color: '#1F2937', flex: 1 },
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  dataContainer: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  statusIcon: { fontSize: 16 },
-  dataText: { fontSize: 14, color: '#374151', fontWeight: '500' },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
-  statusText: { fontSize: 11, fontWeight: '700' },
-  calendarBtn: { width: 40, height: 40, borderRadius: 10, backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#BFDBFE' },
-  calendarIcon: { fontSize: 18 },
-  verDatasButton: { marginTop: 12, borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 8, paddingVertical: 10, alignItems: 'center', backgroundColor: '#F0F9FF' },
-  verDatasText: { color: '#3B82F6', fontSize: 13, fontWeight: '500' },
   avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   avatarText: { fontSize: 20 },
   vendedorNome: { fontSize: 16, fontWeight: '600', color: '#1F2937', flex: 1 },
   statusRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
   dataContainer: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  statusIcon: { fontSize: 14 },
+  dataText: { fontSize: 12, color: '#6B7280', fontWeight: '500' },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  statusText: { fontSize: 11, fontWeight: '700' },
+  verDatasButton: { marginTop: 12, borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 8, paddingVertical: 10, alignItems: 'center', backgroundColor: '#F0F9FF' },
+  verDatasText: { color: '#3B82F6', fontSize: 13, fontWeight: '500' },
   metaRow: { flexDirection: 'row', marginBottom: 12 },
   metaItem: { flex: 1, alignItems: 'center' },
   metaLabel: { fontSize: 10, color: '#6B7280', fontWeight: '600', textTransform: 'uppercase', marginBottom: 4 },
@@ -1314,13 +1296,13 @@ const styles = StyleSheet.create({
   operacaoReceitas: { backgroundColor: '#EFF6FF', borderLeftColor: '#3B82F6' },
   operacaoDespesas: { backgroundColor: '#FEF2F2', borderLeftColor: '#EF4444' },
   opLabelVerde: { fontSize: 10, fontWeight: '500', color: '#059669' },
-  opValorVerde: { fontSize: 12, fontWeight: '700', color: '#065F46' },
+  opValorVerde: { fontSize: 14, fontWeight: '700', color: '#065F46' },
   opDetalheVerde: { fontSize: 10, color: '#047857' },
   opLabelAzul: { fontSize: 10, fontWeight: '500', color: '#2563EB' },
-  opValorAzul: { fontSize: 12, fontWeight: '700', color: '#1E40AF' },
+  opValorAzul: { fontSize: 14, fontWeight: '700', color: '#1E40AF' },
   opDetalheAzul: { fontSize: 10, color: '#1D4ED8' },
   opLabelVermelho: { fontSize: 10, fontWeight: '500', color: '#DC2626' },
-  opValorVermelho: { fontSize: 12, fontWeight: '700', color: '#991B1B' },
+  opValorVermelho: { fontSize: 14, fontWeight: '700', color: '#991B1B' },
   opDetalheVermelho: { fontSize: 10, color: '#B91C1C' },
   microSeguroCard: { backgroundColor: '#FEF9C3', borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: '#FDE047' },
   microSeguroHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },

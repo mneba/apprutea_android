@@ -85,8 +85,11 @@ interface ParcelaModal {
   data_pagamento: string | null;
   valor_multa: number;
   valor_pago?: number;
+  valor_saldo?: number;
   credito_gerado?: number;
-  liquidacao_id?: string | null; // ID da liquidação em que foi pago
+  saldo_excedente?: number;
+  liquidacao_id?: string | null;
+  observacoes?: string | null;
 }
 
 const textos = {
@@ -95,6 +98,7 @@ const textos = {
     liquidacao: 'Liquidação', todosList: 'Todos', buscar: 'Buscar...',
     ordemRota: 'Ordem rota', ordemNome: 'Nome A-Z',
     filtroTodos: 'Todos', filtroAtrasados: 'Atrasados', filtroPagas: 'Pagas',
+    ocultarLiquidacao: 'Ocultar clientes da liquidação',
     parcela: 'Parcela', saldoEmprestimo: 'Saldo Empréstimo',
     parcelasVencidas: 'parcela(s) vencida(s)', totalAtraso: 'Total em atraso:',
     emprestimo: 'Empréstimo', principal: 'Principal', juros: 'Juros',
@@ -120,8 +124,12 @@ const textos = {
     modoVisualizacaoDesc: 'Visualizando dados de',
     modoVisualizacaoSair: 'Sair',
     estornar: 'Estornar', venc: 'Venc:', em: 'Em:', fechar: 'Fechar',
+    quitarTudo: 'QUITAR TUDO', confirmar: 'Confirmar', cancelar: 'Cancelar',
+    atencaoQuitacao: '⚠️ Quitação de Empréstimo',
+    confirmarQuitar: 'Sim, Quitar',
     creditoDisponivel: 'Crédito disponível:',
     registrarPagamento: 'Registrar Pagamento', valorAPagar: 'Valor a pagar',
+    maxPermitido: 'Máx:',
     forma: 'Forma:', gpsOk: 'GPS OK', gpsErro: 'Sem GPS',
     pagarBtn: 'PAGAR', pendente: 'PENDENTE', vencimento: 'Vencimento:',
     processando: 'Processando...', sucesso: 'Pagamento registrado!',
@@ -163,6 +171,7 @@ const textos = {
     liquidacao: 'Liquidación', todosList: 'Todos', buscar: 'Buscar...',
     ordemRota: 'Orden ruta', ordemNome: 'Nombre A-Z',
     filtroTodos: 'Todos', filtroAtrasados: 'Atrasados', filtroPagas: 'Pagados',
+    ocultarLiquidacao: 'Ocultar clientes de la liquidación',
     parcela: 'Cuota', saldoEmprestimo: 'Saldo Préstamo',
     parcelasVencidas: 'cuota(s) vencida(s)', totalAtraso: 'Total en atraso:',
     emprestimo: 'Préstamo', principal: 'Principal', juros: 'Intereses',
@@ -188,8 +197,12 @@ const textos = {
     modoVisualizacaoDesc: 'Visualizando datos de',
     modoVisualizacaoSair: 'Salir',
     estornar: 'Reversar', venc: 'Venc:', em: 'En:', fechar: 'Cerrar',
+    quitarTudo: 'LIQUIDAR TODO', confirmar: 'Confirmar', cancelar: 'Cancelar',
+    atencaoQuitacao: '⚠️ Liquidación de Préstamo',
+    confirmarQuitar: 'Sí, Liquidar',
     creditoDisponivel: 'Crédito disponible:',
     registrarPagamento: 'Registrar Pago', valorAPagar: 'Valor a pagar',
+    maxPermitido: 'Máx:',
     forma: 'Forma:', gpsOk: 'GPS OK', gpsErro: 'Sin GPS',
     pagarBtn: 'PAGAR', pendente: 'PENDIENTE', vencimento: 'Vencimiento:',
     processando: 'Procesando...', sucesso: '¡Pago registrado!',
@@ -244,6 +257,10 @@ const borderOf = (e: EmprestimoData, paga: boolean) => {
 };
 const bgOf = (_e: EmprestimoData, paga: boolean) => paga ? 'rgba(16,185,129,0.07)' : '#fff';
 const isPaga = (pid: string, sd: string, set: Set<string>) => set.has(pid) || sd === 'PAGO';
+const showAlert = (title: string, msg: string) => {
+  if (Platform.OS === 'web') { window.alert(`${title}\n${msg}`); }
+  else { Alert.alert(title, msg); }
+};
 
 export default function ClientesScreen({ navigation, route }: any) {
   const { vendedor } = useAuth();
@@ -276,6 +293,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [filtroStatus, setFiltroStatus] = useState<string>('todos');
   const [showFiltroTipo, setShowFiltroTipo] = useState(false);
   const [showFiltroStatus, setShowFiltroStatus] = useState(false);
+  const [ocultarLiquidacao, setOcultarLiquidacao] = useState(false);
   const [empIdxTodos, setEmpIdxTodos] = useState<Record<string, number>>({});
   const [todosCount, setTodosCount] = useState<number | null>(null);
 
@@ -551,16 +569,22 @@ export default function ClientesScreen({ navigation, route }: any) {
   }, [tab, loadLiq, loadTodosClientes]);
 
   const abrirParcelas = useCallback(async (clienteId: string, clienteNome: string, emprestimoId: string, empStatus?: string) => {
-    setClienteModal({ id: clienteId, nome: clienteNome, emprestimo_id: emprestimoId, emprestimo_status: empStatus });
+    // Buscar status do empréstimo se não informado
+    let statusFinal = empStatus;
+    if (!statusFinal) {
+      const { data: empData } = await supabase.from('emprestimos').select('status').eq('id', emprestimoId).single();
+      statusFinal = empData?.status;
+    }
+    setClienteModal({ id: clienteId, nome: clienteNome, emprestimo_id: emprestimoId, emprestimo_status: statusFinal });
     setModalParcelasVisible(true);
     setLoadingParcelas(true);
     setParcelasModal([]);
     setCreditoDisponivel(0);
     try {
-      const { data: parcelas, error: errP } = await supabase.from('vw_parcelas_emprestimo').select('*').eq('emprestimo_id', emprestimoId).order('numero_parcela', { ascending: true });
+      const { data: parcelas, error: errP } = await supabase.from('emprestimo_parcelas').select('id, emprestimo_id, numero_parcela, valor_parcela, valor_pago, valor_saldo, valor_multa, data_vencimento, data_pagamento, status, saldo_excedente, liquidacao_id, observacoes, ordem_visita_dia').eq('emprestimo_id', emprestimoId).order('numero_parcela', { ascending: true });
       if (errP) throw errP;
       if (!parcelas || parcelas.length === 0) { setParcelasModal([]); setLoadingParcelas(false); return; }
-      const ids = parcelas.map((p: any) => p.parcela_id);
+      const ids = parcelas.map((p: any) => p.id);
       
       // Busca pagamentos com liquidacao_id (tabela pagamentos_parcelas tem tudo)
       const { data: pagamentos } = await supabase
@@ -570,30 +594,37 @@ export default function ClientesScreen({ navigation, route }: any) {
         .eq('estornado', false);
       
       const pMap = new Map<string, { valorPago: number; creditoGerado: number; liquidacaoId: string | null }>();
-      let creditoTotal = 0;
       (pagamentos || []).forEach((p: any) => { 
         pMap.set(p.parcela_id, { 
           valorPago: p.valor_pago_atual || 0, 
           creditoGerado: p.valor_credito_gerado || 0, 
           liquidacaoId: p.liquidacao_id 
         }); 
-        creditoTotal += p.valor_credito_gerado || 0;
       });
       
+      // Crédito disponível = soma dos saldo_excedente reais das parcelas (não do histórico de geração)
+      const creditoTotal = (parcelas || []).reduce((sum: number, p: any) => sum + (p.saldo_excedente || 0), 0);
       setCreditoDisponivel(creditoTotal);
       setParcelasModal(parcelas.map((p: any) => { 
-        const pag = pMap.get(p.parcela_id); 
+        const pag = pMap.get(p.id); 
+        const vPago = p.valor_pago || 0;
+        const vSaldo = p.valor_saldo || 0;
+        const creditoGerado = pag?.creditoGerado || 0;
+        const liqPag = pag?.liquidacaoId || p.liquidacao_id || null;
         return { 
-          parcela_id: p.parcela_id, 
+          parcela_id: p.id, 
           numero_parcela: p.numero_parcela, 
           data_vencimento: p.data_vencimento, 
           valor_parcela: p.valor_parcela, 
           status: p.status, 
           data_pagamento: p.data_pagamento, 
           valor_multa: p.valor_multa || 0, 
-          valor_pago: pag?.valorPago || 0, 
-          credito_gerado: pag?.creditoGerado || 0,
-          liquidacao_id: pag?.liquidacaoId || null
+          valor_pago: vPago, 
+          valor_saldo: vSaldo,
+          credito_gerado: creditoGerado,
+          saldo_excedente: p.saldo_excedente || 0,
+          liquidacao_id: liqPag,
+          observacoes: p.observacoes || null
         }; 
       }));
     } catch (e) { console.error('Erro parcelas:', e); Alert.alert(t.erroGenerico, t.erroCarregarParcelas); }
@@ -705,47 +736,76 @@ export default function ClientesScreen({ navigation, route }: any) {
       return;
     }
     const valorNum = parseFloat(valorPagamento.replace(',', '.'));
-    if (isNaN(valorNum) || valorNum < 0) { Alert.alert(t.erroGenerico, t.valorInvalido); return; }
+    if (isNaN(valorNum) || valorNum < 0) { showAlert(t.erroGenerico, t.valorInvalido); return; }
     
-    // Calcula crédito a usar: no máximo o disponível, mas limitado ao valor da parcela
+    // Calcula crédito a usar: no máximo o disponível, mas limitado ao saldo da parcela
     let valorCredito = 0;
     if (usarCredito && dadosPagamento?.credito_disponivel > 0) {
-      const valorParcela = dadosPagamento.valor_saldo_parcela || parcelaPagamento.valor_parcela;
-      valorCredito = Math.min(dadosPagamento.credito_disponivel, valorParcela);
+      const valorSaldoParcela = dadosPagamento.valor_saldo_parcela || parcelaPagamento.valor_parcela;
+      valorCredito = Math.min(dadosPagamento.credito_disponivel, valorSaldoParcela);
     }
     
     // Validação: pelo menos um valor deve ser informado (dinheiro OU crédito)
     if (valorNum === 0 && valorCredito === 0) {
-      Alert.alert(t.erroGenerico, t.informeValor);
+      showAlert(t.erroGenerico, t.informeValor);
       return;
     }
     
-    setProcessando(true);
-    try {
-      const { data, error } = await supabase.rpc('fn_registrar_pagamento', { 
-        p_parcela_id: parcelaPagamento.parcela_id, 
-        p_valor_pagamento: valorNum, 
-        p_valor_credito: valorCredito, 
-        p_forma_pagamento: formaPagamento, 
-        p_observacoes: null, 
-        p_latitude: coords?.lat || null, 
-        p_longitude: coords?.lng || null, 
-        p_precisao_gps: coords?.acc || null, 
-        p_liquidacao_id: liqId || null 
-      });
-      if (error) throw error;
-      const res = Array.isArray(data) ? data[0] : data;
-      if (res?.sucesso) {
-        Alert.alert(t.sucessoGenerico, t.sucesso);
-        setModalPagamentoVisible(false);
-        setParcelaPagamento(null);
-        setDadosPagamento(null);
-        setUsarCredito(false);
-        if (clienteModal) abrirParcelas(clienteModal.id, clienteModal.nome, clienteModal.emprestimo_id);
-        loadLiq();
-      } else { Alert.alert(t.erroGenerico, res?.mensagem || t.erro); }
-    } catch (e: any) { console.error('Erro pagamento:', e); Alert.alert(t.erroGenerico, e.message || t.erro); }
-    finally { setProcessando(false); }
+    // ⭐ Verificar se este pagamento vai quitar o empréstimo
+    const saldoEmp = clienteModal?.saldo_emprestimo ?? 0;
+    const totalPagando = valorNum + valorCredito;
+    const vaiQuitar = saldoEmp > 0 && totalPagando >= saldoEmp;
+    
+    const executarPagamento = async () => {
+      setProcessando(true);
+      try {
+        const { data, error } = await supabase.rpc('fn_registrar_pagamento', { 
+          p_parcela_id: parcelaPagamento.parcela_id, 
+          p_valor_pagamento: valorNum, 
+          p_valor_credito: valorCredito, 
+          p_forma_pagamento: formaPagamento, 
+          p_observacoes: null, 
+          p_latitude: coords?.lat || null, 
+          p_longitude: coords?.lng || null, 
+          p_precisao_gps: coords?.acc || null, 
+          p_liquidacao_id: liqId || null,
+          p_user_id: vendedor?.user_id || null
+        });
+        if (error) throw error;
+        const res = Array.isArray(data) ? data[0] : data;
+        if (res?.sucesso) {
+          showAlert(t.sucessoGenerico || 'Sucesso', res.mensagem || t.sucesso);
+          setModalPagamentoVisible(false);
+          setParcelaPagamento(null);
+          setDadosPagamento(null);
+          setUsarCredito(false);
+          if (clienteModal) abrirParcelas(clienteModal.id, clienteModal.nome, clienteModal.emprestimo_id);
+          loadLiq();
+        } else { showAlert(t.erroGenerico, res?.mensagem || t.erro); }
+      } catch (e: any) { console.error('Erro pagamento:', e); showAlert(t.erroGenerico, e.message || t.erro); }
+      finally { setProcessando(false); }
+    };
+    
+    // Se vai quitar, pedir confirmação
+    if (vaiQuitar) {
+      const msgQuitar = t.confirmarQuitacao || 
+        `Este pagamento irá QUITAR o empréstimo.\n\nSaldo: ${fmt(saldoEmp)}\nPagando: ${fmt(totalPagando)}\n\nTodas as parcelas restantes serão marcadas como pagas.\n\n⚠️ Esta ação é irreversível.`;
+      
+      if (Platform.OS === 'web') {
+        if (window.confirm(msgQuitar)) executarPagamento();
+      } else {
+        Alert.alert(
+          t.atencaoQuitacao || '⚠️ Quitação de Empréstimo',
+          msgQuitar,
+          [
+            { text: t.cancelar || 'Cancelar', style: 'cancel' },
+            { text: t.confirmarQuitar || 'Sim, Quitar', style: 'destructive', onPress: executarPagamento }
+          ]
+        );
+      }
+    } else {
+      executarPagamento();
+    }
   }, [parcelaPagamento, dadosPagamento, valorPagamento, usarCredito, formaPagamento, coords, liqId, t, clienteModal, abrirParcelas, loadLiq, processando]);
 
   const abrirEstorno = useCallback((parcela: ParcelaModal) => {
@@ -850,6 +910,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   const cntTotal = grouped.filter(c => !isCliPago(c)).length;
   const cntAtraso = grouped.filter(c => c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas)).length;
   const cntPagas = grouped.filter(c => isCliPago(c)).length;
+  const clientesLiqIds = useMemo(() => new Set(grouped.map(c => c.cliente_id)), [grouped]);
   const eIdx = (cid: string) => empIdxMap[cid] || 0;
   const eSet = (cid: string, i: number) => setEmpIdxMap(p => ({ ...p, [cid]: i }));
   const eAtual = (c: ClienteAgrupado) => c.emprestimos[Math.min(eIdx(c.cliente_id), c.emprestimos.length - 1)];
@@ -859,6 +920,8 @@ export default function ClientesScreen({ navigation, route }: any) {
     const isParcial = p.status === 'PARCIAL';
     const isVencida = p.status === 'VENCIDO' || p.status === 'VENCIDA';
     const isCancelado = p.status === 'CANCELADO';
+    const isAutoQuitacao = (p.observacoes || '').includes('[AUTO-QUITAÇÃO]');
+    const isQuitacaoOrigem = isPago && (p.credito_gerado || 0) > 0 && clienteModal?.emprestimo_status === 'QUITADO';
     
     const iconColor = isPago ? '#10B981' : isParcial ? '#F59E0B' : isCancelado ? '#9CA3AF' : isVencida ? '#EF4444' : '#6B7280';
     const iconBg = isPago ? '#D1FAE5' : isParcial ? '#FEF3C7' : isCancelado ? '#F3F4F6' : isVencida ? '#FEE2E2' : '#F3F4F6';
@@ -867,7 +930,8 @@ export default function ClientesScreen({ navigation, route }: any) {
     const statusText = isPago ? t.pagoStatus : isParcial ? t.parcialStatus : isCancelado ? 'CANCELADO' : isVencida ? t.vencidaStatus : t.pendente;
     
     const valorPago = p.valor_pago || 0;
-    const valorRestante = isParcial ? (p.valor_parcela - valorPago) : p.valor_parcela;
+    const valorSaldo = p.valor_saldo ?? (p.valor_parcela - valorPago);
+    const temPagamentoParcial = !isPago && valorPago > 0;
     
     return (
       <View key={p.parcela_id} style={[S.mParcela, { borderLeftColor: iconColor }]}>
@@ -875,7 +939,7 @@ export default function ClientesScreen({ navigation, route }: any) {
           {/* Lado esquerdo: ícone + info + valores */}
           <View style={[S.mParcelaIcon, { backgroundColor: iconBg }]}>
             <Text style={{ color: iconColor, fontSize: 14 }}>
-              {isPago ? '✓' : isParcial ? '◐' : '📅'}
+              {isPago ? '✓' : temPagamentoParcial ? '◐' : isParcial ? '◐' : '📅'}
             </Text>
           </View>
           <View style={S.mParcelaInfo}>
@@ -888,32 +952,56 @@ export default function ClientesScreen({ navigation, route }: any) {
             </View>
             {/* Linha 2: Vencimento */}
             <Text style={S.mParcelaVenc}>{t.venc} {fmtData(p.data_vencimento)}</Text>
-            {/* Linha 3: Valor principal */}
-            {!isPago && !isParcial && (
-              <Text style={S.mParcelaValor}>{fmt(p.valor_parcela)}</Text>
-            )}
-            {/* PAGO: valor pago + crédito */}
-            {isPago && valorPago > 0 && (
+            
+            {/* PAGO: valor pago + original + crédito + indicador quitação */}
+            {isPago && (
               <View style={{ marginTop: 2 }}>
-                <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
-                <Text style={S.mParcelaOriginal}>{t.original} {fmt(p.valor_parcela)}</Text>
-                {(p.credito_gerado || 0) > 0 && (
+                {/* Badge quitação antecipada (parcela que originou) */}
+                {isQuitacaoOrigem && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF3C7', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, marginBottom: 4, alignSelf: 'flex-start' }}>
+                    <Text style={{ fontSize: 11, color: '#D97706', fontWeight: '700' }}>⚡ {lang === 'es' ? 'Liquidación anticipada' : 'Quitação antecipada'}</Text>
+                  </View>
+                )}
+                {/* Badge auto-quitação */}
+                {isAutoQuitacao && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#DBEAFE', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, marginBottom: 4, alignSelf: 'flex-start' }}>
+                    <Text style={{ fontSize: 11, color: '#2563EB', fontWeight: '600' }}>🔄 {lang === 'es' ? 'Liquidado por crédito' : 'Quitado por crédito'}</Text>
+                  </View>
+                )}
+                {valorPago !== p.valor_parcela ? (
+                  <>
+                    <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
+                    <Text style={S.mParcelaOriginal}>{t.original} {fmt(p.valor_parcela)}</Text>
+                  </>
+                ) : (
+                  <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
+                )}
+                {(p.credito_gerado || 0) > 0 && !isAutoQuitacao && (
                   <Text style={S.mParcelaCredito}>{t.credito} {fmt(p.credito_gerado || 0)}</Text>
                 )}
+                {(p.saldo_excedente || 0) > 0 && (p.credito_gerado || 0) === 0 && !isAutoQuitacao && (
+                  <Text style={S.mParcelaCredito}>{t.credito} {fmt(p.saldo_excedente || 0)}</Text>
+                )}
                 {p.data_pagamento && (
                   <Text style={S.mParcelaDataPg}>{t.em} {fmtData(p.data_pagamento)}</Text>
                 )}
               </View>
             )}
-            {/* PARCIAL ou VENCIDA com pagamento parcial: pago + restante */}
-            {!isPago && valorPago > 0 && (
+            
+            {/* PARCIAL / VENCIDA com pagamento parcial */}
+            {temPagamentoParcial && (
               <View style={{ marginTop: 2 }}>
                 <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
-                <Text style={S.mParcelaRestante}>{lang === 'es' ? 'Restante:' : 'Restante:'} {fmt(valorRestante)}</Text>
+                <Text style={S.mParcelaRestante}>{lang === 'es' ? 'Restante:' : 'Restante:'} {fmt(valorSaldo)}</Text>
                 {p.data_pagamento && (
                   <Text style={S.mParcelaDataPg}>{t.em} {fmtData(p.data_pagamento)}</Text>
                 )}
               </View>
+            )}
+            
+            {/* SEM PAGAMENTO: só valor */}
+            {!isPago && !temPagamentoParcial && (
+              <Text style={S.mParcelaValor}>{fmt(p.valor_parcela)}</Text>
             )}
           </View>
           {/* Lado direito: botões */}
@@ -929,7 +1017,8 @@ export default function ClientesScreen({ navigation, route }: any) {
               </TouchableOpacity>
             )}
             {/* Estorno: PAGO ou qualquer parcela com pagamento (parcial) na liquidação atual */}
-            {(isPago || valorPago > 0) && p.parcela_id && liqId && !isViz && p.liquidacao_id === liqId && (
+            {/* Não permite estorno se empréstimo foi quitado (auto-quitação) */}
+            {(isPago || valorPago > 0) && p.parcela_id && liqId && !isViz && p.liquidacao_id === liqId && !['QUITADO', 'RENEGOCIADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '') && (
               <TouchableOpacity style={S.mBtnEstornar} onPress={() => abrirEstorno(p)}>
                 <Text style={S.mBtnEstornarIcon}>↩</Text>
                 <Text style={S.mBtnEstornarTx}>{t.estornar}</Text>
@@ -958,15 +1047,15 @@ export default function ClientesScreen({ navigation, route }: any) {
           </View>
         </View>
         <View style={S.pRow}>
-          <View><View style={S.pLblR}><Text style={S.pLbl}>{t.parcela} {e.numero_parcela}/{e.numero_parcelas}</Text><View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento}</Text></View></View>{pg && pi ? (<><Text style={S.pgVal}>{t.pago} {fmt(pi.valorPago)}</Text><Text style={S.pgOrig}>{t.original} {fmt(pi.valorParcela)}</Text>{pi.creditoGerado > 0 && <Text style={S.pgCred}>{t.credito} {fmt(pi.creditoGerado)}</Text>}</>) : (<Text style={S.pVal}>{fmt(e.valor_parcela)}</Text>)}</View>
+          <View><View style={S.pLblR}><Text style={S.pLbl}>{t.parcela} {e.numero_parcela}/{e.numero_parcelas}</Text><View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento}</Text></View></View>{pg && pi ? (<><Text style={S.pgVal}>{t.pago} {fmt(pi.valorPago)}</Text><Text style={S.pgOrig}>{t.original} {fmt(pi.valorParcela)}</Text>{pi.creditoGerado > 0 && <Text style={S.pgCred}>{t.credito} {fmt(pi.creditoGerado)}</Text>}</>) : e.valor_pago_parcela > 0 && !pg ? (<><Text style={S.pgVal}>{t.pago} {fmt(e.valor_pago_parcela)}</Text><Text style={S.mParcelaRestante}>{lang === 'es' ? 'Restante:' : 'Restante:'} {fmt(e.saldo_parcela)}</Text></>) : (<Text style={S.pVal}>{fmt(e.valor_parcela)}</Text>)}</View>
           <View style={S.sCol}><Text style={S.sLbl}>{t.saldoEmprestimo}</Text><Text style={S.sVal}>{fmt(e.saldo_emprestimo)}</Text></View>
         </View>
         {ex && (<View style={S.exp}>
           {e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && <View style={S.aR}><Text style={S.aRT}>⚠ {e.total_parcelas_vencidas} {t.parcelasVencidas}</Text><Text style={S.aRS}>{t.totalAtraso} {fmt(e.valor_total_vencido)}</Text></View>}
-          {e.status_parcela === 'PARCIAL' && !pg && <View style={S.aY}><Text style={S.aYT}>{t.parcialStatus}: {fmt(e.valor_pago_parcela)} / {fmt(e.valor_parcela)}</Text><Text style={S.aYS}>{lang === 'es' ? 'Restante:' : 'Restante:'} {fmt(e.saldo_parcela)}</Text></View>}
+          {(e.status_parcela === 'PARCIAL' || (e.valor_pago_parcela > 0 && !pg)) && !pg && <View style={S.aY}><Text style={S.aYT}>{t.parcialStatus}: {fmt(e.valor_pago_parcela)} / {fmt(e.valor_parcela)}</Text><Text style={S.aYS}>{lang === 'es' ? 'Restante:' : 'Restante:'} {fmt(e.saldo_parcela)}</Text></View>}
           {c.tem_multiplos_vencimentos && (<View style={S.eNav}><TouchableOpacity onPress={() => eSet(c.cliente_id, Math.max(0, ei - 1))} disabled={ei === 0} style={[S.eNBtn, ei === 0 && S.eNOff]}><Text style={S.eNBTx}>◀</Text></TouchableOpacity>{c.emprestimos.map((_, i) => <View key={i} style={[S.eDot, i === ei && S.eDotOn]} />)}<TouchableOpacity onPress={() => eSet(c.cliente_id, Math.min(c.emprestimos.length - 1, ei + 1))} disabled={ei >= c.emprestimos.length - 1} style={[S.eNBtn, ei >= c.emprestimos.length - 1 && S.eNOff]}><Text style={S.eNBTx}>▶</Text></TouchableOpacity><Text style={S.eNLbl}> {t.emprestimo} {ei + 1}/{c.qtd_emprestimos}</Text></View>)}
           <View style={S.res}><View style={S.resH}><Text style={S.resT}>{t.emprestimo} {ei + 1}/{c.qtd_emprestimos}</Text><View style={[S.stB, { backgroundColor: e.status_dia === 'EM_ATRASO' ? '#FEE2E2' : pg ? '#D1FAE5' : '#F3F4F6' }]}><Text style={[S.stBT, { color: e.status_dia === 'EM_ATRASO' ? '#DC2626' : pg ? '#059669' : '#6B7280' }]}>{pg ? t.pagoStatus : e.status_dia}</Text></View></View><View style={S.g3}><View style={S.gi}><Text style={S.gl}>{t.principal}</Text><Text style={S.gv}>{fmt(e.valor_principal)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.juros}</Text><Text style={[S.gv, { color: '#F59E0B' }]}>{fmt(juros)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.total}</Text><Text style={S.gv}>{fmt(totalE)}</Text></View></View><View style={S.g3}><View style={S.gi}><Text style={S.gl}>{t.jaPago}</Text><Text style={[S.gv, { color: '#10B981' }]}>{fmt(totalE - e.saldo_emprestimo)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.saldo}</Text><Text style={[S.gv, { color: '#EF4444' }]}>{fmt(e.saldo_emprestimo)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.parcelas}</Text><Text style={S.gv}>{pp}/{e.numero_parcelas}</Text></View></View><Text style={S.prL}>{t.progresso}</Text><View style={S.prB}><View style={[S.prF, { width: `${pct}%` }]} /></View><Text style={S.prR}>{pr} {t.restantes}</Text></View>
-          <View style={S.btR}><TouchableOpacity style={[S.bt, S.btG, (!liqId || isViz || pg) && S.btOff]} onPress={() => { if (liqId && !isViz && !pg) abrirPagamento({ parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0 }); }} disabled={!liqId || isViz || pg}><Text style={S.btI}>💰</Text><Text style={S.btW}>{t.pagar}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btBl]} onPress={() => abrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}><Text style={S.btI}>👁</Text><Text style={S.btW}>{t.verParcelas}</Text></TouchableOpacity></View>
+          <View style={S.btR}><TouchableOpacity style={[S.bt, S.btG, (!liqId || isViz || pg) && S.btOff]} onPress={() => { if (liqId && !isViz && !pg) abrirPagamento({ parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0, valor_pago: e.valor_pago_parcela || 0, valor_saldo: e.saldo_parcela || e.valor_parcela }); }} disabled={!liqId || isViz || pg}><Text style={S.btI}>💰</Text><Text style={S.btW}>{t.pagar}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btBl]} onPress={() => abrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}><Text style={S.btI}>👁</Text><Text style={S.btW}>{t.verParcelas}</Text></TouchableOpacity></View>
           {e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && (
             <TouchableOpacity style={[S.btReneg, (!liqId || isViz) && S.btOff]} onPress={async () => {
               if (!liqId || isViz) return;
@@ -988,6 +1077,8 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   const todosFilt = useMemo(() => {
     let r = [...todosList];
+    // Ocultar clientes da liquidação atual
+    if (ocultarLiquidacao && clientesLiqIds.size > 0) { r = r.filter(c => !clientesLiqIds.has(c.id)); }
     // Busca por texto
     if (busca.trim()) { const b = busca.toLowerCase().trim(); r = r.filter(c => c.nome.toLowerCase().includes(b) || (c.telefone_celular && c.telefone_celular.includes(b))); }
     // Filtro por tipo de empréstimo
@@ -997,7 +1088,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     // Ordenação A-Z sempre
     r.sort((a, b) => a.nome.localeCompare(b.nome));
     return r;
-  }, [todosList, busca, filtroTipo, filtroStatus]);
+  }, [todosList, busca, filtroTipo, filtroStatus, ocultarLiquidacao, clientesLiqIds]);
 
   const renderTodos = (c: ClienteTodos) => {
     const a = c.tem_atraso; const cor = a ? '#EF4444' : '#3B82F6';
@@ -1116,6 +1207,20 @@ export default function ClientesScreen({ navigation, route }: any) {
         </View>
         <Text style={S.tCnt}>{todosFilt.length} {t.clientes}</Text>
       </View>)}
+      {tab === 'todos' && liqId && (
+        <TouchableOpacity 
+          style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8 }} 
+          onPress={() => setOcultarLiquidacao(!ocultarLiquidacao)}
+          activeOpacity={0.7}
+        >
+          <View style={{ width: 20, height: 20, borderRadius: 4, borderWidth: 2, borderColor: ocultarLiquidacao ? '#3B82F6' : '#9CA3AF', backgroundColor: ocultarLiquidacao ? '#3B82F6' : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
+            {ocultarLiquidacao && <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '700', marginTop: -1 }}>✓</Text>}
+          </View>
+          <Text style={{ fontSize: 13, color: ocultarLiquidacao ? '#3B82F6' : '#6B7280' }}>
+            {t.ocultarLiquidacao || 'Ocultar clientes da liquidação'}
+          </Text>
+        </TouchableOpacity>
+      )}
       <ScrollView style={S.ls} contentContainerStyle={S.lsI} refreshControl={!isViz ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined} showsVerticalScrollIndicator={false} onScrollBeginDrag={() => { setShowFiltroTipo(false); setShowFiltroStatus(false); }}>
         {tab === 'liquidacao' ? (filtered.length === 0 ? <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View> : filtered.map(renderCard)) : (loadTodos ? <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} /> : todosFilt.length === 0 ? <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View> : todosFilt.map(renderTodos))}
         <View style={{ height: 90 }} />
@@ -1130,6 +1235,75 @@ export default function ClientesScreen({ navigation, route }: any) {
             {loadingParcelas ? (<ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />) : parcelasModal.length === 0 ? (<Text style={S.modalEmpty}>{ t.nenhumaParcelaEncontrada }</Text>) : (parcelasModal.map(p => renderParcelaItem(p)))}
             <View style={{ height: 10 }} />
           </ScrollView>
+          {/* Botão Quitar Tudo */}
+          {(() => {
+            const saldoTotal = parcelasModal.reduce((s, p) => s + (p.valor_saldo || 0), 0);
+            const temPendente = parcelasModal.some(p => ['PENDENTE', 'PARCIAL', 'VENCIDO'].includes(p.status));
+            const empQuitado = ['QUITADO', 'RENEGOCIADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '');
+            const dinheiroNecessario = Math.max(saldoTotal - creditoDisponivel, 0);
+            if (!temPendente || saldoTotal <= 0 || !liqId || isViz || empQuitado) return null;
+            return (
+              <TouchableOpacity 
+                style={{ marginHorizontal: 16, marginBottom: 8, backgroundColor: '#F59E0B', borderRadius: 12, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
+                disabled={processando}
+                onPress={async () => {
+                  const msg = creditoDisponivel > 0
+                    ? `Quitar empréstimo?\n\nSaldo: ${fmt(saldoTotal)}\nCrédito: ${fmt(creditoDisponivel)}\nDinheiro: ${fmt(dinheiroNecessario)}`
+                    : `Quitar empréstimo?\n\nSaldo: ${fmt(saldoTotal)}`;
+                  
+                  const confirmar = async () => {
+                    setProcessando(true);
+                    try {
+                      const { data, error } = await supabase.rpc('fn_quitar_emprestimo', {
+                        p_emprestimo_id: clienteModal?.emprestimo_id,
+                        p_valor_pagamento: dinheiroNecessario,
+                        p_valor_credito: Math.min(creditoDisponivel, saldoTotal),
+                        p_forma_pagamento: 'DINHEIRO',
+                        p_latitude: coords?.lat || null,
+                        p_longitude: coords?.lng || null,
+                        p_precisao_gps: coords?.acc || null,
+                        p_liquidacao_id: liqId || null,
+                        p_user_id: vendedor?.user_id || null
+                      });
+                      if (error) throw error;
+                      const res = Array.isArray(data) ? data[0] : data;
+                      if (res?.sucesso) {
+                        showAlert(t.sucessoGenerico || 'Sucesso', res.mensagem || 'Empréstimo quitado!');
+                        setModalParcelasVisible(false);
+                        loadLiq();
+                      } else {
+                        showAlert(t.erroGenerico || 'Erro', res?.mensagem || 'Erro ao quitar');
+                      }
+                    } catch (e: any) {
+                      console.error('Erro quitar:', e);
+                      showAlert(t.erroGenerico || 'Erro', e.message || 'Erro ao quitar empréstimo');
+                    } finally {
+                      setProcessando(false);
+                    }
+                  };
+                  
+                  if (Platform.OS === 'web') {
+                    if (window.confirm(msg)) confirmar();
+                  } else {
+                    Alert.alert(t.atencao || 'Atenção', msg, [
+                      { text: t.cancelar || 'Cancelar', style: 'cancel' },
+                      { text: t.confirmar || 'Confirmar', onPress: confirmar }
+                    ]);
+                  }
+                }}
+              >
+                {processando ? <ActivityIndicator color="#fff" /> : (
+                  <>
+                    <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700', marginRight: 6 }}>⚡</Text>
+                    <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>
+                      {t.quitarTudo || 'QUITAR TUDO'} {fmt(dinheiroNecessario)}
+                      {creditoDisponivel > 0 ? ` (+${fmt(Math.min(creditoDisponivel, saldoTotal))} crédito)` : ''}
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            );
+          })()}
           <View style={S.mBtnFecharWrap}>
             <TouchableOpacity style={S.mBtnFechar} onPress={() => setModalParcelasVisible(false)}>
               <Text style={S.mBtnFecharTx}>{t.fechar}</Text>
@@ -1233,6 +1407,12 @@ export default function ClientesScreen({ navigation, route }: any) {
                         editable={dadosPagamento?.permite_pagamento !== false}
                       />
                     </View>
+                    {/* Indicador de máximo permitido */}
+                    {clienteModal?.saldo_emprestimo != null && (
+                      <Text style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
+                        {t.maxPermitido || 'Máx:'} {fmt(clienteModal.saldo_emprestimo)}
+                      </Text>
+                    )}
                     
                     {/* Linha de crédito disponível */}
                     {dadosPagamento?.tem_credito && dadosPagamento.credito_disponivel > 0 && (
@@ -1244,12 +1424,15 @@ export default function ClientesScreen({ navigation, route }: any) {
                           onPress={() => {
                             const novoUsarCredito = !usarCredito;
                             setUsarCredito(novoUsarCredito);
-                            const valorBase = dadosPagamento.valor_saldo_parcela || parcelaPagamento.valor_parcela;
+                            const valorSaldoParcela = dadosPagamento.valor_saldo_parcela || parcelaPagamento.valor_parcela;
+                            const saldoEmp = clienteModal?.saldo_emprestimo ?? valorSaldoParcela;
                             if (novoUsarCredito) {
-                              const valorComCredito = Math.max(0, valorBase - dadosPagamento.credito_disponivel);
-                              setValorPagamento(valorComCredito.toFixed(2).replace('.', ','));
+                              const creditoAplicado = Math.min(dadosPagamento.credito_disponivel, valorSaldoParcela);
+                              const maxDinheiro = Math.max(saldoEmp - creditoAplicado, 0);
+                              const valorSugerido = Math.min(valorSaldoParcela - creditoAplicado, maxDinheiro);
+                              setValorPagamento(Math.max(0, valorSugerido).toFixed(2).replace('.', ','));
                             } else {
-                              setValorPagamento(valorBase.toFixed(2).replace('.', ','));
+                              setValorPagamento(valorSaldoParcela.toFixed(2).replace('.', ','));
                             }
                           }}
                         >

@@ -37,7 +37,10 @@ const fmtData = (d: string | null) => {
 
 const fmtHora = (d: string | null) => {
   if (!d) return '';
-  const dt = new Date(d);
+  // Supabase retorna timestamp sem timezone mas em UTC
+  // Adicionar 'Z' para forçar interpretação como UTC, aí toLocaleTimeString converte para local
+  const raw = d.includes('Z') || d.includes('+') ? d : d.replace(' ', 'T') + 'Z';
+  const dt = new Date(raw);
   return dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 };
 
