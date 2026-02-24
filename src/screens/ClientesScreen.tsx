@@ -1208,18 +1208,36 @@ export default function ClientesScreen({ navigation, route }: any) {
         <Text style={S.tCnt}>{todosFilt.length} {t.clientes}</Text>
       </View>)}
       {tab === 'todos' && liqId && (
-        <TouchableOpacity 
-          style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 8 }} 
-          onPress={() => setOcultarLiquidacao(!ocultarLiquidacao)}
-          activeOpacity={0.7}
-        >
-          <View style={{ width: 20, height: 20, borderRadius: 4, borderWidth: 2, borderColor: ocultarLiquidacao ? '#3B82F6' : '#9CA3AF', backgroundColor: ocultarLiquidacao ? '#3B82F6' : 'transparent', alignItems: 'center', justifyContent: 'center', marginRight: 8 }}>
-            {ocultarLiquidacao && <Text style={{ color: '#FFF', fontSize: 12, fontWeight: '700', marginTop: -1 }}>✓</Text>}
-          </View>
-          <Text style={{ fontSize: 13, color: ocultarLiquidacao ? '#3B82F6' : '#6B7280' }}>
-            {t.ocultarLiquidacao || 'Ocultar clientes da liquidação'}
-          </Text>
-        </TouchableOpacity>
+        <View style={{ paddingHorizontal: 16, paddingBottom: 10 }}>
+          <TouchableOpacity 
+            style={{ 
+              flexDirection: 'row', alignItems: 'center', 
+              paddingVertical: 8, paddingHorizontal: 12,
+              backgroundColor: ocultarLiquidacao ? '#EFF6FF' : '#F9FAFB',
+              borderRadius: 8, borderWidth: 1,
+              borderColor: ocultarLiquidacao ? '#3B82F6' : '#E5E7EB',
+            }} 
+            onPress={() => setOcultarLiquidacao(!ocultarLiquidacao)}
+            activeOpacity={0.7}
+          >
+            <View style={{ 
+              width: 18, height: 18, borderRadius: 4, borderWidth: 2, 
+              borderColor: ocultarLiquidacao ? '#3B82F6' : '#9CA3AF', 
+              backgroundColor: ocultarLiquidacao ? '#3B82F6' : 'transparent', 
+              alignItems: 'center', justifyContent: 'center', marginRight: 8 
+            }}>
+              {ocultarLiquidacao && <Text style={{ color: '#FFF', fontSize: 11, fontWeight: '700', marginTop: -1 }}>✓</Text>}
+            </View>
+            <Text style={{ fontSize: 12, color: ocultarLiquidacao ? '#2563EB' : '#6B7280', fontWeight: ocultarLiquidacao ? '600' : '400', flex: 1 }}>
+              {t.ocultarLiquidacao || 'Ocultar clientes da liquidação'}
+            </Text>
+            {ocultarLiquidacao && clientesLiqIds.size > 0 && (
+              <View style={{ backgroundColor: '#3B82F6', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2, marginLeft: 6 }}>
+                <Text style={{ color: '#FFF', fontSize: 10, fontWeight: '700' }}>-{clientesLiqIds.size}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
       )}
       <ScrollView style={S.ls} contentContainerStyle={S.lsI} refreshControl={!isViz ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined} showsVerticalScrollIndicator={false} onScrollBeginDrag={() => { setShowFiltroTipo(false); setShowFiltroStatus(false); }}>
         {tab === 'liquidacao' ? (filtered.length === 0 ? <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View> : filtered.map(renderCard)) : (loadTodos ? <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} /> : todosFilt.length === 0 ? <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View> : todosFilt.map(renderTodos))}

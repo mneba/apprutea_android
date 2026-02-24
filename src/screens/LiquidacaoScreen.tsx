@@ -567,17 +567,17 @@ export default function LiquidacaoScreen({ navigation }: any) {
       setLiqFechadaCaixaInicial(liquidacao.caixa_inicial || 0);
       setLiqFechadaCaixaFinal(resultado.caixa_final || 0);
       
-      await carregarLiquidacoes();
-      
-      // Pequeno delay para UX e abrir extrato
+      // Pequeno delay para UX
       await new Promise(r => setTimeout(r, 800));
       
+      // Fechar modal de progresso e abrir extrato ANTES de recarregar
       setModalFecharVisible(false);
       setFechando(false);
       setFechandoEtapa('confirmar');
+      setExtratoFechamentoVisible(true);
       
-      // Abrir extrato
-      setTimeout(() => setExtratoFechamentoVisible(true), 300);
+      // Recarregar em background (não bloqueia o extrato)
+      carregarLiquidacoes();
     } catch (error: any) {
       setFechando(false);
       setFechandoEtapa('confirmar');
@@ -756,6 +756,17 @@ export default function LiquidacaoScreen({ navigation }: any) {
             </View>
           </View>
         </Modal>
+
+        {/* Extrato pós-fechamento (também no calendário) */}
+        {liqFechadaId && (
+          <ModalExtrato
+            visible={extratoFechamentoVisible}
+            onClose={() => { setExtratoFechamentoVisible(false); setLiqFechadaId(null); }}
+            liquidacaoId={liqFechadaId}
+            caixaInicial={liqFechadaCaixaInicial}
+            caixaFinal={liqFechadaCaixaFinal}
+          />
+        )}
       </View>
     );
   }
