@@ -567,22 +567,26 @@ export default function LiquidacaoScreen({ navigation }: any) {
       setLiqFechadaCaixaInicial(liquidacao.caixa_inicial || 0);
       setLiqFechadaCaixaFinal(resultado.caixa_final || 0);
       
-      // Pequeno delay para UX
-      await new Promise(r => setTimeout(r, 800));
+      await new Promise(r => setTimeout(r, 600));
       
-      // Fechar modal de progresso e abrir extrato ANTES de recarregar
+      // Fechar modal de progresso e abrir extrato direto
+      // NÃO recarregar liquidações agora - esperar fechar extrato
       setModalFecharVisible(false);
       setFechando(false);
       setFechandoEtapa('confirmar');
       setExtratoFechamentoVisible(true);
-      
-      // Recarregar em background (não bloqueia o extrato)
-      carregarLiquidacoes();
     } catch (error: any) {
       setFechando(false);
       setFechandoEtapa('confirmar');
       Alert.alert('Erro', error.message || 'Não foi possível encerrar o dia');
     }
+  };
+
+  const handleFecharExtrato = () => {
+    setExtratoFechamentoVisible(false);
+    setLiqFechadaId(null);
+    // Agora sim recarregar - vai mostrar calendário suavemente
+    carregarLiquidacoes();
   };
 
   // REABERTO NÃO é considerado "aberto" para movimentos no mobile
@@ -761,7 +765,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
         {liqFechadaId && (
           <ModalExtrato
             visible={extratoFechamentoVisible}
-            onClose={() => { setExtratoFechamentoVisible(false); setLiqFechadaId(null); }}
+            onClose={handleFecharExtrato}
             liquidacaoId={liqFechadaId}
             caixaInicial={liqFechadaCaixaInicial}
             caixaFinal={liqFechadaCaixaFinal}
@@ -1137,7 +1141,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
       {liqFechadaId && (
         <ModalExtrato
           visible={extratoFechamentoVisible}
-          onClose={() => { setExtratoFechamentoVisible(false); setLiqFechadaId(null); }}
+          onClose={handleFecharExtrato}
           liquidacaoId={liqFechadaId}
           caixaInicial={liqFechadaCaixaInicial}
           caixaFinal={liqFechadaCaixaFinal}
