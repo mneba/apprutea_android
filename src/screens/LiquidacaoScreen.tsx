@@ -1,1363 +1,1948 @@
-import NetInfo from '@react-native-community/netinfo';
-import React, { useCallback, useEffect, useState } from 'react';
+import * as Location from 'expo-location';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
-  Image,
+  FlatList,
+  Linking,
   Modal,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
-import { ModalExtrato } from '../components/LiquidacaoDetalhes';
 import { useAuth } from '../contexts/AuthContext';
-import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
+import { Language, useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
-import { LiquidacaoDiaria } from '../types';
 
-type Language = 'pt-BR' | 'es';
+// Language importado do LiquidacaoContext
+type TabAtiva = 'liquidacao' | 'todos';
+type FiltroLiquidacao = 'todos' | 'atrasados' | 'pagas';
+type OrdenacaoLiquidacao = 'rota' | 'nome';
 
-interface ContaRota {
-  id: string;
-  saldo_atual: number;
+interface ClienteRotaDia {
+  cliente_id: string; codigo_cliente: number | null; nome: string;
+  telefone_celular: string | null; endereco: string | null;
+  latitude: number | null; longitude: number | null;
+  emprestimo_id: string; saldo_emprestimo: number; valor_principal: number;
+  numero_parcelas: number; status_emprestimo: string; rota_id: string;
+  frequencia_pagamento: string; parcela_id: string; numero_parcela: number;
+  valor_parcela: number; valor_pago_parcela: number; saldo_parcela: number;
+  status_parcela: string; data_vencimento: string; ordem_visita_dia: number | null;
+  liquidacao_id: string | null; tem_parcelas_vencidas: boolean;
+  total_parcelas_vencidas: number; valor_total_vencido: number;
+  status_dia: 'PAGO' | 'PARCIAL' | 'EM_ATRASO' | 'PENDENTE';
+  permite_emprestimo_adicional: boolean; is_parcela_atrasada?: boolean;
 }
 
-interface DiaCalendario {
-  data: Date;
-  diaNumero: number;
-  mesAtual: boolean;
-  ehHoje: boolean;
-  ehFuturo: boolean;
-  liquidacao: LiquidacaoDiaria | null;
+interface EmprestimoData {
+  emprestimo_id: string; saldo_emprestimo: number; valor_principal: number;
+  numero_parcelas: number; status_emprestimo: string; frequencia_pagamento: string;
+  parcela_id: string; numero_parcela: number; valor_parcela: number;
+  valor_pago_parcela: number; saldo_parcela: number; status_parcela: string;
+  data_vencimento: string; ordem_visita_dia: number | null;
+  tem_parcelas_vencidas: boolean; total_parcelas_vencidas: number;
+  valor_total_vencido: number; status_dia: 'PAGO' | 'PARCIAL' | 'EM_ATRASO' | 'PENDENTE';
+  is_parcela_atrasada?: boolean;
+  pagamento_info?: { valorPago: number; creditoGerado: number; valorParcela: number };
+}
+
+interface ClienteAgrupado {
+  cliente_id: string; codigo_cliente: number | null; nome: string;
+  telefone_celular: string | null; endereco: string | null;
+  latitude: number | null; longitude: number | null; rota_id: string;
+  emprestimos: EmprestimoData[]; qtd_emprestimos: number; tem_multiplos_vencimentos: boolean;
+}
+
+interface ClienteTodos {
+  id: string; codigo_cliente: number | null; nome: string;
+  telefone_celular: string | null; status: string; tem_atraso: boolean;
+  permite_renegociacao: boolean;
+  emprestimos: EmprestimoTodos[];
+}
+
+interface EmprestimoTodos {
+  id: string; valor_principal: number; saldo_emprestimo: number;
+  valor_parcela: number; numero_parcelas: number; numero_parcela_atual: number;
+  status: string; frequencia_pagamento: string; tipo_emprestimo: string;
+  total_parcelas_vencidas: number; valor_total_vencido: number;
+}
+
+interface PagamentoParcela {
+  parcela_id: string; cliente_id: string; valor_pago_atual: number;
+  valor_credito_gerado: number; valor_parcela: number; data_pagamento: string;
+}
+
+interface ParcelaModal {
+  parcela_id: string;
+  numero_parcela: number;
+  data_vencimento: string;
+  valor_parcela: number;
+  status: string;
+  data_pagamento: string | null;
+  valor_multa: number;
+  valor_pago?: number;
+  valor_saldo?: number;
+  credito_gerado?: number;
+  saldo_excedente?: number;
+  liquidacao_id?: string | null;
+  observacoes?: string | null;
 }
 
 const textos = {
   'pt-BR': {
-    titulo: 'Liquidação Diária',
-    aberto: 'ABERTO',
-    fechado: 'FECHADO',
-    verOutrasDatas: 'Ver Outras Datas',
-    voltarHoje: 'Voltar para Hoje',
-    meta: 'META',
-    atual: 'ATUAL',
-    progresso: 'PROGRESSO',
-    resumoClientes: 'Resumo de Clientes',
-    clientesIniciais: 'Clientes Iniciais:',
-    clientesNovos: 'Clientes Novos:',
-    clientesRenovados: 'Clientes Renovados:',
-    clientesRenegociados: 'Clientes Renegociados:',
-    clientesCancelados: 'Clientes Cancelados:',
-    totalClientes: 'Total de Clientes:',
-    controlesFinanceiros: 'Controles Financeiros',
-    caixa: 'Caixa',
-    inicial: 'Inicial:',
-    pagamentos: 'Pagamentos',
-    pagos: 'Pagos',
-    naoPagos: 'Não pagos:',
-    efetividade: 'Efetividade:',
-    outrasOperacoes: 'Outras Operações',
-    vendas: 'Vendas',
-    receitas: 'Receitas',
-    despesas: 'Despesas',
-    microSeguro: 'MICRO SEGURO',
-    totalDoDia: 'Total do Dia',
-    quantidade: 'Quantidade',
-    encerrarDia: 'Encerrar Dia',
-    diaEncerrado: 'Dia Encerrado',
-    iniciarDia: 'Iniciar Dia',
-    encerrando: 'Encerrando...',
-    nenhumaLiquidacao: 'Nenhuma liquidação aberta',
-    confirmarEncerramento: 'Deseja realmente encerrar o dia?',
-    atencao: 'Atenção: Você não poderá mais adicionar movimentos nesta data após encerrar.',
-    cancelar: 'Cancelar',
-    confirmar: 'Confirmar',
-    caixaInicialAutomatico: 'Caixa inicial (automático):',
-    infoSaldoConta: 'O valor do caixa inicial é automaticamente o saldo atual da conta da rota.',
-    selecioneData: 'Selecione uma Data',
-    semLiquidacaoCalendario: 'Não há liquidação aberta para hoje. Selecione uma data no calendário abaixo para visualizar os dados.',
-    legenda: 'Legenda:',
-    legendaAberto: 'Aberto',
-    legendaFechado: 'Fechado',
-    legendaAprovado: 'Aprovado',
-    legendaSemRegistro: 'Sem registro',
-    visualizando: 'Visualizando:',
-    fecharCalendario: 'Voltar à Liquidação',
-    meses: ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'],
-    diasSemana: ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'],
+    titulo: 'Meus Clientes', hoje: 'Hoje', clientes: 'clientes',
+    liquidacao: 'Liquidação', todosList: 'Todos', buscar: 'Buscar...',
+    ordemRota: 'Ordem rota', ordemNome: 'Nome A-Z',
+    filtroTodos: 'Todos', filtroAtrasados: 'Atrasados', filtroPagas: 'Pagas',
+    ocultarLiquidacao: 'Ocultar clientes da liquidação',
+    parcela: 'Parcela', saldoEmprestimo: 'Saldo Empréstimo',
+    parcelasVencidas: 'parcela(s) vencida(s)', totalAtraso: 'Total em atraso:',
+    emprestimo: 'Empréstimo', principal: 'Principal', juros: 'Juros',
+    total: 'Total', jaPago: 'Já Pago', saldo: 'Saldo', parcelas: 'Parcelas',
+    progresso: 'Progresso', restantes: 'restante(s)',
+    pagar: 'Pagar', verParcelas: 'Parcelas', contato: 'Contato', ir: 'IR',
+    semClientes: 'Nenhum cliente encontrado', carregando: 'Carregando clientes...',
+    statusAtraso: 'Atraso', statusInativo: 'Inativo',
+    tipoFiltro: 'Tipo:...', statusFiltro: 'Status:...',
+    tipoTodos: 'Todos', tipoNovo: 'Novo', tipoRenovacao: 'Renovação', tipoRenegociacao: 'Renegociação',
+    stTodos: 'Todos', stAtivo: 'Ativo', stVencido: 'Vencido', stQuitado: 'Quitado', stRenegociado: 'Renegociado',
+    pago: 'Pago:', original: 'Original:', credito: 'Crédito:',
+    empAtivo: 'Empréstimo Ativo', empVencido: 'Empréstimo Vencido',
+    empRenegociado: 'Renegociado', empQuitado: 'Quitado',
+    valorParcela: 'Valor Parcela', saldoDevedor: 'Saldo Devedor', saldoRenegociado: 'Saldo Renegociado',
+    empAdicional: 'Empréstimo Adicional', detalhes: 'Detalhes',
+    novoEmprestimo: 'Novo Empréstimo',
+    confirmarNovoEmprestimo: 'Deseja criar um novo empréstimo para este cliente? Os dados cadastrais serão pré-preenchidos.',
+    sim: 'Sim', nao: 'Não',
+    renegociar: 'Renegociar',
+    renegociacaoNaoPermitida: 'Renegociação não autorizada para este cliente. Solicite autorização ao administrador.',
+    modoVisualizacao: 'Modo Visualização',
+    modoVisualizacaoDesc: 'Visualizando dados de',
+    modoVisualizacaoSair: 'Sair',
+    estornar: 'Estornar', venc: 'Venc:', em: 'Em:', fechar: 'Fechar',
+    quitarTudo: 'QUITAR TUDO', confirmar: 'Confirmar', cancelar: 'Cancelar',
+    atencaoQuitacao: '⚠️ Quitação de Empréstimo',
+    confirmarQuitar: 'Sim, Quitar',
+    creditoDisponivel: 'Crédito disponível:',
+    registrarPagamento: 'Registrar Pagamento', valorAPagar: 'Valor a pagar',
+    maxPermitido: 'Máx:',
+    forma: 'Forma:', gpsOk: 'GPS OK', gpsErro: 'Sem GPS',
+    pagarBtn: 'PAGAR', pendente: 'PENDENTE', vencimento: 'Vencimento:',
+    processando: 'Processando...', sucesso: 'Pagamento registrado!',
+    erro: 'Erro ao registrar pagamento',
+    motivoEstorno: 'Motivo do estorno', estornarPagamento: 'Estornar Pagamento',
+    confirmarEstorno: 'CONFIRMAR ESTORNO', cancelar: 'Cancelar',
+    estornoSucesso: 'Estorno realizado!', estornoErro: 'Erro ao estornar',
+    liquidacaoNecessaria: 'É necessário ter uma liquidação aberta para esta operação.',
+    usar: 'Usar',
+    saldoAnterior: 'Saldo anterior de',
+    valorPendente: 'Valor pendente:',
+    pagamentoBloqueado: 'Pagamento bloqueado',
+    irProximaParcela: 'Ir para próxima parcela pendente',
+    carregandoDados: 'Carregando dados...',
+    liquidacaoFechada: 'Liquidação fechada',
+    semLiquidacaoAberta: 'Nenhuma liquidação aberta',
+    abrirLiquidacao: 'Abra uma liquidação para operar',
+    // Strings adicionais para Alerts e popups
+    atencao: 'Atenção', erroGenerico: 'Erro', sucessoGenerico: 'Sucesso', aviso: 'Aviso',
+    erroCarregarParcelas: 'Não foi possível carregar as parcelas.',
+    dadosClienteIndisponiveis: 'Dados do cliente não disponíveis',
+    nenhumaParcela: 'Nenhuma parcela pendente encontrada',
+    erroBuscarParcela: 'Não foi possível buscar a próxima parcela',
+    pagamentoNaoPermitido: 'Pagamento não permitido',
+    valorInvalido: 'Valor inválido',
+    informeValor: 'Informe um valor para pagar ou use o crédito disponível',
+    nenhumaParcelaEncontrada: 'Nenhuma parcela encontrada',
+    dinheiro: 'Dinheiro', transferencia: 'Transf/PIX',
+    pagoStatus: 'PAGO', parcialStatus: 'PARCIAL', vencidaStatus: 'VENCIDA',
+    creditoUsado: 'Crédito usado:', creditoGerado: 'Crédito gerado:',
+    semNumero: 'Sem número',
+    existemParcelas: 'Existem',
+    parcelasAnteriores: 'parcela(s) anterior(es) pendente(s) com saldo de',
+    quitarPrimeiro: 'É necessário quitar as parcelas mais antigas primeiro.',
+    saldoAnteriorParcelas: 'parcela(s)',
+    incluirAtraso: 'Incluir atraso',
+  },  'es': {
+    titulo: 'Mis Clientes', hoje: 'Hoy', clientes: 'clientes',
+    liquidacao: 'Liquidación', todosList: 'Todos', buscar: 'Buscar...',
+    ordemRota: 'Orden ruta', ordemNome: 'Nombre A-Z',
+    filtroTodos: 'Todos', filtroAtrasados: 'Atrasados', filtroPagas: 'Pagados',
+    ocultarLiquidacao: 'Ocultar clientes de la liquidación',
+    parcela: 'Cuota', saldoEmprestimo: 'Saldo Préstamo',
+    parcelasVencidas: 'cuota(s) vencida(s)', totalAtraso: 'Total en atraso:',
+    emprestimo: 'Préstamo', principal: 'Principal', juros: 'Intereses',
+    total: 'Total', jaPago: 'Ya Pagó', saldo: 'Saldo', parcelas: 'Cuotas',
+    progresso: 'Progreso', restantes: 'restante(s)',
+    pagar: 'Pagar', verParcelas: 'Cuotas', contato: 'Contacto', ir: 'IR',
+    semClientes: 'Ningún cliente encontrado', carregando: 'Cargando clientes...',
+    statusAtraso: 'Atraso', statusInativo: 'Inactivo',
+    tipoFiltro: 'Tipo:...', statusFiltro: 'Estado:...',
+    tipoTodos: 'Todos', tipoNovo: 'Nuevo', tipoRenovacao: 'Renovación', tipoRenegociacao: 'Renegociación',
+    stTodos: 'Todos', stAtivo: 'Activo', stVencido: 'Vencido', stQuitado: 'Liquidado', stRenegociado: 'Renegociado',
+    pago: 'Pagado:', original: 'Original:', credito: 'Crédito:',
+    empAtivo: 'Préstamo Activo', empVencido: 'Préstamo Vencido',
+    empRenegociado: 'Renegociado', empQuitado: 'Liquidado',
+    valorParcela: 'Valor Cuota', saldoDevedor: 'Saldo Deudor', saldoRenegociado: 'Saldo Renegociado',
+    empAdicional: 'Préstamo Adicional', detalhes: 'Detalles',
+    novoEmprestimo: 'Nuevo Préstamo',
+    confirmarNovoEmprestimo: '¿Desea crear un nuevo préstamo para este cliente? Los datos de registro se completarán automáticamente.',
+    sim: 'Sí', nao: 'No',
+    renegociar: 'Renegociar',
+    renegociacaoNaoPermitida: 'Renegociación no autorizada para este cliente. Solicite autorización al administrador.',
+    modoVisualizacao: 'Modo Visualización',
+    modoVisualizacaoDesc: 'Visualizando datos de',
+    modoVisualizacaoSair: 'Salir',
+    estornar: 'Reversar', venc: 'Venc:', em: 'En:', fechar: 'Cerrar',
+    quitarTudo: 'LIQUIDAR TODO', confirmar: 'Confirmar', cancelar: 'Cancelar',
+    atencaoQuitacao: '⚠️ Liquidación de Préstamo',
+    confirmarQuitar: 'Sí, Liquidar',
+    creditoDisponivel: 'Crédito disponible:',
+    registrarPagamento: 'Registrar Pago', valorAPagar: 'Valor a pagar',
+    maxPermitido: 'Máx:',
+    forma: 'Forma:', gpsOk: 'GPS OK', gpsErro: 'Sin GPS',
+    pagarBtn: 'PAGAR', pendente: 'PENDIENTE', vencimento: 'Vencimiento:',
+    processando: 'Procesando...', sucesso: '¡Pago registrado!',
+    erro: 'Error al registrar pago',
+    motivoEstorno: 'Motivo de reversión', estornarPagamento: 'Reversar Pago',
+    confirmarEstorno: 'CONFIRMAR REVERSIÓN', cancelar: 'Cancelar',
+    estornoSucesso: '¡Reversión realizada!', estornoErro: 'Error al reversar',
+    liquidacaoNecessaria: 'Es necesario tener una liquidación abierta para esta operación.',
+    usar: 'Usar',
+    saldoAnterior: 'Saldo anterior de',
+    valorPendente: 'Valor pendiente:',
+    pagamentoBloqueado: 'Pago bloqueado',
+    irProximaParcela: 'Ir a próxima cuota pendiente',
+    carregandoDados: 'Cargando datos...',
+    liquidacaoFechada: 'Liquidación cerrada',
+    semLiquidacaoAberta: 'Ninguna liquidación abierta',
+    abrirLiquidacao: 'Abra una liquidación para operar',
+    // Strings adicionais para Alerts e popups
+    atencao: 'Atención', erroGenerico: 'Error', sucessoGenerico: 'Éxito', aviso: 'Aviso',
+    erroCarregarParcelas: 'No fue posible cargar las cuotas.',
+    dadosClienteIndisponiveis: 'Datos del cliente no disponibles',
+    nenhumaParcela: 'Ninguna cuota pendiente encontrada',
+    erroBuscarParcela: 'No fue posible buscar la próxima cuota',
+    pagamentoNaoPermitido: 'Pago no permitido',
+    valorInvalido: 'Valor inválido',
+    informeValor: 'Informe un valor para pagar o use el crédito disponible',
+    nenhumaParcelaEncontrada: 'Ninguna cuota encontrada',
+    dinheiro: 'Efectivo', transferencia: 'Transf/PIX',
+    pagoStatus: 'PAGADO', parcialStatus: 'PARCIAL', vencidaStatus: 'VENCIDA',
+    creditoUsado: 'Crédito usado:', creditoGerado: 'Crédito generado:',
+    semNumero: 'Sin número',
+    existemParcelas: 'Existen',
+    parcelasAnteriores: 'cuota(s) anterior(es) pendiente(s) con saldo de',
+    quitarPrimeiro: 'Es necesario pagar las cuotas más antiguas primero.',
+    saldoAnteriorParcelas: 'cuota(s)',
+    incluirAtraso: 'Incluir atraso',
   },
-  'es': {
-    titulo: 'Liquidación Diaria',
-    aberto: 'ABIERTO',
-    fechado: 'CERRADO',
-    verOutrasDatas: 'Ver Otras Fechas',
-    voltarHoje: 'Volver a Hoy',
-    meta: 'META',
-    atual: 'ACTUAL',
-    progresso: 'PROGRESO',
-    resumoClientes: 'Resumen de Clientes',
-    clientesIniciais: 'Clientes Iniciales:',
-    clientesNovos: 'Clientes Nuevos:',
-    clientesRenovados: 'Clientes Renovados:',
-    clientesRenegociados: 'Clientes Renegociados:',
-    clientesCancelados: 'Clientes Cancelados:',
-    totalClientes: 'Total de Clientes:',
-    controlesFinanceiros: 'Controles Financieros',
-    caixa: 'Caja',
-    inicial: 'Inicial:',
-    pagamentos: 'Pagos',
-    pagos: 'Pagados',
-    naoPagos: 'No pagados:',
-    efetividade: 'Efectividad:',
-    outrasOperacoes: 'Otras Operaciones',
-    vendas: 'Ventas',
-    receitas: 'Ingresos',
-    despesas: 'Gastos',
-    microSeguro: 'MICRO SEGURO',
-    totalDoDia: 'Total del Día',
-    quantidade: 'Cantidad',
-    encerrarDia: 'Cerrar Día',
-    diaEncerrado: 'Día Cerrado',
-    iniciarDia: 'Iniciar Día',
-    encerrando: 'Cerrando...',
-    nenhumaLiquidacao: 'Ninguna liquidación abierta',
-    confirmarEncerramento: '¿Desea cerrar el día?',
-    atencao: 'Atención: No podrá agregar más movimientos después de cerrar.',
-    cancelar: 'Cancelar',
-    confirmar: 'Confirmar',
-    caixaInicialAutomatico: 'Caja inicial (automático):',
-    infoSaldoConta: 'El valor de la caja inicial es automáticamente el saldo actual de la cuenta de la ruta.',
-    selecioneData: 'Seleccione una Fecha',
-    semLiquidacaoCalendario: 'No hay liquidación abierta para hoy. Seleccione una fecha en el calendario a continuación.',
-    legenda: 'Leyenda:',
-    legendaAberto: 'Abierto',
-    legendaFechado: 'Cerrado',
-    legendaAprovado: 'Aprobado',
-    legendaSemRegistro: 'Sin registro',
-    visualizando: 'Visualizando:',
-    fecharCalendario: 'Volver a Liquidación',
-    meses: ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'],
-    diasSemana: ['D', 'L', 'M', 'M', 'J', 'V', 'S'],
-  }
 };
 
-export default function LiquidacaoScreen({ navigation }: any) {
+const FREQ: Record<Language, Record<string, string>> = { 
+  'pt-BR': { DIARIO: 'Diário', SEMANAL: 'Semanal', QUINZENAL: 'Quinzenal', MENSAL: 'Mensal', FLEXIVEL: 'Flexível' },
+  'es': { DIARIO: 'Diario', SEMANAL: 'Semanal', QUINZENAL: 'Quincenal', MENSAL: 'Mensual', FLEXIVEL: 'Flexible' },
+};
+const getIni = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase() || '').join('');
+const fmt = (v: number) => '$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtData = (d: string) => { if (!d) return ''; const [y, m, day] = d.split('-'); return `${day}/${m}/${y}`; };
+const fmtTel = (t: string) => t.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
+// Cor da borda por nível de atraso:
+// Verde: 0 parcelas de atraso (em dia)
+// Amarelo: 1-3 parcelas de atraso (leve)
+// Laranja: 4-7 parcelas de atraso (moderado)
+// Vermelho: 8+ parcelas de atraso (crítico)
+const corAtraso = (vencidas: number): string => {
+  if (vencidas <= 0) return '#10B981'; // verde
+  if (vencidas <= 3) return '#F59E0B'; // amarelo
+  if (vencidas <= 7) return '#F97316'; // laranja
+  return '#EF4444'; // vermelho
+};
+
+const borderOf = (e: EmprestimoData, paga: boolean) => {
+  if (paga) return '#10B981';
+  const vencidas = e.total_parcelas_vencidas || 0;
+  if (vencidas > 0) return corAtraso(vencidas);
+  if (e.is_parcela_atrasada) return '#F59E0B';
+  return ({ PAGO: '#10B981', EM_ATRASO: '#F59E0B', PARCIAL: '#F59E0B', PENDENTE: '#D1D5DB' } as any)[e.status_dia] || '#D1D5DB';
+};
+const bgOf = (_e: EmprestimoData, paga: boolean) => paga ? 'rgba(16,185,129,0.05)' : '#fff';
+const isPaga = (pid: string, sd: string, set: Set<string>) => set.has(pid) || sd === 'PAGO';
+const showAlert = (title: string, msg: string) => {
+  if (Platform.OS === 'web') { window.alert(`${title}\n${msg}`); }
+  else { Alert.alert(title, msg); }
+};
+
+export default function ClientesScreen({ navigation, route }: any) {
   const { vendedor } = useAuth();
   const liqCtx = useLiquidacaoContext();
-  const [liquidacao, setLiquidacao] = useState<LiquidacaoDiaria | null>(null);
-  const [todasLiquidacoes, setTodasLiquidacoes] = useState<LiquidacaoDiaria[]>([]);
+  const rotaId = route?.params?.rotaId || vendedor?.rota_id;
+  const dataLiq = liqCtx.dataVisualizacao || route?.params?.dataLiquidacao || (liqCtx.liquidacaoAtual?.data_abertura ? liqCtx.liquidacaoAtual.data_abertura.split('T')[0] : new Date().toISOString().split('T')[0]);
+  const liqId = liqCtx.liquidacaoIdVisualizacao || route?.params?.liquidacaoId;
+  const isViz = liqCtx.modoVisualizacao || route?.params?.isVisualizacao || false;
+
+  const lang = liqCtx.language || 'pt-BR';
+  // Se não há liquidação aberta, força tab "todos"
+  const [tab, setTab] = useState<TabAtiva>(!liqId ? 'todos' : 'liquidacao');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [language, setLanguage] = useState<Language>('pt-BR');
-  const [fechando, setFechando] = useState(false);
-  const [fechandoEtapa, setFechandoEtapa] = useState<'confirmar' | 'processando' | 'gerando'>('confirmar');
-  const [modalIniciarVisible, setModalIniciarVisible] = useState(false);
-  const [modalFecharVisible, setModalFecharVisible] = useState(false);
-  const [extratoFechamentoVisible, setExtratoFechamentoVisible] = useState(false);
-  const [liqFechadaId, setLiqFechadaId] = useState<string | null>(null);
-  const [liqFechadaCaixaInicial, setLiqFechadaCaixaInicial] = useState(0);
-  const [liqFechadaCaixaFinal, setLiqFechadaCaixaFinal] = useState(0);
-  const [contaRota, setContaRota] = useState<ContaRota | null>(null);
-  const [salvando, setSalvando] = useState(false);
-  
-  // Estados do Calendário
-  const [mostrarCalendario, setMostrarCalendario] = useState(false);
-  const [modoVisualizacao, setModoVisualizacaoLocal] = useState(false);
-  const [dataVisualizacao, setDataVisualizacaoLocal] = useState<Date | null>(null);
-  const [mesAtual, setMesAtual] = useState(new Date().getMonth());
-  const [anoAtual, setAnoAtual] = useState(new Date().getFullYear());
-  
-  // Wrappers que sincronizam estado local → contexto compartilhado
-  const setModoVisualizacao = useCallback((v: boolean) => {
-    setModoVisualizacaoLocal(v);
-    liqCtx.setModoVisualizacao(v);
-  }, [liqCtx]);
+  const [busca, setBusca] = useState('');
 
-  const setDataVisualizacao = useCallback((d: Date | null) => {
-    setDataVisualizacaoLocal(d);
-    liqCtx.setDataVisualizacao(d ? d.toISOString().split('T')[0] : null);
-  }, [liqCtx]);
+  const [raw, setRaw] = useState<ClienteRotaDia[]>([]);
+  const [pagasSet, setPagasSet] = useState<Set<string>>(new Set());  const [pagMap, setPagMap] = useState<Map<string, PagamentoParcela>>(new Map());
+  const [clientesPagosNaLiq, setClientesPagosNaLiq] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [empIdxMap, setEmpIdxMap] = useState<Record<string, number>>({});
+  const [filtro, setFiltro] = useState<FiltroLiquidacao>('todos');
+  const [ord, setOrd] = useState<OrdenacaoLiquidacao>('rota');
+  const [showOrd, setShowOrd] = useState(false);
 
-  // Sincroniza liquidacaoId no contexto quando liquidação muda
-  useEffect(() => {
-    liqCtx.setLiquidacaoIdVisualizacao(liquidacao?.id || null);
-    // Sincronizar liquidação aberta no contexto compartilhado
-    if (liquidacao && (liquidacao.status === 'ABERTO' || liquidacao.status === 'ABERTA' || liquidacao.status === 'REABERTO')) {
-      liqCtx.setLiquidacaoAtual(liquidacao);
-    } else if (!modoVisualizacao) {
-      liqCtx.setLiquidacaoAtual(null);
+  const [todosList, setTodosList] = useState<ClienteTodos[]>([]);
+  const [loadTodos, setLoadTodos] = useState(false);
+  const [expandedTodos, setExpandedTodos] = useState<string | null>(null);
+  const [filtroTipo, setFiltroTipo] = useState<string>('todos');
+  const [filtroStatus, setFiltroStatus] = useState<string>('todos');
+  const [showFiltroTipo, setShowFiltroTipo] = useState(false);
+  const [showFiltroStatus, setShowFiltroStatus] = useState(false);
+  const [ocultarLiquidacao, setOcultarLiquidacao] = useState(false);
+
+  // Refs para snap-to-top das FlatLists
+  const flatListLiqRef = useRef<FlatList>(null);
+  const flatListTodosRef = useRef<FlatList>(null);
+  const cardHeightsLiq = useRef<number[]>([]);
+  const cardHeightsTodos = useRef<number[]>([]);
+
+  const onCardLayout = useCallback((heights: React.MutableRefObject<number[]>, index: number, height: number) => {
+    heights.current[index] = height;
+  }, []);
+
+  const snapToNearestItem = useCallback((ref: React.RefObject<FlatList>, event: any, heights: React.MutableRefObject<number[]>) => {
+    if (!ref.current) return;
+    const scrollY = event.nativeEvent.contentOffset.y;
+    const contentHeight = event.nativeEvent.contentSize.height;
+    const viewHeight = event.nativeEvent.layoutMeasurement.height;
+    
+    // Não snapar no topo nem quando está perto do final (evita trava)
+    if (scrollY <= 5 || scrollY + viewHeight >= contentHeight - 50) return;
+    
+    // Encontrar o item mais próximo do topo
+    let accumulated = 0;
+    let targetOffset = 0;
+    for (let i = 0; i < heights.current.length; i++) {
+      const h = heights.current[i] || 92;
+      if (accumulated + h * 0.4 > scrollY) {
+        targetOffset = accumulated;
+        break;
+      }
+      accumulated += h;
+      targetOffset = accumulated;
     }
-  }, [liquidacao?.id, liquidacao?.status]);
-  
-  // Dados do modo visualização (dias sem liquidação)
-  const [dadosVisualizacao, setDadosVisualizacao] = useState<{
-    totalClientes: number;
-    clientesAtivos: number;
-    clientesInativos: number;
-    clientesList: any[];
-  } | null>(null);
-  const [loadingVisualizacao, setLoadingVisualizacao] = useState(false);
-
-  // Estado de conectividade
-  const [isConnected, setIsConnected] = useState(true);
-
-  const t = textos[language];
-  const hoje = new Date();
-  hoje.setHours(0, 0, 0, 0);
-
-  // Bloqueia navegação para meses futuros
-  const ehMesAtualOuFuturo = anoAtual > hoje.getFullYear() ||
-    (anoAtual === hoje.getFullYear() && mesAtual >= hoje.getMonth());
-
-  useEffect(() => {
-    carregarLiquidacoes();
+    
+    // Só snapar se a diferença for significativa (evita micro-ajustes irritantes)
+    if (Math.abs(targetOffset - scrollY) > 5 && Math.abs(targetOffset - scrollY) < 60) {
+      ref.current.scrollToOffset({ offset: targetOffset, animated: true });
+    }
   }, []);
 
-  // Listener de conectividade
-  useEffect(() => {
-    const unsubscribe = NetInfo.addEventListener(state => {
-      setIsConnected(state.isConnected ?? true);
+  // Alphabet sidebar
+  const [activeLetterLiq, setActiveLetterLiq] = useState<string | null>(null);
+  const [activeLetterTodos, setActiveLetterTodos] = useState<string | null>(null);
+  const alphabetTimeoutRef = useRef<any>(null);
+
+  const getAvailableLetters = useCallback((data: { nome: string }[]) => {
+    const letters = new Set<string>();
+    data.forEach(item => {
+      const first = item.nome.trim().charAt(0).toUpperCase();
+      if (first && /[A-ZÀ-Ü]/.test(first)) letters.add(first.normalize('NFD').replace(/[\u0300-\u036f]/g, '').charAt(0));
     });
-    return () => unsubscribe();
+    return 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').filter(l => letters.has(l));
   }, []);
 
-  const carregarLiquidacoes = async () => {
-    if (!vendedor) return;
+  const scrollToLetter = useCallback((
+    letter: string, 
+    ref: React.RefObject<FlatList>, 
+    data: { nome: string }[],
+    heights: React.MutableRefObject<number[]>,
+    setActive: (l: string | null) => void
+  ) => {
+    const normalLetter = letter.normalize('NFD').replace(/[\u0300-\u036f]/g, '').charAt(0).toUpperCase();
+    const targetIndex = data.findIndex(item => {
+      const first = item.nome.trim().charAt(0).normalize('NFD').replace(/[\u0300-\u036f]/g, '').charAt(0).toUpperCase();
+      return first >= normalLetter;
+    });
+    if (targetIndex >= 0 && ref.current) {
+      let offset = 0;
+      for (let i = 0; i < targetIndex; i++) offset += heights.current[i] || 92;
+      ref.current.scrollToOffset({ offset, animated: false });
+    }
+    setActive(letter);
+    if (alphabetTimeoutRef.current) clearTimeout(alphabetTimeoutRef.current);
+    alphabetTimeoutRef.current = setTimeout(() => setActive(null), 1200);
+  }, []);
 
+  const AlphabetSidebar = useCallback(({ 
+    data, flatRef, heights, activeLetter, setActive 
+  }: { 
+    data: { nome: string }[]; 
+    flatRef: React.RefObject<FlatList>; 
+    heights: React.MutableRefObject<number[]>;
+    activeLetter: string | null;
+    setActive: (l: string | null) => void;
+  }) => {
+    const letters = getAvailableLetters(data);
+    const sidebarRef = useRef<View>(null);
+    const sidebarYRef = useRef(0);
+    const letterHeightRef = useRef(0);
+
+    return (
+      <View 
+        ref={sidebarRef}
+        style={S.alphaBar}
+        onLayout={(e) => {
+          sidebarRef.current?.measureInWindow((_x, y, _w, h) => {
+            sidebarYRef.current = y;
+            letterHeightRef.current = h / letters.length;
+          });
+        }}
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderGrant={(e) => {
+          const idx = Math.floor((e.nativeEvent.pageY - sidebarYRef.current) / letterHeightRef.current);
+          if (idx >= 0 && idx < letters.length) scrollToLetter(letters[idx], flatRef, data, heights, setActive);
+        }}
+        onResponderMove={(e) => {
+          const idx = Math.floor((e.nativeEvent.pageY - sidebarYRef.current) / letterHeightRef.current);
+          if (idx >= 0 && idx < letters.length) scrollToLetter(letters[idx], flatRef, data, heights, setActive);
+        }}
+        onResponderRelease={() => {
+          if (alphabetTimeoutRef.current) clearTimeout(alphabetTimeoutRef.current);
+          alphabetTimeoutRef.current = setTimeout(() => setActive(null), 800);
+        }}
+      >
+        {letters.map(l => (
+          <Text key={l} style={[S.alphaLetter, activeLetter === l && S.alphaLetterActive]}>{l}</Text>
+        ))}
+      </View>
+    );
+  }, [getAvailableLetters, scrollToLetter]);
+  const [empIdxTodos, setEmpIdxTodos] = useState<Record<string, number>>({});
+  const [todosCount, setTodosCount] = useState<number | null>(null);
+
+  // Estados dos Modais
+  const [modalParcelasVisible, setModalParcelasVisible] = useState(false);
+  const [modalPagamentoVisible, setModalPagamentoVisible] = useState(false);
+  const [modalEstornoVisible, setModalEstornoVisible] = useState(false);
+  const [parcelasModal, setParcelasModal] = useState<ParcelaModal[]>([]);
+  const [loadingParcelas, setLoadingParcelas] = useState(false);
+  const [creditoDisponivel, setCreditoDisponivel] = useState(0);
+  const [clienteModal, setClienteModal] = useState<{ id: string; nome: string; emprestimo_id: string; emprestimo_status?: string } | null>(null);
+  
+  const [parcelaPagamento, setParcelaPagamento] = useState<ParcelaModal | null>(null);
+  const [dadosPagamento, setDadosPagamento] = useState<any>(null);
+  const [loadingDadosPagamento, setLoadingDadosPagamento] = useState(false);
+  const [valorPagamento, setValorPagamento] = useState('');
+  const [usarCredito, setUsarCredito] = useState(false);
+  const [formaPagamento, setFormaPagamento] = useState('DINHEIRO');
+  const [gpsStatus, setGpsStatus] = useState<'ok' | 'erro' | 'carregando'>('carregando');
+  const [coords, setCoords] = useState<{ lat: number; lng: number; acc: number } | null>(null);
+  const [processando, setProcessando] = useState(false);
+
+  const [parcelaEstorno, setParcelaEstorno] = useState<ParcelaModal | null>(null);
+  const [motivoEstorno, setMotivoEstorno] = useState('');
+
+  const t = textos[lang];
+
+  const carregarGPS = useCallback(async () => {
+    setGpsStatus('carregando');
     try {
-      // Buscar todas liquidações dos últimos 60 dias
-      const dataInicio = new Date();
-      dataInicio.setDate(dataInicio.getDate() - 60);
-      
-      const { data, error } = await supabase
-        .from('liquidacoes_diarias')
-        .select('*')
-        .eq('rota_id', vendedor.rota_id)
-        .gte('data_abertura', dataInicio.toISOString())
-        .order('data_abertura', { ascending: false });
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') { setGpsStatus('erro'); return; }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      setCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude, acc: loc.coords.accuracy || 0 });
+      setGpsStatus('ok');
+    } catch { setGpsStatus('erro'); }
+  }, []);
 
-      if (!error && data) {
-        setTodasLiquidacoes(data);
-        // Encontrar liquidação aberta
-        const aberta = data.find(l => l.status === 'ABERTO' || l.status === 'ABERTA');
-        setLiquidacao(aberta || null);
+  const loadLiq = useCallback(async () => {
+    if (!rotaId) {
+      console.log('❌ loadLiq: rotaId não definido');
+      setLoading(false);
+      return;
+    }
+    console.log('🔍 loadLiq: Buscando clientes...', { rotaId, dataLiq, liqId });
+    try {
+      // 1. Busca clientes para a liquidação do dia via function
+      // A function fn_clientes_liquidacao_dia recebe a data como parâmetro
+      // para calcular corretamente dia da semana/mês:
+      //   DIARIO: aparece todo dia
+      //   SEMANAL: aparece se mesmo dia da semana da data de referência
+      //   MENSAL/QUINZENAL/FLEXIVEL: aparece se mesmo dia do mês
+      const { data, error } = await supabase
+        .rpc('fn_clientes_liquidacao_dia', {
+          p_rota_id: rotaId,
+          p_data_referencia: dataLiq
+        });
+      
+      if (error) throw error;
+      
+      let allData = ((data || []) as any[]).map(r => ({
+        ...r,
+        codigo_cliente: r.codigo_cliente ?? r.consecutivo ?? null,
+      })) as ClienteRotaDia[];
+      const existingParcelaIds = new Set(allData.map(r => r.parcela_id));
+      
+      // 2. Busca parcelas que foram pagas NA liquidação atual (para mostrar como "pagas")
+      if (liqId) {
+        console.log('🔍 Buscando parcelas pagas na liquidação:', liqId);
         
-        // Se não tem liquidação aberta, mostrar calendário
-        if (!aberta && !modoVisualizacao) {
-          setMostrarCalendario(true);
+        // Busca diretamente de pagamentos_parcelas que tem todos os dados
+        const { data: pagamentos, error: errPag } = await supabase
+          .from('pagamentos_parcelas')
+          .select('parcela_id, cliente_id, emprestimo_id, liquidacao_id, numero_parcela, valor_parcela, valor_pago_atual, valor_credito_gerado, estornado')
+          .eq('liquidacao_id', liqId)
+          .eq('estornado', false);
+        
+        console.log('📦 Pagamentos na liquidação:', { count: pagamentos?.length, error: errPag?.message });
+        
+        if (pagamentos && pagamentos.length > 0) {
+          // Filtra parcelas que não estão na lista (view não retornou pq já estão pagas)
+          const pagamentosNovos = pagamentos.filter(p => !existingParcelaIds.has(p.parcela_id));
+          
+          console.log('📋 Pagamentos não listados:', pagamentosNovos.length);
+          
+          if (pagamentosNovos.length > 0) {
+            // Busca dados dos clientes
+            const clienteIds = [...new Set(pagamentosNovos.map(p => p.cliente_id))];
+            const { data: clientes } = await supabase
+              .from('clientes')
+              .select('id, nome, telefone_celular, endereco, latitude, longitude, codigo_cliente')
+              .in('id', clienteIds);
+            const cliMap = new Map((clientes || []).map(c => [c.id, c]));
+            
+            // Busca dados dos empréstimos
+            const empIds = [...new Set(pagamentosNovos.map(p => p.emprestimo_id))];
+            const { data: emps } = await supabase
+              .from('emprestimos')
+              .select('id, valor_principal, valor_saldo, numero_parcelas, status, frequencia_pagamento, rota_id')
+              .in('id', empIds);
+            const empMap = new Map((emps || []).map(e => [e.id, e]));
+            
+            // Busca dados das parcelas (para data_vencimento)
+            const parcIds = pagamentosNovos.map(p => p.parcela_id);
+            const { data: parcs } = await supabase
+              .from('emprestimo_parcelas')
+              .select('id, data_vencimento, status')
+              .in('id', parcIds);
+            const parcMap = new Map((parcs || []).map(p => [p.id, p]));
+            
+            // Monta os registros
+            pagamentosNovos.forEach(pag => {
+              const cli = cliMap.get(pag.cliente_id);
+              const emp = empMap.get(pag.emprestimo_id);
+              const parc = parcMap.get(pag.parcela_id);
+              if (!cli || !emp) return;
+              
+              const pagaRow: ClienteRotaDia = {
+                cliente_id: cli.id,
+                nome: cli.nome,
+                telefone_celular: cli.telefone_celular,
+                endereco: cli.endereco,
+                latitude: cli.latitude,
+                longitude: cli.longitude,
+                codigo_cliente: cli.codigo_cliente,
+                emprestimo_id: emp.id,
+                saldo_emprestimo: emp.valor_saldo,
+                valor_principal: emp.valor_principal,
+                numero_parcelas: emp.numero_parcelas,
+                status_emprestimo: emp.status,
+                rota_id: emp.rota_id,
+                frequencia_pagamento: emp.frequencia_pagamento,
+                parcela_id: pag.parcela_id,
+                numero_parcela: pag.numero_parcela,
+                valor_parcela: pag.valor_parcela,
+                valor_pago_parcela: pag.valor_pago_atual,
+                saldo_parcela: 0,
+                status_parcela: parc?.status || 'PAGO',
+                data_vencimento: parc?.data_vencimento || new Date().toISOString(),
+                ordem_visita_dia: null,
+                liquidacao_id: pag.liquidacao_id,
+                tem_parcelas_vencidas: false,
+                total_parcelas_vencidas: 0,
+                valor_total_vencido: 0,
+                status_dia: 'PAGO',
+                permite_emprestimo_adicional: false,
+                is_parcela_atrasada: false,
+              };
+              allData.push(pagaRow);
+              existingParcelaIds.add(pag.parcela_id);
+              console.log('✅ Adicionado cliente pago:', cli.nome, 'parcela:', pag.numero_parcela);
+            });
+          }
+        }
+      }
+      
+      console.log('📊 loadLiq resultado:', { 
+        countOriginal: data?.length || 0,
+        countTotal: allData.length,
+        rotaId,
+        dataLiq,
+        liqId
+      });
+      
+      setRaw(allData);
+      const ids = allData.map((r: any) => r.parcela_id).filter(Boolean);
+      if (ids.length > 0) {
+        // Busca pagamentos NÃO estornados
+        const { data: pags } = await supabase
+          .from('pagamentos_parcelas')
+          .select('parcela_id, cliente_id, valor_pago_atual, valor_credito_gerado, valor_parcela, data_pagamento, liquidacao_id')
+          .in('parcela_id', ids)
+          .eq('estornado', false);
+        
+        const m = new Map<string, PagamentoParcela>();
+        const s = new Set<string>();
+        const cliPagos = new Set<string>();
+        
+        (pags || []).forEach((p: any) => { 
+          m.set(p.parcela_id, p); 
+          if (p.valor_pago_atual >= p.valor_parcela) s.add(p.parcela_id);
+          // Se o pagamento foi feito NA liquidação atual → cliente "visitado/pago"
+          if (liqId && p.liquidacao_id === liqId) {
+            cliPagos.add(p.cliente_id);
+          }
+        });
+        
+        // Também busca clientes pagos que NÃO estão no allData (parcelas já saíram da view)
+        if (liqId) {
+          const { data: todosPagLiq } = await supabase
+            .from('pagamentos_parcelas')
+            .select('cliente_id')
+            .eq('liquidacao_id', liqId)
+            .eq('estornado', false);
+          (todosPagLiq || []).forEach((p: any) => cliPagos.add(p.cliente_id));
+        }
+        
+        // Também adiciona ao pagasSet as parcelas que vieram como PAGO no allData
+        allData.forEach((r: any) => {
+          if (r.status_dia === 'PAGO' || r.status_parcela === 'PAGO') {
+            s.add(r.parcela_id);
+          }
+        });
+        
+        console.log('📋 PagasSet:', { total: s.size, ids: Array.from(s).slice(0, 5) });
+        console.log('📋 ClientesPagosNaLiq:', { total: cliPagos.size, ids: Array.from(cliPagos).slice(0, 5) });
+        setPagMap(m); 
+        setPagasSet(s);
+        setClientesPagosNaLiq(cliPagos);
+      } else { setPagMap(new Map()); setPagasSet(new Set()); setClientesPagosNaLiq(new Set()); }
+    } catch (e) { console.error('Erro loadLiq:', e); }
+    finally { setLoading(false); setRefreshing(false); }
+  }, [rotaId, dataLiq, liqId]);
+
+  const loadTodosClientes = useCallback(async () => {
+    if (!rotaId || todosList.length > 0) return;
+    setLoadTodos(true);
+    try {
+      // Query 1: Todos os empréstimos da rota com dados do cliente
+      const { data: emps } = await supabase.from('emprestimos').select(`id, valor_principal, valor_saldo, valor_parcela, numero_parcelas, status, frequencia_pagamento, tipo_emprestimo, clientes!inner(id, nome, telefone_celular, status, codigo_cliente, permite_renegociacao)`).eq('rota_id', rotaId).in('status', ['ATIVO', 'VENCIDO', 'QUITADO', 'RENEGOCIADO']);
+      if (!emps || emps.length === 0) { setTodosList([]); return; }
+
+      // Query 2: Todas as parcelas dos empréstimos de uma vez
+      const empIds = (emps as any[]).map(e => e.id);
+      const { data: allParcs } = await supabase.from('emprestimo_parcelas').select('emprestimo_id, numero_parcela, valor_parcela, status').in('emprestimo_id', empIds);
+
+      // Agrupa parcelas por empréstimo
+      const parcMap = new Map<string, { maxParcela: number; vencidas: number; totalVencido: number }>();
+      (allParcs || []).forEach((p: any) => {
+        let info = parcMap.get(p.emprestimo_id);
+        if (!info) { info = { maxParcela: 0, vencidas: 0, totalVencido: 0 }; parcMap.set(p.emprestimo_id, info); }
+        if (p.numero_parcela > info.maxParcela) info.maxParcela = p.numero_parcela;
+        if (p.status === 'VENCIDO' || p.status === 'VENCIDA') { info.vencidas++; info.totalVencido += (p.valor_parcela || 0); }
+      });
+
+      // Monta clientes
+      const cliMap = new Map<string, ClienteTodos>();
+      for (const e of emps as any[]) {
+        const c = e.clientes; if (!c) continue;
+        let cli = cliMap.get(c.id);
+        if (!cli) { cli = { id: c.id, codigo_cliente: c.codigo_cliente, nome: c.nome, telefone_celular: c.telefone_celular, status: c.status, tem_atraso: false, permite_renegociacao: c.permite_renegociacao || false, emprestimos: [] }; cliMap.set(c.id, cli); }
+        const info = parcMap.get(e.id) || { maxParcela: 1, vencidas: 0, totalVencido: 0 };
+        if (info.vencidas > 0) cli.tem_atraso = true;
+        cli.emprestimos.push({ id: e.id, valor_principal: e.valor_principal, saldo_emprestimo: e.valor_saldo, valor_parcela: e.valor_parcela, numero_parcelas: e.numero_parcelas, numero_parcela_atual: info.maxParcela, status: e.status, frequencia_pagamento: e.frequencia_pagamento, tipo_emprestimo: (e as any).tipo_emprestimo || 'NOVO', total_parcelas_vencidas: info.vencidas, valor_total_vencido: info.totalVencido });
+      }
+      setTodosList(Array.from(cliMap.values()));
+    } catch (e) { console.error('Erro loadTodos:', e); }
+    finally { setLoadTodos(false); }
+  }, [rotaId, todosList.length]);
+
+  useEffect(() => { loadLiq(); }, [loadLiq]);
+  useEffect(() => { if (tab === 'todos') loadTodosClientes(); }, [tab, loadTodosClientes]);
+  
+  // Contagem rápida de clientes para exibir no tab "Todos" antes de carregar
+  useEffect(() => {
+    if (!rotaId || todosCount !== null) return;
+    (async () => {
+      try {
+        const { count } = await supabase
+          .from('emprestimos')
+          .select('cliente_id', { count: 'exact', head: true })
+          .eq('rota_id', rotaId)
+          .in('status', ['ATIVO', 'VENCIDO', 'QUITADO']);
+        setTodosCount(count || 0);
+      } catch { }
+    })();
+  }, [rotaId, todosCount]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    if (tab === 'liquidacao') loadLiq();
+    else { setTodosList([]); loadTodosClientes(); }
+  }, [tab, loadLiq, loadTodosClientes]);
+
+  const abrirParcelas = useCallback(async (clienteId: string, clienteNome: string, emprestimoId: string, empStatus?: string) => {
+    // Buscar status do empréstimo se não informado
+    let statusFinal = empStatus;
+    if (!statusFinal) {
+      const { data: empData } = await supabase.from('emprestimos').select('status').eq('id', emprestimoId).single();
+      statusFinal = empData?.status;
+    }
+    setClienteModal({ id: clienteId, nome: clienteNome, emprestimo_id: emprestimoId, emprestimo_status: statusFinal });
+    setModalParcelasVisible(true);
+    setLoadingParcelas(true);
+    setParcelasModal([]);
+    setCreditoDisponivel(0);
+    try {
+      const { data: parcelas, error: errP } = await supabase.from('emprestimo_parcelas').select('id, emprestimo_id, numero_parcela, valor_parcela, valor_pago, valor_saldo, valor_multa, data_vencimento, data_pagamento, status, saldo_excedente, liquidacao_id, observacoes, ordem_visita_dia').eq('emprestimo_id', emprestimoId).order('numero_parcela', { ascending: true });
+      if (errP) throw errP;
+      if (!parcelas || parcelas.length === 0) { setParcelasModal([]); setLoadingParcelas(false); return; }
+      const ids = parcelas.map((p: any) => p.id);
+      
+      // Busca pagamentos com liquidacao_id (tabela pagamentos_parcelas tem tudo)
+      const { data: pagamentos } = await supabase
+        .from('pagamentos_parcelas')
+        .select('parcela_id, valor_pago_atual, valor_credito_gerado, liquidacao_id, estornado')
+        .in('parcela_id', ids)
+        .eq('estornado', false);
+      
+      const pMap = new Map<string, { valorPago: number; creditoGerado: number; liquidacaoId: string | null }>();
+      (pagamentos || []).forEach((p: any) => { 
+        pMap.set(p.parcela_id, { 
+          valorPago: p.valor_pago_atual || 0, 
+          creditoGerado: p.valor_credito_gerado || 0, 
+          liquidacaoId: p.liquidacao_id 
+        }); 
+      });
+      
+      // Crédito disponível = soma dos saldo_excedente reais das parcelas (não do histórico de geração)
+      const creditoTotal = (parcelas || []).reduce((sum: number, p: any) => sum + (p.saldo_excedente || 0), 0);
+      setCreditoDisponivel(creditoTotal);
+      setParcelasModal(parcelas.map((p: any) => { 
+        const pag = pMap.get(p.id); 
+        const vPago = p.valor_pago || 0;
+        const vSaldo = p.valor_saldo || 0;
+        const creditoGerado = pag?.creditoGerado || 0;
+        const liqPag = pag?.liquidacaoId || p.liquidacao_id || null;
+        return { 
+          parcela_id: p.id, 
+          numero_parcela: p.numero_parcela, 
+          data_vencimento: p.data_vencimento, 
+          valor_parcela: p.valor_parcela, 
+          status: p.status, 
+          data_pagamento: p.data_pagamento, 
+          valor_multa: p.valor_multa || 0, 
+          valor_pago: vPago, 
+          valor_saldo: vSaldo,
+          credito_gerado: creditoGerado,
+          saldo_excedente: p.saldo_excedente || 0,
+          liquidacao_id: liqPag,
+          observacoes: p.observacoes || null
+        }; 
+      }));
+    } catch (e) { console.error('Erro parcelas:', e); Alert.alert(t.erroGenerico, t.erroCarregarParcelas); }
+    finally { setLoadingParcelas(false); }
+  }, []);
+
+  // FUNÇÃO ATUALIZADA - Busca dados completos via RPC antes de abrir modal
+  const abrirPagamento = useCallback(async (parcela: ParcelaModal) => {
+    if (!liqId && !isViz) { Alert.alert(t.atencao, t.liquidacaoNecessaria); return; }
+    
+    setParcelaPagamento(parcela);
+    setDadosPagamento(null);
+    setLoadingDadosPagamento(true);
+    setUsarCredito(false);
+    setFormaPagamento('DINHEIRO');
+    setModalPagamentoVisible(true);
+    carregarGPS();
+    
+    try {
+      const { data, error } = await supabase.rpc('fn_consultar_parcela_para_pagamento', { p_parcela_id: parcela.parcela_id });
+      if (error) throw error;
+      
+      const dados = Array.isArray(data) ? data[0] : data;
+      if (dados) {
+        setDadosPagamento(dados);
+        setValorPagamento((dados.valor_saldo_parcela || parcela.valor_parcela).toFixed(2).replace('.', ','));
+      } else {
+        setValorPagamento(parcela.valor_parcela.toFixed(2).replace('.', ','));
+      }
+    } catch (e) {
+      console.error('Erro ao consultar parcela:', e);
+      setValorPagamento(parcela.valor_parcela.toFixed(2).replace('.', ','));
+    } finally {
+      setLoadingDadosPagamento(false);
+    }
+  }, [liqId, isViz, t, carregarGPS]);
+
+  // Função para ir para próxima parcela pendente
+  const irParaProximaParcela = useCallback(async () => {
+    if (!clienteModal) {
+      Alert.alert(t.erroGenerico, t.dadosClienteIndisponiveis);
+      return;
+    }
+    
+    console.log('🔄 irParaProximaParcela - buscando para emprestimo:', clienteModal.emprestimo_id);
+    setLoadingDadosPagamento(true);
+    
+    try {
+      const { data, error } = await supabase.rpc('fn_buscar_proxima_parcela_a_pagar', { p_emprestimo_id: clienteModal.emprestimo_id });
+      console.log('📦 Resposta fn_buscar_proxima_parcela_a_pagar:', { data, error });
+      
+      if (error) throw error;
+      const proxima = Array.isArray(data) ? data[0] : data;
+      console.log('📦 Próxima parcela:', proxima);
+      
+      if (proxima && proxima.parcela_id) {
+        // A function retorna valor_saldo (não valor_saldo_parcela)
+        const valorSaldo = proxima.valor_saldo || proxima.valor_parcela;
+        console.log('💰 Valor saldo da parcela:', valorSaldo);
+        
+        const novaParcela: ParcelaModal = {
+          parcela_id: proxima.parcela_id, 
+          numero_parcela: proxima.numero_parcela,
+          data_vencimento: proxima.data_vencimento, 
+          valor_parcela: proxima.valor_parcela,
+          status: proxima.status, 
+          data_pagamento: null, 
+          valor_multa: proxima.valor_multa || 0,
+          valor_pago: proxima.valor_pago || 0,
+        };
+        
+        console.log('📝 Nova parcela a exibir:', novaParcela);
+        setParcelaPagamento(novaParcela);
+        
+        // Busca dados completos via fn_consultar_parcela_para_pagamento
+        const { data: dadosNova, error: errConsulta } = await supabase.rpc('fn_consultar_parcela_para_pagamento', { p_parcela_id: proxima.parcela_id });
+        console.log('📋 Resposta fn_consultar_parcela_para_pagamento:', { dadosNova, errConsulta });
+        
+        const dados = Array.isArray(dadosNova) ? dadosNova[0] : dadosNova;
+        console.log('📋 Dados processados:', dados);
+        
+        if (dados) {
+          setDadosPagamento(dados);
+          // Usa valor_saldo_parcela se disponível, senão valor_saldo da fn_buscar
+          const valorAPagar = dados.valor_saldo_parcela || valorSaldo;
+          setValorPagamento(valorAPagar.toFixed(2).replace('.', ','));
+          console.log('✅ Modal atualizado! Parcela:', dados.numero_parcela, 'Valor:', valorAPagar);
+        } else {
+          // Fallback se fn_consultar não retornar dados
+          setValorPagamento(valorSaldo.toFixed(2).replace('.', ','));
+          console.log('⚠️ Usando fallback - Valor:', valorSaldo);
         }
       } else {
-        setLiquidacao(null);
+        console.log('⚠️ Nenhuma parcela pendente encontrada');
+        Alert.alert(t.aviso, proxima?.mensagem_status || t.nenhumaParcela);
       }
-
-      // Buscar saldo da conta da rota (será usado como caixa inicial automático)
-      const { data: contaData } = await supabase
-        .from('contas')
-        .select('id, saldo_atual')
-        .eq('rota_id', vendedor.rota_id)
-        .eq('tipo_conta', 'ROTA')
-        .eq('status', 'ATIVA')
-        .maybeSingle();
-      
-      if (contaData) {
-        setContaRota(contaData);
-      }
-    } catch (error) {
-      console.error('Erro ao carregar liquidações:', error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+    } catch (e: any) { 
+      console.error('❌ Erro ao buscar próxima parcela:', e); 
+      Alert.alert(t.erroGenerico, e.message || t.erroBuscarParcela);
     }
-  };
+    finally { setLoadingDadosPagamento(false); }
+  }, [clienteModal]);
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    carregarLiquidacoes();
-  };
-
-  const toggleLanguage = () => {
-    setLanguage(language === 'pt-BR' ? 'es' : 'pt-BR');
-  };
-
-  // ==================== CALENDÁRIO ====================
-  const gerarDiasDoMes = (): DiaCalendario[] => {
-    const dias: DiaCalendario[] = [];
-    const primeiroDia = new Date(anoAtual, mesAtual, 1);
-    const diaSemanaInicio = primeiroDia.getDay();
-    const ultimoDia = new Date(anoAtual, mesAtual + 1, 0);
-    const totalDias = ultimoDia.getDate();
-
-    // Dias do mês anterior
-    const ultimoDiaMesAnterior = new Date(anoAtual, mesAtual, 0).getDate();
-    for (let i = diaSemanaInicio - 1; i >= 0; i--) {
-      const dia = ultimoDiaMesAnterior - i;
-      const data = new Date(anoAtual, mesAtual - 1, dia);
-      dias.push({ data, diaNumero: dia, mesAtual: false, ehHoje: false, ehFuturo: data > hoje, liquidacao: null });
+  // FUNÇÃO ATUALIZADA - Registra pagamento com suporte a crédito
+  const registrarPagamento = useCallback(async () => {
+    if (!parcelaPagamento || processando) return;
+    if (dadosPagamento && !dadosPagamento.permite_pagamento) {
+      Alert.alert(t.atencao, dadosPagamento.mensagem_bloqueio || t.pagamentoNaoPermitido);
+      return;
     }
-
-    // Dias do mês atual
-    for (let dia = 1; dia <= totalDias; dia++) {
-      const data = new Date(anoAtual, mesAtual, dia);
-      data.setHours(0, 0, 0, 0);
-      const ehHoje = data.getTime() === hoje.getTime();
-      const ehFuturo = data > hoje;
-      const liq = todasLiquidacoes.find(l => {
-        const dataLiq = new Date(l.data_abertura);
-        dataLiq.setHours(0, 0, 0, 0);
-        return dataLiq.getTime() === data.getTime();
-      }) || null;
-      dias.push({ data, diaNumero: dia, mesAtual: true, ehHoje, ehFuturo, liquidacao: liq });
-    }
-
-    // Dias do próximo mês
-    const diasRestantes = 42 - dias.length;
-    for (let dia = 1; dia <= diasRestantes; dia++) {
-      const data = new Date(anoAtual, mesAtual + 1, dia);
-      dias.push({ data, diaNumero: dia, mesAtual: false, ehHoje: false, ehFuturo: data > hoje, liquidacao: null });
-    }
-
-    return dias;
-  };
-
-  const irMesAnterior = () => {
-    if (mesAtual === 0) { setMesAtual(11); setAnoAtual(anoAtual - 1); }
-    else { setMesAtual(mesAtual - 1); }
-  };
-
-  const irProximoMes = () => {
-    if (ehMesAtualOuFuturo) return;
-    if (mesAtual === 11) { setMesAtual(0); setAnoAtual(anoAtual + 1); }
-    else { setMesAtual(mesAtual + 1); }
-  };
-
-  const handleClickDia = (dia: DiaCalendario) => {
-    if (!dia.mesAtual || dia.ehFuturo) return;
+    const valorNum = parseFloat(valorPagamento.replace(',', '.'));
+    if (isNaN(valorNum) || valorNum < 0) { showAlert(t.erroGenerico, t.valorInvalido); return; }
     
-    if (dia.liquidacao) {
-      const status = dia.liquidacao.status?.toUpperCase();
-      
-      // REABERTO: apenas visualização, sem movimentos (reabertura só via webapp)
-      if (status === 'REABERTO' || status === 'REABERTA') {
-        setLiquidacao(dia.liquidacao);
-        setModoVisualizacao(true); // SEMPRE visualização - não permite movimentos
-        setDataVisualizacao(dia.data);
-        setDadosVisualizacao(null); // Tem liquidação, não precisa de dados dinâmicos
-        setMostrarCalendario(false);
-        Alert.alert('Dia Reaberto', 'Esta liquidação foi reaberta pelo administrador. Visualização apenas - novos movimentos vão para a liquidação aberta atual.');
-        return;
-      }
-      
-      // ABERTO/ABERTA: pode editar
-      if (status === 'ABERTO' || status === 'ABERTA') {
-        setLiquidacao(dia.liquidacao);
-        setModoVisualizacao(false);
-        setDataVisualizacao(null);
-        setDadosVisualizacao(null);
-        setMostrarCalendario(false);
-        return;
-      }
-      
-      // FECHADO/APROVADO: visualização com dados da liquidação
-      setLiquidacao(dia.liquidacao);
-      setModoVisualizacao(true);
-      setDataVisualizacao(dia.data);
-      setDadosVisualizacao(null); // Tem liquidação, dados vêm dela
-      setMostrarCalendario(false);
-    } else if (dia.ehHoje) {
-      // Hoje sem liquidação - verificar se já existe ABERTA em outro dia
-      const temAberta = todasLiquidacoes.some(l => {
-        const s = l.status?.toUpperCase();
-        return s === 'ABERTO' || s === 'ABERTA';
-      });
-      if (temAberta) {
-        Alert.alert('Atenção', 'Já existe uma liquidação aberta. Feche-a antes de abrir outra.');
-        return;
-      }
-      setModalIniciarVisible(true);
-    } else {
-      // Dia futuro ou passado sem liquidação → enterFutureView
-      setLiquidacao(null);
-      enterFutureView(dia.data);
+    // Calcula crédito a usar: no máximo o disponível, mas limitado ao saldo da parcela
+    let valorCredito = 0;
+    if (usarCredito && dadosPagamento?.credito_disponivel > 0) {
+      const valorSaldoParcela = dadosPagamento.valor_saldo_parcela || parcelaPagamento.valor_parcela;
+      valorCredito = Math.min(dadosPagamento.credito_disponivel, valorSaldoParcela);
     }
-  };
-
-  const handleAbrirCalendario = () => {
-    console.log('Abrindo calendário...');
-    setMostrarCalendario(true);
-  };
-
-  const handleFecharCalendario = () => {
-    // Volta para a liquidação aberta (se existir)
-    const aberta = todasLiquidacoes.find(l => {
-      const s = l.status?.toUpperCase();
-      return s === 'ABERTO' || s === 'ABERTA';
-    });
-    if (aberta) {
-      setLiquidacao(aberta);
-      setModoVisualizacao(false);
-      setDataVisualizacao(null);
-      setDadosVisualizacao(null);
-      setMostrarCalendario(false);
-    }
-  };
-
-  // === FutureRouteView Functions ===
-  const enterFutureView = async (data: Date) => {
-    setModoVisualizacao(true);
-    setDataVisualizacao(data);
-    setMostrarCalendario(false);
     
-    // Buscar dados da rota para a data selecionada
-    if (!vendedor) return;
-    setLoadingVisualizacao(true);
-    try {
-      const dataFiltro = data.toISOString().split('T')[0];
-      const { data: clientesDia, error } = await supabase
-        .from('vw_clientes_rota_dia')
-        .select('*')
-        .eq('rota_id', vendedor.rota_id)
-        .eq('data_vencimento', dataFiltro);
-
-      if (!error && clientesDia) {
-        const total = clientesDia.length;
-        const ativos = clientesDia.filter((c: any) => c.status_dia !== 'PAGO').length;
-        setDadosVisualizacao({
-          totalClientes: total,
-          clientesAtivos: ativos,
-          clientesInativos: total - ativos,
-          clientesList: clientesDia,
+    // Validação: pelo menos um valor deve ser informado (dinheiro OU crédito)
+    if (valorNum === 0 && valorCredito === 0) {
+      showAlert(t.erroGenerico, t.informeValor);
+      return;
+    }
+    
+    // ⭐ Verificar se este pagamento vai quitar o empréstimo
+    const saldoEmp = clienteModal?.saldo_emprestimo ?? 0;
+    const totalPagando = valorNum + valorCredito;
+    const vaiQuitar = saldoEmp > 0 && totalPagando >= saldoEmp;
+    
+    const executarPagamento = async () => {
+      setProcessando(true);
+      try {
+        const { data, error } = await supabase.rpc('fn_registrar_pagamento', { 
+          p_parcela_id: parcelaPagamento.parcela_id, 
+          p_valor_pagamento: valorNum, 
+          p_valor_credito: valorCredito, 
+          p_forma_pagamento: formaPagamento, 
+          p_observacoes: null, 
+          p_latitude: coords?.lat || null, 
+          p_longitude: coords?.lng || null, 
+          p_precisao_gps: coords?.acc || null, 
+          p_liquidacao_id: liqId || null,
+          p_user_id: vendedor?.user_id || null
         });
+        if (error) throw error;
+        const res = Array.isArray(data) ? data[0] : data;
+        if (res?.sucesso) {
+          showAlert(t.sucessoGenerico || 'Sucesso', res.mensagem || t.sucesso);
+          setModalPagamentoVisible(false);
+          setParcelaPagamento(null);
+          setDadosPagamento(null);
+          setUsarCredito(false);
+          if (clienteModal) abrirParcelas(clienteModal.id, clienteModal.nome, clienteModal.emprestimo_id);
+          loadLiq();
+        } else { showAlert(t.erroGenerico, res?.mensagem || t.erro); }
+      } catch (e: any) { console.error('Erro pagamento:', e); showAlert(t.erroGenerico, e.message || t.erro); }
+      finally { setProcessando(false); }
+    };
+    
+    // Se vai quitar, pedir confirmação
+    if (vaiQuitar) {
+      const msgQuitar = t.confirmarQuitacao || 
+        `Este pagamento irá QUITAR o empréstimo.\n\nSaldo: ${fmt(saldoEmp)}\nPagando: ${fmt(totalPagando)}\n\nTodas as parcelas restantes serão marcadas como pagas.\n\n⚠️ Esta ação é irreversível.`;
+      
+      if (Platform.OS === 'web') {
+        if (window.confirm(msgQuitar)) executarPagamento();
       } else {
-        setDadosVisualizacao({ totalClientes: 0, clientesAtivos: 0, clientesInativos: 0, clientesList: [] });
+        Alert.alert(
+          t.atencaoQuitacao || '⚠️ Quitação de Empréstimo',
+          msgQuitar,
+          [
+            { text: t.cancelar || 'Cancelar', style: 'cancel' },
+            { text: t.confirmarQuitar || 'Sim, Quitar', style: 'destructive', onPress: executarPagamento }
+          ]
+        );
       }
-    } catch (err) {
-      console.error('Erro ao buscar dados de visualização:', err);
-      setDadosVisualizacao({ totalClientes: 0, clientesAtivos: 0, clientesInativos: 0, clientesList: [] });
-    } finally {
-      setLoadingVisualizacao(false);
+    } else {
+      executarPagamento();
     }
-  };
+  }, [parcelaPagamento, dadosPagamento, valorPagamento, usarCredito, formaPagamento, coords, liqId, t, clienteModal, abrirParcelas, loadLiq, processando]);
 
-  const exitFutureView = () => {
-    setModoVisualizacao(false);
-    setDataVisualizacao(null);
-    setDadosVisualizacao(null);
-    setMostrarCalendario(true); // Volta ao calendário, NÃO para hoje
-  };
+  const abrirEstorno = useCallback((parcela: ParcelaModal) => {
+    if (!liqId) { Alert.alert(t.atencao, t.liquidacaoNecessaria); return; }
+    setParcelaEstorno(parcela);
+    setMotivoEstorno('');
+    setModalEstornoVisible(true);
+  }, [liqId, t]);
 
-  const handleVoltarHoje = () => {
-    setModoVisualizacao(false);
-    setDataVisualizacao(null);
-    setDadosVisualizacao(null);
-    const aberta = todasLiquidacoes.find(l => l.status === 'ABERTO' || l.status === 'ABERTA');
-    setLiquidacao(aberta || null);
-    if (!aberta) setMostrarCalendario(true);
-  };
-
-  const getCorDia = (dia: DiaCalendario) => {
-    if (!dia.mesAtual || !dia.liquidacao) return styles.diaSemRegistro;
-    const status = dia.liquidacao.status?.toUpperCase();
-    if (status === 'ABERTO' || status === 'ABERTA') return styles.diaAberto;
-    if (status === 'REABERTO' || status === 'REABERTA') return styles.diaReaberto;
-    if (status === 'FECHADO' || status === 'FECHADA') return styles.diaFechado;
-    if (status === 'APROVADO' || status === 'APROVADA') return styles.diaAprovado;
-    return styles.diaSemRegistro;
-  };
-
-  const getIconeDia = (dia: DiaCalendario) => {
-    if (!dia.mesAtual || !dia.liquidacao) return '⊘';
-    const status = dia.liquidacao.status?.toUpperCase();
-    if (status === 'ABERTO' || status === 'ABERTA') return '○';
-    if (status === 'REABERTO' || status === 'REABERTA') return '⟳';
-    return '✓';
-  };
-
-  // ==================== FORMATADORES ====================
-  const formatarMoeda = (valor: number | null) => {
-    if (valor === null || valor === undefined) return 'R$ 0,00';
-    return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-  };
-
-  const formatarMoedaCompacta = (valor: number | null) => {
-    if (valor === null || valor === undefined) return 'R$0';
-    if (valor >= 1000) return `R$${(valor / 1000).toFixed(1)}k`;
-    return `R$${valor.toFixed(0)}`;
-  };
-
-  const formatarData = (data: string | Date | null) => {
-    if (!data) return '-';
-    const d = typeof data === 'string' ? new Date(data) : data;
-    return d.toLocaleDateString('pt-BR');
-  };
-
-  const calcularEfetividade = () => {
-    if (!liquidacao) return 0;
-    const total = (liquidacao.pagamentos_pagos || 0) + (liquidacao.pagamentos_nao_pagos || 0);
-    if (total === 0) return 0;
-    return Math.round(((liquidacao.pagamentos_pagos || 0) / total) * 100);
-  };
-
-  const calcularTotalClientes = () => {
-    if (!liquidacao) return 0;
-    return (liquidacao.clientes_iniciais || 0) + 
-           (liquidacao.clientes_novos || 0) + 
-           (liquidacao.clientes_renovados || 0) + 
-           (liquidacao.clientes_renegociados || 0) - 
-           (liquidacao.clientes_cancelados || 0);
-  };
-
-  // ==================== HANDLERS ====================
-  const handleIniciarDia = async () => {
-    if (!vendedor) return;
+  const confirmarEstorno = useCallback(async () => {
+    if (!parcelaEstorno || !motivoEstorno.trim() || processando) return;
     
-    // CAIXA INICIAL AUTOMÁTICO = SALDO DA CONTA DA ROTA
-    const valorCaixaInicial = contaRota?.saldo_atual || 0;
-    
-    setSalvando(true);
+    setProcessando(true);
     try {
-      const { data, error } = await supabase.rpc('fn_abrir_liquidacao_diaria', {
-        p_vendedor_id: vendedor.id,
-        p_rota_id: vendedor.rota_id,
-        p_caixa_inicial: valorCaixaInicial,
-        p_user_id: vendedor.user_id,
+      const { data, error } = await supabase.rpc('fn_estornar_pagamento', { 
+        p_parcela_id: parcelaEstorno.parcela_id, 
+        p_motivo: motivoEstorno.trim(),
+        p_vendedor_id: vendedor?.id  // Passa o ID do vendedor logado
       });
-
-      if (error) throw error;
-
-      setModalIniciarVisible(false);
-      setMostrarCalendario(false);
-      setModoVisualizacao(false);
-      carregarLiquidacoes();
-      Alert.alert('Sucesso', 'Dia iniciado com sucesso!');
-    } catch (error: any) {
-      Alert.alert('Erro', error.message || 'Não foi possível iniciar o dia');
-    } finally {
-      setSalvando(false);
-    }
-  };
-
-  const handleEncerrarDia = async () => {
-    if (!liquidacao || !vendedor) return;
-
-    setFechando(true);
-    setFechandoEtapa('processando');
-    try {
-      const { data, error } = await supabase.rpc('fn_fechar_liquidacao_diaria', {
-        p_liquidacao_id: liquidacao.id,
-        p_user_id: vendedor.user_id,
-        p_observacoes: 'Fechamento via App Mobile'
-      });
-
-      if (error) throw error;
-
-      const resultado = Array.isArray(data) ? data[0] : data;
       
-      if (!resultado || !resultado.sucesso) {
-        throw new Error(resultado?.mensagem || 'Erro ao fechar liquidação');
+      if (error) throw error;
+      const res = Array.isArray(data) ? data[0] : data;
+      
+      if (res?.sucesso) {
+        setModalEstornoVisible(false);
+        setParcelaEstorno(null);
+        // Usa a mensagem retornada pela function que já inclui o nome do responsável
+        Alert.alert(t.sucessoGenerico, res.mensagem || t.estornoSucesso);
+        if (clienteModal) abrirParcelas(clienteModal.id, clienteModal.nome, clienteModal.emprestimo_id);
+        loadLiq();
+      } else { 
+        setModalEstornoVisible(false);
+        Alert.alert(t.erroGenerico, res?.mensagem || t.estornoErro); 
       }
-
-      // Etapa 2: Gerando extrato
-      setFechandoEtapa('gerando');
-
-      // Guardar dados para extrato
-      setLiqFechadaId(liquidacao.id);
-      setLiqFechadaCaixaInicial(liquidacao.caixa_inicial || 0);
-      setLiqFechadaCaixaFinal(resultado.caixa_final || 0);
-      
-      await new Promise(r => setTimeout(r, 600));
-      
-      // Fechar modal de progresso e abrir extrato direto
-      // NÃO recarregar liquidações agora - esperar fechar extrato
-      setModalFecharVisible(false);
-      setFechando(false);
-      setFechandoEtapa('confirmar');
-      setExtratoFechamentoVisible(true);
-    } catch (error: any) {
-      setFechando(false);
-      setFechandoEtapa('confirmar');
-      Alert.alert('Erro', error.message || 'Não foi possível encerrar o dia');
+    } catch (e: any) { 
+      console.error('Erro estorno:', e); 
+      Alert.alert(t.erroGenerico, e.message || t.estornoErro); 
     }
-  };
+    finally { setProcessando(false); }
+  }, [parcelaEstorno, motivoEstorno, vendedor, t, clienteModal, abrirParcelas, loadLiq, processando]);
 
-  const handleFecharExtrato = () => {
-    setExtratoFechamentoVisible(false);
-    setLiqFechadaId(null);
-    // Agora sim recarregar - vai mostrar calendário suavemente
-    carregarLiquidacoes();
-  };
+  const grouped = useMemo((): ClienteAgrupado[] => {
+    const m = new Map<string, ClienteAgrupado>();
+    raw.forEach(r => {
+      let g = m.get(r.cliente_id);
+      if (!g) { g = { cliente_id: r.cliente_id, codigo_cliente: r.codigo_cliente, nome: r.nome, telefone_celular: r.telefone_celular, endereco: r.endereco, latitude: r.latitude, longitude: r.longitude, rota_id: r.rota_id, emprestimos: [], qtd_emprestimos: 0, tem_multiplos_vencimentos: false }; m.set(r.cliente_id, g); }
+      
+      // Verifica se já existe uma entrada para este empréstimo
+      const existente = g.emprestimos.find(e => e.emprestimo_id === r.emprestimo_id);
+      
+      if (existente) {
+        // Mesmo empréstimo — prefere parcela PENDENTE sobre PAGO
+        const pi = pagMap.get(r.parcela_id);
+        const rPago = isPaga(r.parcela_id, r.status_dia, pagasSet);
+        const existentePago = isPaga(existente.parcela_id, existente.status_dia, pagasSet);
+        
+        // Substitui se a existente é paga e esta é pendente, ou se esta tem menor número de parcela e ambas são pendentes
+        if ((existentePago && !rPago) || (!existentePago && !rPago && r.numero_parcela < existente.numero_parcela)) {
+          Object.assign(existente, {
+            parcela_id: r.parcela_id, numero_parcela: r.numero_parcela,
+            valor_parcela: r.valor_parcela, valor_pago_parcela: r.valor_pago_parcela,
+            saldo_parcela: r.saldo_parcela, status_parcela: r.status_parcela,
+            data_vencimento: r.data_vencimento, ordem_visita_dia: r.ordem_visita_dia,
+            tem_parcelas_vencidas: r.tem_parcelas_vencidas,
+            total_parcelas_vencidas: r.total_parcelas_vencidas,
+            valor_total_vencido: r.valor_total_vencido,
+            status_dia: r.status_dia, is_parcela_atrasada: r.is_parcela_atrasada,
+            saldo_emprestimo: r.saldo_emprestimo,
+            pagamento_info: pi ? { valorPago: pi.valor_pago_atual, creditoGerado: pi.valor_credito_gerado, valorParcela: pi.valor_parcela } : undefined,
+          });
+        }
+        // Acumula atrasadas
+        if (r.tem_parcelas_vencidas && r.total_parcelas_vencidas > existente.total_parcelas_vencidas) {
+          existente.tem_parcelas_vencidas = r.tem_parcelas_vencidas;
+          existente.total_parcelas_vencidas = r.total_parcelas_vencidas;
+          existente.valor_total_vencido = r.valor_total_vencido;
+        }
+      } else {
+        // Novo empréstimo para este cliente
+        const pi = pagMap.get(r.parcela_id);
+        g.emprestimos.push({ emprestimo_id: r.emprestimo_id, saldo_emprestimo: r.saldo_emprestimo, valor_principal: r.valor_principal, numero_parcelas: r.numero_parcelas, status_emprestimo: r.status_emprestimo, frequencia_pagamento: r.frequencia_pagamento, parcela_id: r.parcela_id, numero_parcela: r.numero_parcela, valor_parcela: r.valor_parcela, valor_pago_parcela: r.valor_pago_parcela, saldo_parcela: r.saldo_parcela, status_parcela: r.status_parcela, data_vencimento: r.data_vencimento, ordem_visita_dia: r.ordem_visita_dia, tem_parcelas_vencidas: r.tem_parcelas_vencidas, total_parcelas_vencidas: r.total_parcelas_vencidas, valor_total_vencido: r.valor_total_vencido, status_dia: r.status_dia, is_parcela_atrasada: r.is_parcela_atrasada, pagamento_info: pi ? { valorPago: pi.valor_pago_atual, creditoGerado: pi.valor_credito_gerado, valorParcela: pi.valor_parcela } : undefined });
+      }
+    });
+    m.forEach(g => { g.qtd_emprestimos = g.emprestimos.length; g.tem_multiplos_vencimentos = g.emprestimos.length > 1; });
+    return Array.from(m.values());
+  }, [raw, pagMap, pagasSet]);
 
-  // REABERTO NÃO é considerado "aberto" para movimentos no mobile
-  // Reaberturas são apenas para correções via webapp
-  const isAberto = liquidacao?.status?.toUpperCase() === 'ABERTO' || liquidacao?.status?.toUpperCase() === 'ABERTA';
-  const isReaberto = liquidacao?.status?.toUpperCase() === 'REABERTO' || liquidacao?.status?.toUpperCase() === 'REABERTA';
-  
-  // Pode editar: apenas ABERTO (não REABERTO) e não está em modo visualização
-  const podeEditar = isAberto && !modoVisualizacao && !isReaberto;
+  // Cliente é considerado "pago/visitado" se recebeu QUALQUER pagamento na liquidação atual
+  // Regra de negócio: vendedor visitou, cobrou (mesmo parcial/atrasada) → sai da lista
+  const isCliPago = useCallback((c: ClienteAgrupado) => clientesPagosNaLiq.has(c.cliente_id), [clientesPagosNaLiq]);
 
-  // ==================== LOADING ====================
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#3B82F6" />
-      </View>
-    );
-  }
+  const filtered = useMemo(() => {
+    let r = [...grouped];
+    if (busca.trim()) { const b = busca.toLowerCase().trim(); r = r.filter(c => c.nome.toLowerCase().includes(b) || (c.telefone_celular && c.telefone_celular.includes(b)) || (c.endereco && c.endereco.toLowerCase().includes(b))); }
+    if (filtro === 'atrasados') r = r.filter(c => !isCliPago(c) && c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas));
+    else if (filtro === 'pagas') r = r.filter(c => isCliPago(c));
+    else r = r.filter(c => !isCliPago(c)); // 'todos' mostra apenas pendentes (não pagos)
+    r.sort(ord === 'rota' ? (a, b) => (a.emprestimos[0]?.ordem_visita_dia ?? 9999) - (b.emprestimos[0]?.ordem_visita_dia ?? 9999) : (a, b) => a.nome.localeCompare(b.nome));
+    return r;
+  }, [grouped, busca, filtro, ord, isCliPago]);
 
-  // ==================== RENDER CALENDÁRIO ====================
-  if (mostrarCalendario) {
-    const diasDoMes = gerarDiasDoMes();
+  const cntTotal = grouped.filter(c => !isCliPago(c)).length;
+  const cntAtraso = grouped.filter(c => c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas)).length;
+  const cntPagas = grouped.filter(c => isCliPago(c)).length;
+  const clientesLiqIds = useMemo(() => new Set(grouped.map(c => c.cliente_id)), [grouped]);
+  const eIdx = (cid: string) => empIdxMap[cid] || 0;
+  const eSet = (cid: string, i: number) => setEmpIdxMap(p => ({ ...p, [cid]: i }));
+  const eAtual = (c: ClienteAgrupado) => c.emprestimos[Math.min(eIdx(c.cliente_id), c.emprestimos.length - 1)];
+
+  const renderParcelaItem = (p: ParcelaModal) => {
+    const isPago = p.status === 'PAGO';
+    const isParcial = p.status === 'PARCIAL';
+    const isVencida = p.status === 'VENCIDO' || p.status === 'VENCIDA';
+    const isCancelado = p.status === 'CANCELADO';
+    const isAutoQuitacao = (p.observacoes || '').includes('[AUTO-QUITAÇÃO]');
+    const isQuitacaoOrigem = isPago && (p.credito_gerado || 0) > 0 && clienteModal?.emprestimo_status === 'QUITADO';
+    
+    const iconColor = isPago ? '#10B981' : isParcial ? '#F59E0B' : isCancelado ? '#9CA3AF' : isVencida ? '#EF4444' : '#6B7280';
+    const iconBg = isPago ? '#D1FAE5' : isParcial ? '#FEF3C7' : isCancelado ? '#F3F4F6' : isVencida ? '#FEE2E2' : '#F3F4F6';
+    const statusColor = isPago ? '#10B981' : isParcial ? '#D97706' : isCancelado ? '#9CA3AF' : isVencida ? '#EF4444' : '#F97316';
+    const statusBg = isPago ? '#D1FAE5' : isParcial ? '#FEF3C7' : isCancelado ? '#F3F4F6' : isVencida ? '#FEE2E2' : '#FFEDD5';
+    const statusText = isPago ? t.pagoStatus : isParcial ? t.parcialStatus : isCancelado ? 'CANCELADO' : isVencida ? t.vencidaStatus : t.pendente;
+    
+    const valorPago = p.valor_pago || 0;
+    const valorSaldo = p.valor_saldo ?? (p.valor_parcela - valorPago);
+    const temPagamentoParcial = !isPago && valorPago > 0;
     
     return (
-      <View style={styles.container}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>{t.titulo}</Text>
-          <View style={styles.headerActions}>
-            <View style={[styles.statusDot, { backgroundColor: isConnected ? '#10B981' : '#EF4444' }]} />
-            <TouchableOpacity onPress={toggleLanguage} style={styles.langButton}>
-              <Text style={styles.langText}>🌐 {language === 'pt-BR' ? 'PT' : 'ES'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.avatarButton} onPress={() => navigation.navigate('Perfil')}>
-              {vendedor?.foto_url ? (
-                <Image source={{ uri: vendedor.foto_url }} style={styles.avatarSmall} />
-              ) : (
-                <View style={styles.avatarSmallPlaceholder}>
-                  <Text style={styles.avatarSmallText}>👤</Text>
-                </View>
-              )}
-            </TouchableOpacity>
+      <View key={p.parcela_id} style={[S.mParcela, { borderLeftColor: iconColor }]}>
+        <View style={S.mParcelaRow}>
+          {/* Lado esquerdo: ícone + info + valores */}
+          <View style={[S.mParcelaIcon, { backgroundColor: iconBg }]}>
+            <Text style={{ color: iconColor, fontSize: 14 }}>
+              {isPago ? '✓' : temPagamentoParcial ? '◐' : isParcial ? '◐' : '📅'}
+            </Text>
+          </View>
+          <View style={S.mParcelaInfo}>
+            {/* Linha 1: Parcela X + badge status */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={S.mParcelaNum}>{t.parcela} {p.numero_parcela}</Text>
+              <View style={[S.mParcelaStatus, { backgroundColor: statusBg }]}>
+                <Text style={[S.mParcelaStatusTx, { color: statusColor }]}>{statusText}</Text>
+              </View>
+            </View>
+            {/* Linha 2: Vencimento */}
+            <Text style={S.mParcelaVenc}>{t.venc} {fmtData(p.data_vencimento)}</Text>
+            
+            {/* PAGO: valor pago + original + crédito + indicador quitação */}
+            {isPago && (
+              <View style={{ marginTop: 2 }}>
+                {/* Badge quitação antecipada (parcela que originou) */}
+                {isQuitacaoOrigem && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF3C7', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, marginBottom: 4, alignSelf: 'flex-start' }}>
+                    <Text style={{ fontSize: 11, color: '#D97706', fontWeight: '700' }}>⚡ {lang === 'es' ? 'Liquidación anticipada' : 'Quitação antecipada'}</Text>
+                  </View>
+                )}
+                {/* Badge auto-quitação */}
+                {isAutoQuitacao && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#DBEAFE', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, marginBottom: 4, alignSelf: 'flex-start' }}>
+                    <Text style={{ fontSize: 11, color: '#2563EB', fontWeight: '600' }}>🔄 {lang === 'es' ? 'Liquidado por crédito' : 'Quitado por crédito'}</Text>
+                  </View>
+                )}
+                {valorPago !== p.valor_parcela ? (
+                  <>
+                    <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
+                    <Text style={S.mParcelaOriginal}>{t.original} {fmt(p.valor_parcela)}</Text>
+                  </>
+                ) : (
+                  <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
+                )}
+                {(p.credito_gerado || 0) > 0 && !isAutoQuitacao && (
+                  <Text style={S.mParcelaCredito}>{t.credito} {fmt(p.credito_gerado || 0)}</Text>
+                )}
+                {(p.saldo_excedente || 0) > 0 && (p.credito_gerado || 0) === 0 && !isAutoQuitacao && (
+                  <Text style={S.mParcelaCredito}>{t.credito} {fmt(p.saldo_excedente || 0)}</Text>
+                )}
+                {p.data_pagamento && (
+                  <Text style={S.mParcelaDataPg}>{t.em} {fmtData(p.data_pagamento)}</Text>
+                )}
+              </View>
+            )}
+            
+            {/* PARCIAL / VENCIDA com pagamento parcial */}
+            {temPagamentoParcial && (
+              <View style={{ marginTop: 2 }}>
+                <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
+                <Text style={S.mParcelaRestante}>{lang === 'es' ? 'Restante:' : 'Restante:'} {fmt(valorSaldo)}</Text>
+                {p.data_pagamento && (
+                  <Text style={S.mParcelaDataPg}>{t.em} {fmtData(p.data_pagamento)}</Text>
+                )}
+              </View>
+            )}
+            
+            {/* SEM PAGAMENTO: só valor */}
+            {!isPago && !temPagamentoParcial && (
+              <Text style={S.mParcelaValor}>{fmt(p.valor_parcela)}</Text>
+            )}
+          </View>
+          {/* Lado direito: botões */}
+          <View style={S.mParcelaBtns}>
+            {!isPago && p.parcela_id && !['RENEGOCIADO', 'QUITADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '') && p.status !== 'CANCELADO' && (
+              <TouchableOpacity 
+                style={[S.mBtnPagar, (!liqId || isViz) && S.mBtnPagarDisabled]} 
+                onPress={() => abrirPagamento(p)} 
+                disabled={!liqId || isViz}
+              >
+                <Text style={S.mBtnPagarIcon}>💰</Text>
+                <Text style={S.mBtnPagarTx}>{t.pagar}</Text>
+              </TouchableOpacity>
+            )}
+            {/* Estorno: PAGO ou qualquer parcela com pagamento (parcial) na liquidação atual */}
+            {/* Não permite estorno se empréstimo foi quitado (auto-quitação) */}
+            {(isPago || valorPago > 0) && p.parcela_id && liqId && !isViz && p.liquidacao_id === liqId && !['QUITADO', 'RENEGOCIADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '') && (
+              <TouchableOpacity style={S.mBtnEstornar} onPress={() => abrirEstorno(p)}>
+                <Text style={S.mBtnEstornarIcon}>↩</Text>
+                <Text style={S.mBtnEstornarTx}>{t.estornar}</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
+      </View>
+    );
+  };
 
-        {/* Botão fixo: Fechar calendário e voltar à liquidação aberta */}
-        {todasLiquidacoes.some(l => { const s = l.status?.toUpperCase(); return s === 'ABERTO' || s === 'ABERTA'; }) && (
-          <TouchableOpacity style={styles.fecharCalendarioBtn} onPress={handleFecharCalendario}>
-            <Text style={styles.fecharCalendarioIcon}>←</Text>
-            <Text style={styles.fecharCalendarioText}>{t.fecharCalendario}</Text>
-          </TouchableOpacity>
-        )}
-
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Info Card */}
-          <View style={styles.infoCard}>
-            <Text style={styles.infoTitulo}>📅 {t.selecioneData}</Text>
-            <Text style={styles.infoTexto}>{t.semLiquidacaoCalendario}</Text>
+  const renderCard = (c: ClienteAgrupado) => {
+    const e = eAtual(c); const ex = expanded === c.cliente_id; const ei = eIdx(c.cliente_id);
+    const pg = isPaga(e.parcela_id, e.status_dia, pagasSet); const bc = borderOf(e, pg); const bg = bgOf(e, pg);
+    const pi = e.pagamento_info; const juros = e.valor_parcela * e.numero_parcelas - e.valor_principal;
+    const totalE = e.valor_principal + juros; const pp = e.numero_parcela - 1 + (pg ? 1 : 0);
+    const pr = e.numero_parcelas - pp; const pct = e.numero_parcelas > 0 ? Math.min(100, Math.round((pp / e.numero_parcelas) * 100)) : 0;
+    return (
+      <TouchableOpacity key={c.cliente_id} activeOpacity={0.7} onPress={() => setExpanded(p => p === c.cliente_id ? null : c.cliente_id)} style={[S.card, { borderLeftColor: bc, backgroundColor: bg }]}>
+        <View style={S.cardRow}>
+          <View style={[S.av, { backgroundColor: '#64748B' }]}><Text style={S.avTx}>{getIni(c.nome)}</Text></View>
+          <View style={S.cardInfo}>
+            <View style={S.nameRow}><Text style={S.nome} numberOfLines={1}>{c.nome.toLowerCase()}</Text>{e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && <View style={[S.bWarn, { backgroundColor: corAtraso(e.total_parcelas_vencidas) + '20' }]}><Text style={[S.bWarnI, { color: corAtraso(e.total_parcelas_vencidas) }]}>⚠</Text><Text style={[S.bWarnT, { color: corAtraso(e.total_parcelas_vencidas) }]}>{e.total_parcelas_vencidas}</Text></View>}{c.tem_multiplos_vencimentos && <View style={S.bMul}><Text style={S.bMulT}>{c.qtd_emprestimos}</Text></View>}<Text style={S.dots}>⋮</Text></View>
+            {c.telefone_celular ? <Text style={S.sub}>📞 {fmtTel(c.telefone_celular)}</Text> : null}
+            {c.endereco ? <Text style={S.sub} numberOfLines={1}>📍 {c.endereco}</Text> : null}
           </View>
+        </View>
+        <View style={S.pRow}>
+          <View><View style={S.pLblR}><Text style={S.pLbl}>{t.parcela} {e.numero_parcela}/{e.numero_parcelas}</Text><View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento}</Text></View></View>{pg && pi ? (<><Text style={S.pgVal}>{t.pago} {fmt(pi.valorPago)}</Text><Text style={S.pgOrig}>{t.original} {fmt(pi.valorParcela)}</Text>{pi.creditoGerado > 0 && <Text style={S.pgCred}>{t.credito} {fmt(pi.creditoGerado)}</Text>}</>) : e.valor_pago_parcela > 0 && !pg ? (<><Text style={S.pgVal}>{t.pago} {fmt(e.valor_pago_parcela)}</Text><Text style={S.mParcelaRestante}>{lang === 'es' ? 'Restante:' : 'Restante:'} {fmt(e.saldo_parcela)}</Text></>) : (<Text style={S.pVal}>{fmt(e.valor_parcela)}</Text>)}</View>
+          <View style={S.sCol}><Text style={S.sLbl}>{t.saldoEmprestimo}</Text><Text style={S.sVal}>{fmt(e.saldo_emprestimo)}</Text></View>
+        </View>
+        {ex && (<View style={S.exp}>
+          {e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && <View style={S.aR}><Text style={S.aRT}>⚠ {e.total_parcelas_vencidas} {t.parcelasVencidas}</Text><Text style={S.aRS}>{t.totalAtraso} {fmt(e.valor_total_vencido)}</Text></View>}
+          {(e.status_parcela === 'PARCIAL' || (e.valor_pago_parcela > 0 && !pg)) && !pg && <View style={S.aY}><Text style={S.aYT}>{t.parcialStatus}: {fmt(e.valor_pago_parcela)} / {fmt(e.valor_parcela)}</Text><Text style={S.aYS}>{lang === 'es' ? 'Restante:' : 'Restante:'} {fmt(e.saldo_parcela)}</Text></View>}
+          {c.tem_multiplos_vencimentos && (<View style={S.eNav}><TouchableOpacity onPress={() => eSet(c.cliente_id, Math.max(0, ei - 1))} disabled={ei === 0} style={[S.eNBtn, ei === 0 && S.eNOff]}><Text style={S.eNBTx}>◀</Text></TouchableOpacity>{c.emprestimos.map((_, i) => <View key={i} style={[S.eDot, i === ei && S.eDotOn]} />)}<TouchableOpacity onPress={() => eSet(c.cliente_id, Math.min(c.emprestimos.length - 1, ei + 1))} disabled={ei >= c.emprestimos.length - 1} style={[S.eNBtn, ei >= c.emprestimos.length - 1 && S.eNOff]}><Text style={S.eNBTx}>▶</Text></TouchableOpacity><Text style={S.eNLbl}> {t.emprestimo} {ei + 1}/{c.qtd_emprestimos}</Text></View>)}
+          <View style={S.res}><View style={S.resH}><Text style={S.resT}>{t.emprestimo} {ei + 1}/{c.qtd_emprestimos}</Text><View style={[S.stB, { backgroundColor: e.status_dia === 'EM_ATRASO' ? '#FEE2E2' : pg ? '#D1FAE5' : '#F3F4F6' }]}><Text style={[S.stBT, { color: e.status_dia === 'EM_ATRASO' ? '#DC2626' : pg ? '#059669' : '#6B7280' }]}>{pg ? t.pagoStatus : e.status_dia}</Text></View></View><View style={S.g3}><View style={S.gi}><Text style={S.gl}>{t.principal}</Text><Text style={S.gv}>{fmt(e.valor_principal)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.juros}</Text><Text style={[S.gv, { color: '#F59E0B' }]}>{fmt(juros)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.total}</Text><Text style={S.gv}>{fmt(totalE)}</Text></View></View><View style={S.g3}><View style={S.gi}><Text style={S.gl}>{t.jaPago}</Text><Text style={[S.gv, { color: '#10B981' }]}>{fmt(totalE - e.saldo_emprestimo)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.saldo}</Text><Text style={[S.gv, { color: '#EF4444' }]}>{fmt(e.saldo_emprestimo)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.parcelas}</Text><Text style={S.gv}>{pp}/{e.numero_parcelas}</Text></View></View><Text style={S.prL}>{t.progresso}</Text><View style={S.prB}><View style={[S.prF, { width: `${pct}%` }]} /></View><Text style={S.prR}>{pr} {t.restantes}</Text></View>
+          <View style={S.btR}><TouchableOpacity style={[S.bt, S.btG, (!liqId || isViz || pg) && S.btOff]} onPress={() => { if (liqId && !isViz && !pg) abrirPagamento({ parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0, valor_pago: e.valor_pago_parcela || 0, valor_saldo: e.saldo_parcela || e.valor_parcela }); }} disabled={!liqId || isViz || pg}><Text style={S.btI}>💰</Text><Text style={S.btW}>{t.pagar}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btBl]} onPress={() => abrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}><Text style={S.btI}>👁</Text><Text style={S.btW}>{t.verParcelas}</Text></TouchableOpacity></View>
+          {e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && (
+            <TouchableOpacity style={[S.btReneg, (!liqId || isViz) && S.btOff]} onPress={async () => {
+              if (!liqId || isViz) return;
+              // Verificar permite_renegociacao
+              const { data: cli } = await supabase.from('clientes').select('permite_renegociacao').eq('id', c.cliente_id).single();
+              if (!cli?.permite_renegociacao) {
+                if (Platform.OS === 'web') { window.alert(t.renegociacaoNaoPermitida); }
+                else { Alert.alert(t.atencao, t.renegociacaoNaoPermitida); }
+                return;
+              }
+              const nav = navigation.getParent() || navigation;
+              nav.navigate('NovoCliente', { renegociacao: { emprestimo_id: e.emprestimo_id, cliente_id: c.cliente_id, cliente_nome: c.nome, saldo_devedor: e.saldo_emprestimo, telefone_celular: c.telefone_celular, codigo_cliente: c.codigo_cliente } });
+            }} disabled={!liqId || isViz}><Text style={S.btRenegI}>🔄</Text><Text style={S.btRenegT}>{t.renegociar}</Text></TouchableOpacity>
+          )}
+          <View style={S.btR}><TouchableOpacity style={[S.bt, S.btOG]} onPress={() => c.telefone_celular && Linking.openURL(`tel:${c.telefone_celular.replace(/\D/g, '')}`)} disabled={!c.telefone_celular}><Text style={S.btI}>📱</Text><Text style={S.btTG}>{t.contato}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btOB]} onPress={() => { if (c.latitude && c.longitude) Linking.openURL(Platform.OS === 'ios' ? `maps:?daddr=${c.latitude},${c.longitude}` : `google.navigation:q=${c.latitude},${c.longitude}`); }} disabled={!c.latitude}><Text style={S.btI}>🧭</Text><Text style={S.btTB}>{t.ir}</Text></TouchableOpacity></View>
+        </View>)}
+      </TouchableOpacity>);
+  };
 
-          {/* Calendário */}
-          <View style={styles.calendarioCard}>
-            <View style={styles.mesHeader}>
-              <TouchableOpacity onPress={irMesAnterior} style={styles.mesNavBtn}>
-                <Text style={styles.mesNavText}>‹</Text>
-              </TouchableOpacity>
-              <Text style={styles.mesTitulo}>{t.meses[mesAtual]} {anoAtual}</Text>
-              <TouchableOpacity onPress={irProximoMes} style={styles.mesNavBtn} disabled={ehMesAtualOuFuturo}>
-                <Text style={[styles.mesNavText, ehMesAtualOuFuturo && { color: '#D1D5DB' }]}>›</Text>
-              </TouchableOpacity>
+  const todosFilt = useMemo(() => {
+    let r = [...todosList];
+    // Ocultar clientes da liquidação atual
+    if (ocultarLiquidacao && clientesLiqIds.size > 0) { r = r.filter(c => !clientesLiqIds.has(c.id)); }
+    // Busca por texto
+    if (busca.trim()) { const b = busca.toLowerCase().trim(); r = r.filter(c => c.nome.toLowerCase().includes(b) || (c.telefone_celular && c.telefone_celular.includes(b))); }
+    // Filtro por tipo de empréstimo
+    if (filtroTipo !== 'todos') { r = r.filter(c => c.emprestimos.some(e => e.tipo_emprestimo === filtroTipo)); }
+    // Filtro por status do empréstimo
+    if (filtroStatus !== 'todos') { r = r.filter(c => c.emprestimos.some(e => e.status === filtroStatus)); }
+    // Ordenação A-Z sempre
+    r.sort((a, b) => a.nome.localeCompare(b.nome));
+    return r;
+  }, [todosList, busca, filtroTipo, filtroStatus, ocultarLiquidacao, clientesLiqIds]);
+
+  const renderTodos = (c: ClienteTodos) => {
+    const a = c.tem_atraso; 
+    // Calcular total vencidas do empréstimo atual
+    const ei = empIdxTodos[c.id] || 0;
+    const emp = c.emprestimos[Math.min(ei, c.emprestimos.length - 1)];
+    const vencidas = emp?.total_parcelas_vencidas || 0;
+    const cor = a ? corAtraso(vencidas) : '#D1D5DB';
+    const ex = expandedTodos === c.id;
+    const isVencido = emp?.status === 'VENCIDO';
+    const isRenegociado = emp?.status === 'RENEGOCIADO';
+    const isQuitado = emp?.status === 'QUITADO';
+    const empStatusLabel = isRenegociado ? t.empRenegociado : isQuitado ? t.empQuitado : isVencido ? t.empVencido : t.empAtivo;
+    const empStatusColor = isRenegociado ? '#9333EA' : isQuitado ? '#10B981' : isVencido ? '#EF4444' : '#1F2937';
+    const statusAtrasoLabel = vencidas > 0 ? `${vencidas} ${t.parcelasVencidas}` : '';
+    return (
+      <TouchableOpacity key={c.id} activeOpacity={0.7} onPress={() => setExpandedTodos(p => p === c.id ? null : c.id)} style={[S.card, { borderLeftColor: cor }]}>
+        <View style={S.cardRow}><View style={[S.av, { backgroundColor: '#64748B' }]}><Text style={S.avTx}>{getIni(c.nome)}</Text></View><View style={S.cardInfo}><View style={S.nameRow}><Text style={S.nome} numberOfLines={1}>{c.nome.toLowerCase()}</Text>{vencidas > 0 && <View style={[S.bWarn, { backgroundColor: corAtraso(vencidas) + '20' }]}><Text style={[S.bWarnI, { color: corAtraso(vencidas) }]}>⚠</Text><Text style={[S.bWarnT, { color: corAtraso(vencidas) }]}>{vencidas}</Text></View>}<Text style={S.dots}>⋮</Text></View></View></View>
+        {ex && emp && (<View style={S.exp}>
+          {emp.total_parcelas_vencidas > 0 && <View style={S.aR}><Text style={S.aRT}>⚠ {emp.total_parcelas_vencidas} {t.parcelasVencidas}</Text><Text style={S.aRS}>{t.totalAtraso} {fmt(emp.valor_total_vencido)}</Text></View>}
+          <View style={S.tEmpCard}><View style={S.tEmpHead}><Text style={[S.tEmpTitle, { color: empStatusColor }]}>{empStatusLabel}</Text><Text style={S.tEmpParcela}>{emp.numero_parcela_atual}/{emp.numero_parcelas}</Text></View><View style={S.tEmpBody}><View><Text style={S.tEmpLbl}>{t.valorParcela}</Text><Text style={S.tEmpVal}>{fmt(emp.valor_parcela)}</Text></View><View style={{ alignItems: 'flex-end' }}><Text style={S.tEmpLbl}>{isRenegociado ? t.saldoRenegociado : t.saldoDevedor}</Text><Text style={[S.tEmpVal, { color: isRenegociado ? '#9333EA' : emp.saldo_emprestimo > 0 ? '#F59E0B' : '#10B981' }]}>{fmt(isRenegociado ? emp.valor_principal : emp.saldo_emprestimo)}</Text></View></View></View>
+          {c.emprestimos.length > 1 && (<View style={S.eNav}><TouchableOpacity onPress={() => setEmpIdxTodos(p => ({ ...p, [c.id]: Math.max(0, ei - 1) }))} disabled={ei === 0} style={[S.eNBtn, ei === 0 && S.eNOff]}><Text style={S.eNBTx}>◀</Text></TouchableOpacity>{c.emprestimos.map((_, i) => <View key={i} style={[S.eDot, i === ei && S.eDotOn]} />)}<TouchableOpacity onPress={() => setEmpIdxTodos(p => ({ ...p, [c.id]: Math.min(c.emprestimos.length - 1, ei + 1) }))} disabled={ei >= c.emprestimos.length - 1} style={[S.eNBtn, ei >= c.emprestimos.length - 1 && S.eNOff]}><Text style={S.eNBTx}>▶</Text></TouchableOpacity><Text style={S.eNLbl}> {t.emprestimo} {ei + 1}/{c.emprestimos.length}</Text></View>)}
+          {(() => {
+            const temAtivo = c.emprestimos.some(e => e.status === 'ATIVO' || e.status === 'VENCIDO');
+            const temAtraso = c.tem_atraso;
+            if (!temAtivo) {
+              // Sem empréstimo ativo → Novo Empréstimo (Renovação)
+              return (<TouchableOpacity style={S.tAddRowActive} onPress={() => {
+                const confirmar = () => { 
+                  const nav = navigation.getParent() || navigation; 
+                  nav.navigate('NovoCliente', { clienteExistente: { id: c.id, nome: c.nome, telefone_celular: c.telefone_celular, documento: c.codigo_cliente?.toString() || '' } }); 
+                };
+                if (Platform.OS === 'web') {
+                  if (window.confirm(t.confirmarNovoEmprestimo)) confirmar();
+                } else {
+                  Alert.alert(t.novoEmprestimo, t.confirmarNovoEmprestimo, [
+                    { text: t.nao, style: 'cancel' },
+                    { text: t.sim, onPress: confirmar }
+                  ]);
+                }
+              }}><Text style={S.tAddIconActive}>＋</Text><Text style={S.tAddTextActive}>{t.novoEmprestimo}</Text></TouchableOpacity>);
+            }
+            if (temAtivo && temAtraso) {
+              // Com empréstimo ativo + atraso → Renegociar (se autorizado)
+              if (!c.permite_renegociacao) {
+                return (<View style={[S.btReneg, { opacity: 0.4 }]}><Text style={S.btRenegI}>🔄</Text><Text style={S.btRenegT}>{t.renegociar}</Text></View>);
+              }
+              return (<TouchableOpacity style={S.btReneg} onPress={() => {
+                const nav = navigation.getParent() || navigation;
+                nav.navigate('NovoCliente', { renegociacao: { emprestimo_id: emp.id, cliente_id: c.id, cliente_nome: c.nome, saldo_devedor: emp.saldo_emprestimo, telefone_celular: c.telefone_celular, codigo_cliente: c.codigo_cliente } });
+              }}><Text style={S.btRenegI}>🔄</Text><Text style={S.btRenegT}>{t.renegociar}</Text></TouchableOpacity>);
+            }
+            if (c.emprestimos.length === 1) {
+              // Ativo sem atraso → Adicional desabilitado
+              return (<View style={S.tAddRow}><Text style={S.tAddIcon}>⊕</Text><Text style={S.tAddText}>{t.empAdicional}</Text></View>);
+            }
+            return null;
+          })()}
+          <View style={S.btR}><TouchableOpacity style={[S.bt, S.btRed]} onPress={() => c.telefone_celular && Linking.openURL(`tel:${c.telefone_celular.replace(/\D/g, '')}`)} disabled={!c.telefone_celular}><Text style={S.btI}>💬</Text><Text style={S.btW}>{t.contato}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btBl]} onPress={() => abrirParcelas(c.id, c.nome, emp.id, emp.status)}><Text style={S.btI}>👁</Text><Text style={S.btW}>{t.detalhes}</Text></TouchableOpacity></View>
+        </View>)}
+      </TouchableOpacity>);
+  };
+
+  if (loading) return (<View style={S.lW}><ActivityIndicator size="large" color="#3B82F6" /><Text style={S.lT}>{t.carregando}</Text></View>);
+
+  return (
+    <View style={S.c}>
+      <View style={S.hd}><View><Text style={S.hdT}>{t.titulo}</Text><Text style={S.hdS}>{isViz ? fmtData(dataLiq) : t.hoje} - {tab === 'liquidacao' ? filtered.length : todosList.length} {t.clientes}</Text></View><View style={S.hdR}><View style={S.hdDot} /><Text style={S.hdI}>🔔</Text><Text style={S.hdI}>⚙️</Text></View></View>
+      {isViz && (<View style={S.vizBanner}><View style={S.vizBannerContent}><Text style={S.vizBannerIcon}>⚠️</Text><View style={S.vizBannerTexts}><Text style={S.vizBannerTitle}>{t.modoVisualizacao}</Text><Text style={S.vizBannerDesc}>{t.modoVisualizacaoDesc} {fmtData(dataLiq)}</Text></View></View></View>)}
+      
+      {/* Banner de liquidação fechada quando não há liqId */}
+      {!liqId && !isViz && (
+        <View style={S.semLiqBanner}>
+          <Text style={S.semLiqIcon}>🔒</Text>
+          <View style={S.semLiqTexts}>
+            <Text style={S.semLiqTitle}>{t.semLiquidacaoAberta}</Text>
+            <Text style={S.semLiqDesc}>{t.abrirLiquidacao}</Text>
+          </View>
+        </View>
+      )}
+      
+      {/* Tabs - Liquidação desabilitada se não há liqId */}
+      <View style={S.tabs}>
+        <TouchableOpacity 
+          style={[S.tb, tab === 'liquidacao' && S.tbOn, !liqId && S.tbDisabled]} 
+          onPress={() => liqId && setTab('liquidacao')}
+          disabled={!liqId}
+        >
+          <Text style={S.tbI}>{liqId ? '📅' : '🔒'}</Text>
+          <Text style={[S.tbTx, tab === 'liquidacao' && S.tbTxOn, !liqId && S.tbTxDisabled]}>
+            {t.liquidacao} {liqId ? `(${cntTotal})` : ''}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[S.tb, tab === 'todos' && S.tbOn]} 
+          onPress={() => setTab('todos')}
+        >
+          <Text style={S.tbI}>👥</Text>
+          <Text style={[S.tbTx, tab === 'todos' && S.tbTxOn]}>{t.todosList} ({todosList.length > 0 ? todosList.length : todosCount ?? '...'})</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={S.srR}><View style={S.srB}><Text style={S.srI}>🔍</Text><TextInput style={S.srIn} placeholder={t.buscar} placeholderTextColor="#9CA3AF" value={busca} onChangeText={setBusca} /></View>{tab === 'liquidacao' && <TouchableOpacity style={S.orB} onPress={() => setShowOrd(!showOrd)}><Text style={S.orI}>↕️</Text><Text style={S.orTx}>{ord === 'rota' ? t.ordemRota : t.ordemNome}</Text><Text style={S.orCh}>▼</Text></TouchableOpacity>}</View>
+      {showOrd && tab === 'liquidacao' && <View style={S.orDr}>{(['rota', 'nome'] as OrdenacaoLiquidacao[]).map(o => (<TouchableOpacity key={o} style={[S.orOp, ord === o && S.orOpOn]} onPress={() => { setOrd(o); setShowOrd(false); }}><Text style={[S.orOpTx, ord === o && S.orOpTxOn]}>{o === 'rota' ? t.ordemRota : t.ordemNome}</Text></TouchableOpacity>))}</View>}
+      {tab === 'liquidacao' && (<View style={S.chs}><TouchableOpacity style={[S.ch, filtro === 'todos' && S.chOn]} onPress={() => setFiltro('todos')}><Text style={[S.chTx, filtro === 'todos' && S.chTxOn]}>{t.filtroTodos} {cntTotal}</Text></TouchableOpacity><TouchableOpacity style={[S.ch, filtro === 'atrasados' && S.chOn]} onPress={() => setFiltro('atrasados')}><Text style={[S.chTx, filtro === 'atrasados' && S.chTxOn]}>{t.filtroAtrasados} {cntAtraso}</Text></TouchableOpacity><TouchableOpacity style={[S.ch, filtro === 'pagas' && S.chPOn, filtro !== 'pagas' && S.chPOff]} onPress={() => setFiltro(filtro === 'pagas' ? 'todos' : 'pagas')}><Text style={[S.chTx, filtro === 'pagas' ? S.chPTxOn : S.chPTxOff]}>{t.filtroPagas} {cntPagas}</Text></TouchableOpacity><Text style={S.chCh}>▼</Text></View>)}
+      {tab === 'todos' && (<View style={S.tF}>
+        <View style={{ position: 'relative' as const }}>
+          <TouchableOpacity style={[S.tFB, filtroTipo !== 'todos' && { borderColor: '#3B82F6', backgroundColor: '#EFF6FF' }]} onPress={() => { setShowFiltroTipo(!showFiltroTipo); setShowFiltroStatus(false); }}>
+            <Text style={[S.tFBT, filtroTipo !== 'todos' && { color: '#3B82F6' }]}>{filtroTipo === 'todos' ? t.tipoFiltro : filtroTipo === 'NOVO' ? t.tipoNovo : filtroTipo === 'RENOVACAO' ? t.tipoRenovacao : t.tipoRenegociacao}</Text><Text style={S.tFC}>▼</Text>
+          </TouchableOpacity>
+          {showFiltroTipo && (<View style={S.tDD}>{[
+            { k: 'todos', l: t.tipoTodos }, { k: 'NOVO', l: t.tipoNovo }, { k: 'RENOVACAO', l: t.tipoRenovacao }, { k: 'RENEGOCIACAO', l: t.tipoRenegociacao }
+          ].map(o => (<TouchableOpacity key={o.k} style={[S.tDDI, filtroTipo === o.k && S.tDDISel]} onPress={() => { setFiltroTipo(o.k); setShowFiltroTipo(false); }}><Text style={[S.tDDIT, filtroTipo === o.k && S.tDDITSel]}>{o.l}</Text></TouchableOpacity>))}</View>)}
+        </View>
+        <View style={{ position: 'relative' as const }}>
+          <TouchableOpacity style={[S.tFB, filtroStatus !== 'todos' && { borderColor: '#3B82F6', backgroundColor: '#EFF6FF' }]} onPress={() => { setShowFiltroStatus(!showFiltroStatus); setShowFiltroTipo(false); }}>
+            <Text style={[S.tFBT, filtroStatus !== 'todos' && { color: '#3B82F6' }]}>{filtroStatus === 'todos' ? t.statusFiltro : filtroStatus === 'ATIVO' ? t.stAtivo : filtroStatus === 'VENCIDO' ? t.stVencido : filtroStatus === 'QUITADO' ? t.stQuitado : t.stRenegociado}</Text><Text style={S.tFC}>▼</Text>
+          </TouchableOpacity>
+          {showFiltroStatus && (<View style={S.tDD}>{[
+            { k: 'todos', l: t.stTodos }, { k: 'ATIVO', l: t.stAtivo }, { k: 'VENCIDO', l: t.stVencido }, { k: 'QUITADO', l: t.stQuitado }, { k: 'RENEGOCIADO', l: t.stRenegociado }
+          ].map(o => (<TouchableOpacity key={o.k} style={[S.tDDI, filtroStatus === o.k && S.tDDISel]} onPress={() => { setFiltroStatus(o.k); setShowFiltroStatus(false); }}><Text style={[S.tDDIT, filtroStatus === o.k && S.tDDITSel]}>{o.l}</Text></TouchableOpacity>))}</View>)}
+        </View>
+        <Text style={S.tCnt}>{todosFilt.length} {t.clientes}</Text>
+      </View>)}
+      {tab === 'todos' && liqId && (
+        <View style={{ paddingHorizontal: 16, paddingBottom: 10 }}>
+          <TouchableOpacity 
+            style={{ 
+              flexDirection: 'row', alignItems: 'center', 
+              paddingVertical: 8, paddingHorizontal: 12,
+              backgroundColor: ocultarLiquidacao ? '#EFF6FF' : '#F9FAFB',
+              borderRadius: 8, borderWidth: 1,
+              borderColor: ocultarLiquidacao ? '#3B82F6' : '#E5E7EB',
+            }} 
+            onPress={() => setOcultarLiquidacao(!ocultarLiquidacao)}
+            activeOpacity={0.7}
+          >
+            <View style={{ 
+              width: 18, height: 18, borderRadius: 4, borderWidth: 2, 
+              borderColor: ocultarLiquidacao ? '#3B82F6' : '#9CA3AF', 
+              backgroundColor: ocultarLiquidacao ? '#3B82F6' : 'transparent', 
+              alignItems: 'center', justifyContent: 'center', marginRight: 8 
+            }}>
+              {ocultarLiquidacao && <Text style={{ color: '#FFF', fontSize: 11, fontWeight: '700', marginTop: -1 }}>✓</Text>}
             </View>
-
-            <View style={styles.diasSemanaRow}>
-              {t.diasSemana.map((dia, index) => (
-                <View key={index} style={styles.diaSemanaCell}>
-                  <Text style={styles.diaSemanaText}>{dia}</Text>
+            <Text style={{ fontSize: 12, color: ocultarLiquidacao ? '#2563EB' : '#6B7280', fontWeight: ocultarLiquidacao ? '600' : '400', flex: 1 }}>
+              {t.ocultarLiquidacao || 'Ocultar clientes da liquidação'}
+            </Text>
+            {ocultarLiquidacao && clientesLiqIds.size > 0 && (
+              <View style={{ backgroundColor: '#3B82F6', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2, marginLeft: 6 }}>
+                <Text style={{ color: '#FFF', fontSize: 10, fontWeight: '700' }}>-{clientesLiqIds.size}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
+      {tab === 'liquidacao' ? (
+        filtered.length === 0 ? (
+          <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View>
+        ) : (
+          <View style={{ flex: 1 }}>
+            <FlatList
+              ref={flatListLiqRef}
+              data={filtered}
+              keyExtractor={(item) => item.cliente_id}
+              renderItem={({ item, index }) => (
+                <View onLayout={(e) => onCardLayout(cardHeightsLiq, index, e.nativeEvent.layout.height)}>
+                  {renderCard(item)}
                 </View>
-              ))}
-            </View>
+              )}
+              style={S.ls}
+              contentContainerStyle={S.lsI}
+              refreshControl={!isViz ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined}
+              showsVerticalScrollIndicator={false}
+              onScrollBeginDrag={() => { setShowFiltroTipo(false); setShowFiltroStatus(false); }}
+              decelerationRate={0.92}
+              onMomentumScrollEnd={(e) => snapToNearestItem(flatListLiqRef, e, cardHeightsLiq)}
+              ListFooterComponent={<View style={{ height: 90 }} />}
+              viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
+            />
+            {ord === 'nome' && filtered.length > 10 && (
+              <AlphabetSidebar data={filtered} flatRef={flatListLiqRef} heights={cardHeightsLiq} activeLetter={activeLetterLiq} setActive={setActiveLetterLiq} />
+            )}
+            {activeLetterLiq && (
+              <View style={S.alphaIndicator}><Text style={S.alphaIndicatorText}>{activeLetterLiq}</Text></View>
+            )}
+          </View>
+        )
+      ) : (
+        loadTodos ? (
+          <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
+        ) : todosFilt.length === 0 ? (
+          <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View>
+        ) : (
+          <View style={{ flex: 1 }}>
+            <FlatList
+              ref={flatListTodosRef}
+              data={todosFilt}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item, index }) => (
+                <View onLayout={(e) => onCardLayout(cardHeightsTodos, index, e.nativeEvent.layout.height)}>
+                  {renderTodos(item)}
+                </View>
+              )}
+              style={S.ls}
+              contentContainerStyle={S.lsI}
+              refreshControl={!isViz ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined}
+              showsVerticalScrollIndicator={false}
+              onScrollBeginDrag={() => { setShowFiltroTipo(false); setShowFiltroStatus(false); }}
+              decelerationRate={0.92}
+              onMomentumScrollEnd={(e) => snapToNearestItem(flatListTodosRef, e, cardHeightsTodos)}
+              ListFooterComponent={<View style={{ height: 90 }} />}
+              viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
+            />
+            {todosFilt.length > 10 && (
+              <AlphabetSidebar data={todosFilt} flatRef={flatListTodosRef} heights={cardHeightsTodos} activeLetter={activeLetterTodos} setActive={setActiveLetterTodos} />
+            )}
+            {activeLetterTodos && (
+              <View style={S.alphaIndicator}><Text style={S.alphaIndicatorText}>{activeLetterTodos}</Text></View>
+            )}
+          </View>
+        )
+      )}
 
-            <View style={styles.diasGrid}>
-              {diasDoMes.map((dia, index) => (
-                <TouchableOpacity
-                  key={index}
-                  style={[styles.diaCell, dia.ehHoje && styles.diaCellHoje]}
-                  onPress={() => handleClickDia(dia)}
-                  disabled={!dia.mesAtual || dia.ehFuturo}
-                >
-                  <Text style={[
-                    styles.diaNumero,
-                    !dia.mesAtual && styles.diaNumeroOutroMes,
-                    dia.ehHoje && styles.diaNumeroHoje,
-                    dia.ehFuturo && dia.mesAtual && { color: '#D1D5DB' },
-                  ]}>
-                    {dia.diaNumero}
-                  </Text>
+      {/* MODAL PARCELAS */}
+      <Modal visible={modalParcelasVisible} animationType="slide" transparent={true} onRequestClose={() => setModalParcelasVisible(false)}>
+        <View style={S.modalOverlay}><View style={S.modalContainer}>
+          <View style={S.modalHeader}><Text style={S.modalTitle}>{clienteModal?.nome || ''}</Text><TouchableOpacity onPress={() => setModalParcelasVisible(false)} style={S.modalClose}><Text style={S.modalCloseX}>✕</Text></TouchableOpacity></View>
+          {creditoDisponivel > 0 && (<View style={S.creditoBanner}><Text style={S.creditoIcon}>💳</Text><Text style={S.creditoText}>{t.creditoDisponivel} {fmt(creditoDisponivel)}</Text></View>)}
+          <ScrollView style={S.modalScroll} showsVerticalScrollIndicator={false}>
+            {loadingParcelas ? (<ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />) : parcelasModal.length === 0 ? (<Text style={S.modalEmpty}>{ t.nenhumaParcelaEncontrada }</Text>) : (parcelasModal.map(p => renderParcelaItem(p)))}
+            <View style={{ height: 10 }} />
+          </ScrollView>
+          {/* Botão Quitar Tudo */}
+          {(() => {
+            const saldoTotal = parcelasModal.reduce((s, p) => s + (p.valor_saldo || 0), 0);
+            const temPendente = parcelasModal.some(p => ['PENDENTE', 'PARCIAL', 'VENCIDO'].includes(p.status));
+            const empQuitado = ['QUITADO', 'RENEGOCIADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '');
+            const dinheiroNecessario = Math.max(saldoTotal - creditoDisponivel, 0);
+            if (!temPendente || saldoTotal <= 0 || !liqId || isViz || empQuitado) return null;
+            return (
+              <TouchableOpacity 
+                style={{ marginHorizontal: 16, marginBottom: 8, backgroundColor: '#F59E0B', borderRadius: 12, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
+                disabled={processando}
+                onPress={async () => {
+                  const msg = creditoDisponivel > 0
+                    ? `Quitar empréstimo?\n\nSaldo: ${fmt(saldoTotal)}\nCrédito: ${fmt(creditoDisponivel)}\nDinheiro: ${fmt(dinheiroNecessario)}`
+                    : `Quitar empréstimo?\n\nSaldo: ${fmt(saldoTotal)}`;
                   
-                  {dia.mesAtual && !dia.ehFuturo && (
-                    <View style={[styles.diaIndicador, getCorDia(dia)]}>
-                      <Text style={[
-                        styles.diaIcone,
-                        dia.liquidacao?.status?.toUpperCase() === 'ABERTO' && styles.iconeAberto,
-                        (dia.liquidacao?.status?.toUpperCase() === 'REABERTO' || dia.liquidacao?.status?.toUpperCase() === 'REABERTA') && styles.iconeReaberto,
-                        (dia.liquidacao?.status?.toUpperCase() === 'FECHADO' || dia.liquidacao?.status?.toUpperCase() === 'APROVADO') && styles.iconeFechado,
-                      ]}>
-                        {getIconeDia(dia)}
+                  const confirmar = async () => {
+                    setProcessando(true);
+                    try {
+                      const { data, error } = await supabase.rpc('fn_quitar_emprestimo', {
+                        p_emprestimo_id: clienteModal?.emprestimo_id,
+                        p_valor_pagamento: dinheiroNecessario,
+                        p_valor_credito: Math.min(creditoDisponivel, saldoTotal),
+                        p_forma_pagamento: 'DINHEIRO',
+                        p_latitude: coords?.lat || null,
+                        p_longitude: coords?.lng || null,
+                        p_precisao_gps: coords?.acc || null,
+                        p_liquidacao_id: liqId || null,
+                        p_user_id: vendedor?.user_id || null
+                      });
+                      if (error) throw error;
+                      const res = Array.isArray(data) ? data[0] : data;
+                      if (res?.sucesso) {
+                        showAlert(t.sucessoGenerico || 'Sucesso', res.mensagem || 'Empréstimo quitado!');
+                        setModalParcelasVisible(false);
+                        loadLiq();
+                      } else {
+                        showAlert(t.erroGenerico || 'Erro', res?.mensagem || 'Erro ao quitar');
+                      }
+                    } catch (e: any) {
+                      console.error('Erro quitar:', e);
+                      showAlert(t.erroGenerico || 'Erro', e.message || 'Erro ao quitar empréstimo');
+                    } finally {
+                      setProcessando(false);
+                    }
+                  };
+                  
+                  if (Platform.OS === 'web') {
+                    if (window.confirm(msg)) confirmar();
+                  } else {
+                    Alert.alert(t.atencao || 'Atenção', msg, [
+                      { text: t.cancelar || 'Cancelar', style: 'cancel' },
+                      { text: t.confirmar || 'Confirmar', onPress: confirmar }
+                    ]);
+                  }
+                }}
+              >
+                {processando ? <ActivityIndicator color="#fff" /> : (
+                  <>
+                    <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700', marginRight: 6 }}>⚡</Text>
+                    <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>
+                      {t.quitarTudo || 'QUITAR TUDO'} {fmt(dinheiroNecessario)}
+                      {creditoDisponivel > 0 ? ` (+${fmt(Math.min(creditoDisponivel, saldoTotal))} crédito)` : ''}
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            );
+          })()}
+          <View style={S.mBtnFecharWrap}>
+            <TouchableOpacity style={S.mBtnFechar} onPress={() => setModalParcelasVisible(false)}>
+              <Text style={S.mBtnFecharTx}>{t.fechar}</Text>
+            </TouchableOpacity>
+          </View>
+        </View></View>
+      </Modal>
+
+      {/* MODAL PAGAMENTO - COM CRÉDITO E VALIDAÇÕES */}
+      <Modal visible={modalPagamentoVisible} animationType="fade" transparent={true} onRequestClose={() => setModalPagamentoVisible(false)}>
+        <View style={S.modalOverlay}><View style={S.modalPagamento}>
+          <View style={S.pgHeader}><Text style={S.pgHeaderIcon}>💰</Text><Text style={S.pgHeaderTitle}>{t.registrarPagamento}</Text><TouchableOpacity onPress={() => setModalPagamentoVisible(false)} style={S.modalClose}><Text style={S.modalCloseX}>✕</Text></TouchableOpacity></View>
+          
+          {loadingDadosPagamento ? (
+            <View style={S.pgLoading}><ActivityIndicator size="large" color="#3B82F6" /><Text style={S.pgLoadingText}>{t.carregandoDados || 'Carregando...'}</Text></View>
+          ) : parcelaPagamento && (
+            <>
+              <View style={S.pgInfoRow}>
+                <Text style={S.pgInfoParcela}>{t.parcela} {dadosPagamento?.numero_parcela || parcelaPagamento.numero_parcela}/{dadosPagamento?.total_parcelas || parcelasModal.length || '?'}</Text>
+                <View style={[
+                  S.pgInfoStatus, 
+                  (dadosPagamento?.status_parcela || parcelaPagamento.status) === 'PARCIAL' && { backgroundColor: '#FEF3C7' }
+                ]}>
+                  <Text style={[
+                    S.pgInfoStatusTx,
+                    (dadosPagamento?.status_parcela || parcelaPagamento.status) === 'PARCIAL' && { color: '#D97706' }
+                  ]}>
+                    {(dadosPagamento?.status_parcela || parcelaPagamento.status) === 'PARCIAL' ? 'PARCIAL' : t.pendente}
+                  </Text>
+                </View>
+              </View>
+              <Text style={S.pgInfoCliente}>{dadosPagamento?.cliente_nome || clienteModal?.nome || ''}</Text>
+              <Text style={S.pgInfoVenc}>{t.vencimento} {fmtData(dadosPagamento?.data_vencimento || parcelaPagamento.data_vencimento)}</Text>
+              
+              {/* CENÁRIO A: Parcela NÃO é a próxima - BLOQUEIA (qtd_parcelas_anteriores_pendentes > 0) */}
+              {dadosPagamento && dadosPagamento.qtd_parcelas_anteriores_pendentes > 0 && (
+                <>
+                  {/* Alerta amarelo - saldo anterior pendente */}
+                  <View style={S.pgAlertYellow}>
+                    <Text style={S.pgAlertYellowIcon}>⚠</Text>
+                    <View style={S.pgAlertYellowTexts}>
+                      <Text style={S.pgAlertYellowTitle}>{t.saldoAnterior || 'Saldo anterior de'} {dadosPagamento.qtd_parcelas_anteriores_pendentes} {t.parcela}(s)</Text>
+                      <Text style={S.pgAlertYellowDesc}>{t.valorPendente || 'Valor pendente:'} {fmt(dadosPagamento.saldo_parcelas_anteriores)}</Text>
+                    </View>
+                  </View>
+                  
+                  {/* Alerta vermelho - bloqueio */}
+                  <View style={S.pgAlertRed}>
+                    <Text style={S.pgAlertRedIcon}>⛔</Text>
+                    <View style={S.pgAlertRedTexts}>
+                      <Text style={S.pgAlertRedTitle}>{t.pagamentoBloqueado || 'Pagamento bloqueado'}</Text>
+                      <Text style={S.pgAlertRedDesc}>
+                        {`${t.existemParcelas} ${dadosPagamento.qtd_parcelas_anteriores_pendentes} ${t.parcelasAnteriores} ${fmt(dadosPagamento.saldo_parcelas_anteriores)}. ${t.quitarPrimeiro}`}
                       </Text>
                     </View>
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Legenda */}
-            <View style={styles.legenda}>
-              <Text style={styles.legendaTitulo}>{t.legenda}</Text>
-              <View style={styles.legendaItens}>
-                <View style={styles.legendaItem}>
-                  <View style={[styles.legendaCor, styles.legendaCorAberto]} />
-                  <Text style={styles.legendaTexto}>{t.legendaAberto}</Text>
-                </View>
-                <View style={styles.legendaItem}>
-                  <View style={[styles.legendaCor, styles.legendaCorFechado]} />
-                  <Text style={styles.legendaTexto}>{t.legendaFechado}</Text>
-                </View>
-                <View style={styles.legendaItem}>
-                  <View style={[styles.legendaCor, styles.legendaCorAprovado]} />
-                  <Text style={styles.legendaTexto}>{t.legendaAprovado}</Text>
-                </View>
-                <View style={styles.legendaItem}>
-                  <View style={[styles.legendaCor, styles.legendaCorReaberto]} />
-                  <Text style={styles.legendaTexto}>{language === 'pt-BR' ? 'Reaberto' : 'Reabierto'}</Text>
-                </View>
-                <View style={styles.legendaItem}>
-                  <View style={[styles.legendaCor, styles.legendaCorSemRegistro]} />
-                  <Text style={styles.legendaTexto}>{t.legendaSemRegistro}</Text>
-                </View>
-              </View>
-            </View>
-          </View>
-
-          <View style={{ height: 100 }} />
-        </ScrollView>
-
-        {/* Modal Iniciar */}
-        <Modal visible={modalIniciarVisible} transparent animationType="fade">
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>{t.iniciarDia}</Text>
-              
-              {/* Info: caixa inicial automático */}
-              <View style={styles.caixaInicialInfo}>
-                <Text style={styles.caixaInicialInfoIcon}>ℹ️</Text>
-                <Text style={styles.caixaInicialInfoText}>{t.infoSaldoConta}</Text>
-              </View>
-              
-              {/* Valor do caixa inicial (somente leitura) */}
-              <View style={styles.caixaInicialReadOnly}>
-                <Text style={styles.caixaInicialLabel}>{t.caixaInicialAutomatico}</Text>
-                <Text style={styles.caixaInicialValor}>{formatarMoeda(contaRota?.saldo_atual || 0)}</Text>
-              </View>
-              
-              <View style={styles.modalButtons}>
-                <TouchableOpacity style={styles.modalButtonCancel} onPress={() => setModalIniciarVisible(false)}>
-                  <Text style={styles.modalButtonCancelText}>{t.cancelar}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.modalButtonConfirm} onPress={handleIniciarDia} disabled={salvando}>
-                  {salvando ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalButtonConfirmText}>{t.confirmar}</Text>}
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-
-        {/* Extrato pós-fechamento (também no calendário) */}
-        {liqFechadaId && (
-          <ModalExtrato
-            visible={extratoFechamentoVisible}
-            onClose={handleFecharExtrato}
-            liquidacaoId={liqFechadaId}
-            caixaInicial={liqFechadaCaixaInicial}
-            caixaFinal={liqFechadaCaixaFinal}
-          />
-        )}
-      </View>
-    );
-  }
-
-  // ==================== RENDER PRINCIPAL ====================
-  return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>{t.titulo}</Text>
-        <View style={styles.headerActions}>
-          <View style={[styles.statusDot, { backgroundColor: isConnected ? '#10B981' : '#EF4444' }]} />
-          <TouchableOpacity onPress={toggleLanguage} style={styles.langButton}>
-            <Text style={styles.langText}>🌐 {language === 'pt-BR' ? 'PT' : 'ES'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.avatarButton} onPress={() => navigation.navigate('Perfil')}>
-            {vendedor?.foto_url ? (
-              <Image source={{ uri: vendedor.foto_url }} style={styles.avatarSmall} />
-            ) : (
-              <View style={styles.avatarSmallPlaceholder}>
-                <Text style={styles.avatarSmallText}>👤</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton} onPress={() => navigation.navigate('Configuracoes')}>
-            <Text style={styles.iconText}>⚙️</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Banner Visualização */}
-      {modoVisualizacao && (
-        <View style={styles.bannerVisualizacao}>
-          <View style={styles.bannerConteudo}>
-            <Text style={styles.bannerIcone}>⚠️</Text>
-            <View style={styles.bannerTextos}>
-              <Text style={styles.bannerTitulo}>{language === 'pt-BR' ? 'Modo Visualização' : 'Modo Visualización'}</Text>
-              <Text style={styles.bannerSubtexto}>
-                {t.visualizando} {dataVisualizacao ? formatarData(dataVisualizacao) : ''}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.bannerBotoes}>
-            <TouchableOpacity style={styles.bannerBtnSair} onPress={exitFutureView}>
-              <Text style={styles.bannerBtnSairText}>{language === 'pt-BR' ? 'Sair' : 'Salir'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.bannerBtnHoje} onPress={handleVoltarHoje}>
-              <Text style={styles.bannerBtnHojeText}>{t.voltarHoje}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      <ScrollView
-        style={styles.content}
-        refreshControl={!modoVisualizacao ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined}
-        showsVerticalScrollIndicator={false}
-      >
-        {liquidacao ? (
-          <>
-            {/* Card Vendedor + Status */}
-            <View style={[styles.card, styles.cardVendedor, { borderTopColor: isReaberto ? '#F59E0B' : isAberto ? '#10B981' : '#EF4444' }]}>
-              <View style={styles.vendedorRow}>
-                <View style={styles.avatar}><Text style={styles.avatarText}>👤</Text></View>
-                <Text style={styles.vendedorNome}>{vendedor?.nome}</Text>
-              </View>
-              
-              <View style={styles.statusRow}>
-                <View style={styles.dataContainer}>
-                  <Text style={styles.statusIcon}>{isAberto ? '🔓' : isReaberto ? '🔄' : '🔒'}</Text>
-                  <Text style={styles.dataText}>{formatarData(liquidacao.data_abertura)}</Text>
-                </View>
-                <View style={[styles.statusBadge, { backgroundColor: isReaberto ? '#FEF3C7' : isAberto ? '#D1FAE5' : '#FEE2E2' }]}>
-                  <Text style={[styles.statusText, { color: isReaberto ? '#D97706' : isAberto ? '#047857' : '#DC2626' }]}>
-                    {isReaberto ? 'REABERTO' : isAberto ? t.aberto : t.fechado}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Aviso REABERTO */}
-              {isReaberto && (
-                <View style={styles.avisoReaberto}>
-                  <Text style={styles.avisoReabertoText}>⚠️ Dia reaberto pelo admin. Apenas visualização - novos movimentos vão para a liquidação aberta.</Text>
-                </View>
-              )}
-
-              {/* BOTÃO VER OUTRAS DATAS - AGORA COM onPress! */}
-              <TouchableOpacity style={styles.verDatasButton} onPress={handleAbrirCalendario}>
-                <Text style={styles.verDatasText}>{t.verOutrasDatas}</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Card Meta/Atual/Progresso */}
-            <View style={styles.card}>
-              <View style={styles.metaRow}>
-                <View style={styles.metaItem}>
-                  <Text style={styles.metaLabel}>{t.meta}</Text>
-                  <Text style={styles.metaValue}>{formatarMoeda(liquidacao.valor_esperado_dia)}</Text>
-                </View>
-                <View style={styles.metaItem}>
-                  <Text style={styles.metaLabel}>{t.atual}</Text>
-                  <Text style={styles.metaValue}>{formatarMoeda(liquidacao.valor_recebido_dia)}</Text>
-                </View>
-                <View style={styles.metaItem}>
-                  <Text style={styles.metaLabel}>{t.progresso}</Text>
-                  <Text style={[styles.metaValue, styles.metaProgresso]}>{liquidacao.percentual_recebimento || 0}%</Text>
-                </View>
-              </View>
-              <View style={styles.progressBar}>
-                <View style={[styles.progressFill, { width: `${Math.min(liquidacao.percentual_recebimento || 0, 100)}%` }]} />
-              </View>
-            </View>
-
-            {/* Resumo de Clientes */}
-            <View style={styles.card}>
-              <Text style={styles.sectionTitle}>{t.resumoClientes}</Text>
-              <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesIniciais}</Text><Text style={styles.clienteValue}>{liquidacao.clientes_iniciais || 0}</Text></View>
-              <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesNovos}</Text><Text style={styles.clienteValue}>{liquidacao.clientes_novos || 0}</Text></View>
-              <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesRenovados}</Text><Text style={styles.clienteValue}>{liquidacao.clientes_renovados || 0}</Text></View>
-              <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesRenegociados}</Text><Text style={styles.clienteValue}>{liquidacao.clientes_renegociados || 0}</Text></View>
-              <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesCancelados}</Text><Text style={styles.clienteValue}>{liquidacao.clientes_cancelados || 0}</Text></View>
-              <View style={[styles.clienteRow, styles.clienteRowTotal]}><Text style={styles.clienteLabelTotal}>{t.totalClientes}</Text><Text style={styles.clienteValueTotal}>{calcularTotalClientes()}</Text></View>
-            </View>
-
-            {/* Controles Financeiros */}
-            <Text style={styles.sectionTitleOutside}>{t.controlesFinanceiros}</Text>
-
-            {/* Caixa */}
-            <View style={[styles.card, styles.cardCaixa]}>
-              <View style={styles.financeiroContent}>
-                <View>
-                  <Text style={styles.financeiroLabel}>{t.caixa}</Text>
-                  <Text style={styles.financeiroValor}>{formatarMoeda(liquidacao.caixa_final || liquidacao.caixa_inicial)}</Text>
-                  <Text style={styles.financeiroDetalhe}>{t.inicial} {formatarMoeda(liquidacao.caixa_inicial)}</Text>
-                </View>
-                <View style={styles.indicadorVerde} />
-              </View>
-            </View>
-
-            {/* Pagamentos */}
-            <View style={[styles.card, styles.cardPagamentos]}>
-              <View style={styles.financeiroContent}>
-                <View>
-                  <Text style={styles.financeiroLabel}>{t.pagamentos}</Text>
-                  <Text style={styles.financeiroValor}>{liquidacao.pagamentos_pagos || 0} {t.pagos}</Text>
-                  <Text style={styles.financeiroDetalhe}>{t.naoPagos} {liquidacao.pagamentos_nao_pagos || 0} | {t.efetividade} {calcularEfetividade()}%</Text>
-                </View>
-                <View style={styles.indicadorVermelho} />
-              </View>
-            </View>
-
-            {/* Outras Operações */}
-            <Text style={styles.sectionTitleOutside}>{t.outrasOperacoes}</Text>
-            <View style={styles.operacoesRow}>
-              <View style={[styles.operacaoCard, styles.operacaoVendas]}>
-                <Text style={styles.opLabelVerde}>{t.vendas}</Text>
-                <Text style={styles.opValorVerde}>{formatarMoedaCompacta(liquidacao.total_emprestado_dia)}</Text>
-                <Text style={styles.opDetalheVerde}>{liquidacao.qtd_emprestimos_dia || 0} emp.</Text>
-              </View>
-              <View style={[styles.operacaoCard, styles.operacaoReceitas]}>
-                <Text style={styles.opLabelAzul}>{t.receitas}</Text>
-                <Text style={styles.opValorAzul}>{formatarMoedaCompacta(liquidacao.valor_recebido_dia)}</Text>
-                <Text style={styles.opDetalheAzul}>{liquidacao.pagamentos_pagos || 0} pag.</Text>
-              </View>
-              <View style={[styles.operacaoCard, styles.operacaoDespesas]}>
-                <Text style={styles.opLabelVermelho}>{t.despesas}</Text>
-                <Text style={styles.opValorVermelho}>{formatarMoedaCompacta(liquidacao.total_despesas_dia)}</Text>
-                <Text style={styles.opDetalheVermelho}>{liquidacao.qtd_despesas_dia || 0} desp.</Text>
-              </View>
-            </View>
-
-            {/* Micro Seguro */}
-            <TouchableOpacity style={styles.microSeguroCard}>
-              <View style={styles.microSeguroHeader}>
-                <Text style={styles.microSeguroIcon}>🛡️</Text>
-                <Text style={styles.microSeguroTitle}>{t.microSeguro}</Text>
-                <Text style={styles.microSeguroArrow}>›</Text>
-              </View>
-              <View style={styles.microSeguroContent}>
-                <View style={styles.microSeguroItem}>
-                  <Text style={styles.microSeguroLabel}>{t.totalDoDia}</Text>
-                  <Text style={styles.microSeguroValue}>{formatarMoeda(liquidacao.total_microseguro_dia)}</Text>
-                </View>
-                <View style={styles.microSeguroItem}>
-                  <Text style={styles.microSeguroLabel}>{t.quantidade}</Text>
-                  <Text style={styles.microSeguroValue}>{liquidacao.qtd_microseguros_dia || 0}</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-
-            {/* Botão Encerrar Dia */}
-            <TouchableOpacity
-              style={[styles.encerrarButton, (!podeEditar) && styles.encerrarButtonDisabled]}
-              onPress={() => podeEditar && setModalFecharVisible(true)}
-              disabled={!podeEditar || fechando}
-            >
-              {fechando ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <>
-                  <Text style={styles.encerrarIcon}>{podeEditar ? '↩️' : '🔒'}</Text>
-                  <Text style={styles.encerrarText}>{podeEditar ? t.encerrarDia : isReaberto ? 'REABERTO (Admin)' : t.diaEncerrado}</Text>
+                    <TouchableOpacity style={S.pgAlertRedBtn} onPress={irParaProximaParcela}>
+                      <Text style={S.pgAlertRedBtnTx}>{t.irProximaParcela || 'Ir para próxima parcela pendente'}</Text>
+                    </TouchableOpacity>
+                  </View>
                 </>
               )}
-            </TouchableOpacity>
-          </>
-        ) : modoVisualizacao ? (
-          /* === MODO VISUALIZAÇÃO SEM LIQUIDAÇÃO === */
-          <>
-            {/* Card Info Visualização */}
-            <View style={styles.cardVisualizacao}>
-              <View style={styles.cardVisualizacaoHeader}>
-                <Text style={styles.cardVisualizacaoIcone}>👁️</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.cardVisualizacaoTitulo}>
-                    {language === 'pt-BR' ? 'Visualização de Rota' : 'Visualización de Ruta'}
-                  </Text>
-                  <Text style={styles.cardVisualizacaoData}>
-                    {dataVisualizacao ? dataVisualizacao.toLocaleDateString(language === 'pt-BR' ? 'pt-BR' : 'es', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }) : ''}
-                  </Text>
-                </View>
-              </View>
-              <Text style={styles.cardVisualizacaoAviso}>
-                {language === 'pt-BR' 
-                  ? 'Nenhuma liquidação para esta data. Visualizando clientes e parcelas previstas.'
-                  : 'Ninguna liquidación para esta fecha. Visualizando clientes y parcelas previstas.'}
-              </Text>
-            </View>
-
-            {/* Totalizadores Dinâmicos */}
-            {loadingVisualizacao ? (
-              <View style={styles.loadingVisualizacao}>
-                <ActivityIndicator size="small" color="#3B82F6" />
-                <Text style={styles.loadingVisualizacaoText}>
-                  {language === 'pt-BR' ? 'Carregando dados...' : 'Cargando datos...'}
-                </Text>
-              </View>
-            ) : dadosVisualizacao ? (
-              <>
-                <View style={styles.totalizadoresRow}>
-                  <View style={[styles.totalizadorCard, styles.totalizadorTotal]}>
-                    <Text style={styles.totalizadorValor}>{dadosVisualizacao.totalClientes}</Text>
-                    <Text style={styles.totalizadorLabel}>{language === 'pt-BR' ? 'Total' : 'Total'}</Text>
+              
+              {/* CENÁRIO B: Parcela É a próxima - Mostra formulário (qtd_parcelas_anteriores_pendentes === 0) */}
+              {(!dadosPagamento || dadosPagamento.qtd_parcelas_anteriores_pendentes === 0) && (
+                <>
+                  {/* Aviso amarelo se tem saldo anterior parcial (parcelas com pagamento parcial) */}
+                  {dadosPagamento?.tem_saldo_anterior && dadosPagamento.saldo_parcelas_anteriores > 0 && (
+                    <View style={S.pgAlertYellow}>
+                      <Text style={S.pgAlertYellowIcon}>⚠</Text>
+                      <View style={S.pgAlertYellowTexts}>
+                        <Text style={S.pgAlertYellowTitle}>{t.saldoAnterior} {t.saldoAnteriorParcelas}</Text>
+                        <Text style={S.pgAlertYellowDesc}>{t.valorPendente} {fmt(dadosPagamento.saldo_parcelas_anteriores)}</Text>
+                      </View>
+                      {/* Botão para incluir atrasos no pagamento */}
+                      <TouchableOpacity 
+                        style={S.pgAlertYellowBtn} 
+                        onPress={() => {
+                          const valorTotal = dadosPagamento.valor_total_sugerido || (dadosPagamento.valor_saldo_parcela + dadosPagamento.saldo_parcelas_anteriores);
+                          const valorFinal = usarCredito && dadosPagamento.credito_disponivel > 0 
+                            ? Math.max(0, valorTotal - dadosPagamento.credito_disponivel)
+                            : valorTotal;
+                          setValorPagamento(valorFinal.toFixed(2).replace('.', ','));
+                        }}
+                      >
+                        <Text style={S.pgAlertYellowBtnTx}>+ {t.incluirAtraso} ({fmt(dadosPagamento.saldo_parcelas_anteriores)})</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  
+                  {/* Input de valor */}
+                  <View style={S.pgInputBox}>
+                    <Text style={S.pgInputLabel}>{t.valorAPagar}</Text>
+                    <View style={S.pgInputRow}>
+                      <Text style={S.pgInputCurrency}>$</Text>
+                      <TextInput 
+                        style={S.pgInput} 
+                        value={valorPagamento} 
+                        onChangeText={setValorPagamento} 
+                        keyboardType="decimal-pad" 
+                        placeholder="0,00"
+                        editable={dadosPagamento?.permite_pagamento !== false}
+                      />
+                    </View>
+                    {/* Indicador de máximo permitido */}
+                    {clienteModal?.saldo_emprestimo != null && (
+                      <Text style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
+                        {t.maxPermitido || 'Máx:'} {fmt(clienteModal.saldo_emprestimo)}
+                      </Text>
+                    )}
+                    
+                    {/* Linha de crédito disponível */}
+                    {dadosPagamento?.tem_credito && dadosPagamento.credito_disponivel > 0 && (
+                      <View style={S.pgCreditoRow}>
+                        <Text style={S.pgCreditoIcon}>💳</Text>
+                        <Text style={S.pgCreditoText}>{t.credito} {fmt(dadosPagamento.credito_disponivel)}</Text>
+                        <TouchableOpacity 
+                          style={[S.pgCreditoBtn, usarCredito && S.pgCreditoBtnOn]} 
+                          onPress={() => {
+                            const novoUsarCredito = !usarCredito;
+                            setUsarCredito(novoUsarCredito);
+                            const valorSaldoParcela = dadosPagamento.valor_saldo_parcela || parcelaPagamento.valor_parcela;
+                            const saldoEmp = clienteModal?.saldo_emprestimo ?? valorSaldoParcela;
+                            if (novoUsarCredito) {
+                              const creditoAplicado = Math.min(dadosPagamento.credito_disponivel, valorSaldoParcela);
+                              const maxDinheiro = Math.max(saldoEmp - creditoAplicado, 0);
+                              const valorSugerido = Math.min(valorSaldoParcela - creditoAplicado, maxDinheiro);
+                              setValorPagamento(Math.max(0, valorSugerido).toFixed(2).replace('.', ','));
+                            } else {
+                              setValorPagamento(valorSaldoParcela.toFixed(2).replace('.', ','));
+                            }
+                          }}
+                        >
+                          <View style={[S.pgCreditoCheck, usarCredito && S.pgCreditoCheckOn]}>
+                            {usarCredito && <Text style={S.pgCreditoCheckIcon}>✓</Text>}
+                          </View>
+                          <Text style={[S.pgCreditoBtnTx, usarCredito && S.pgCreditoBtnTxOn]}>{t.usar || 'Usar'}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
                   </View>
-                  <View style={[styles.totalizadorCard, styles.totalizadorAtivo]}>
-                    <Text style={[styles.totalizadorValor, { color: '#059669' }]}>{dadosVisualizacao.clientesAtivos}</Text>
-                    <Text style={styles.totalizadorLabel}>{language === 'pt-BR' ? 'Ativos' : 'Activos'}</Text>
+                  
+                  {/* Alerta de bloqueio por status (PAGO/CANCELADO) */}
+                  {dadosPagamento && !dadosPagamento.permite_pagamento && dadosPagamento.mensagem_bloqueio && (
+                    <View style={S.pgAlertRed}>
+                      <Text style={S.pgAlertRedIcon}>⛔</Text>
+                      <View style={S.pgAlertRedTexts}>
+                        <Text style={S.pgAlertRedTitle}>{t.pagamentoBloqueado || 'Pagamento bloqueado'}</Text>
+                        <Text style={S.pgAlertRedDesc}>{dadosPagamento.mensagem_bloqueio}</Text>
+                      </View>
+                    </View>
+                  )}
+                  
+                  <View style={S.pgFormRow}>
+                    <Text style={S.pgFormLabel}>{t.forma}</Text>
+                    <TouchableOpacity style={S.pgFormSelect} onPress={() => setFormaPagamento(formaPagamento === 'DINHEIRO' ? 'TRANSFERENCIA' : 'DINHEIRO')}>
+                      <Text style={S.pgFormSelectTx}>{formaPagamento === 'DINHEIRO' ? t.dinheiro : t.transferencia}</Text>
+                      <Text style={S.pgFormSelectChev}>▼</Text>
+                    </TouchableOpacity>
+                    <View style={[S.pgGpsStatus, gpsStatus === 'ok' ? S.pgGpsOk : S.pgGpsErro]}>
+                      <Text style={S.pgGpsIcon}>{gpsStatus === 'ok' ? '◉' : '○'}</Text>
+                      <Text style={[S.pgGpsTx, gpsStatus === 'ok' ? S.pgGpsTxOk : S.pgGpsTxErro]}>{gpsStatus === 'ok' ? t.gpsOk : t.gpsErro}</Text>
+                    </View>
                   </View>
-                  <View style={[styles.totalizadorCard, styles.totalizadorInativo]}>
-                    <Text style={[styles.totalizadorValor, { color: '#DC2626' }]}>{dadosVisualizacao.clientesInativos}</Text>
-                    <Text style={styles.totalizadorLabel}>{language === 'pt-BR' ? 'Inativos' : 'Inactivos'}</Text>
-                  </View>
-                </View>
-
-                {/* Botão ver clientes */}
-                <TouchableOpacity 
-                  style={styles.verClientesBtn}
-                  onPress={() => navigation.navigate('Clientes', { 
-                    dataVisualizacao: dataVisualizacao?.toISOString(),
-                    modoVisualizacao: true 
-                  })}
-                >
-                  <Text style={styles.verClientesBtnIcon}>👥</Text>
-                  <Text style={styles.verClientesBtnText}>
-                    {language === 'pt-BR' ? 'Ver Clientes do Dia' : 'Ver Clientes del Día'}
-                  </Text>
-                  <Text style={styles.verClientesBtnArrow}>›</Text>
-                </TouchableOpacity>
-
-                {dadosVisualizacao.totalClientes === 0 && (
-                  <View style={styles.semClientesCard}>
-                    <Text style={styles.semClientesIcone}>📋</Text>
-                    <Text style={styles.semClientesTexto}>
-                      {language === 'pt-BR' 
-                        ? 'Nenhum cliente com parcela prevista para esta data.'
-                        : 'Ningún cliente con parcela prevista para esta fecha.'}
-                    </Text>
-                  </View>
-                )}
-              </>
-            ) : null}
-
-            {/* Botão Ver Outras Datas */}
-            <TouchableOpacity style={[styles.verDatasButton, { marginTop: 12 }]} onPress={handleAbrirCalendario}>
-              <Text style={styles.verDatasText}>{t.verOutrasDatas}</Text>
-            </TouchableOpacity>
-          </>
-        ) : (
-          <View style={styles.semLiquidacao}>
-            <Text style={styles.semLiquidacaoIcon}>📅</Text>
-            <Text style={styles.semLiquidacaoText}>{t.nenhumaLiquidacao}</Text>
-            <TouchableOpacity style={styles.iniciarButton} onPress={() => setModalIniciarVisible(true)}>
-              <Text style={styles.iniciarText}>{t.iniciarDia}</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-        <View style={{ height: 100 }} />
-      </ScrollView>
-
-      {/* Modal Iniciar Dia */}
-      <Modal visible={modalIniciarVisible} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>{t.iniciarDia}</Text>
-            
-            {/* Info: caixa inicial automático */}
-            <View style={styles.caixaInicialInfo}>
-              <Text style={styles.caixaInicialInfoIcon}>ℹ️</Text>
-              <Text style={styles.caixaInicialInfoText}>{t.infoSaldoConta}</Text>
-            </View>
-            
-            {/* Valor do caixa inicial (somente leitura) */}
-            <View style={styles.caixaInicialReadOnly}>
-              <Text style={styles.caixaInicialLabel}>{t.caixaInicialAutomatico}</Text>
-              <Text style={styles.caixaInicialValor}>{formatarMoeda(contaRota?.saldo_atual || 0)}</Text>
-            </View>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalButtonCancel} onPress={() => setModalIniciarVisible(false)}>
-                <Text style={styles.modalButtonCancelText}>{t.cancelar}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.modalButtonConfirm} onPress={handleIniciarDia} disabled={salvando}>
-                {salvando ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalButtonConfirmText}>{t.confirmar}</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
+                  
+                  <TouchableOpacity 
+                    style={[S.pgBtnPagar, (processando || (dadosPagamento && !dadosPagamento.permite_pagamento)) && S.pgBtnDisabled]} 
+                    onPress={registrarPagamento} 
+                    disabled={processando || (dadosPagamento && !dadosPagamento.permite_pagamento)}
+                  >
+                    {processando ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <>
+                        <Text style={S.pgBtnIcon}>✓</Text>
+                        <Text style={S.pgBtnTx}>{t.pagarBtn} {fmt(
+                          (parseFloat(valorPagamento.replace(',', '.')) || 0) + 
+                          (usarCredito && dadosPagamento?.credito_disponivel 
+                            ? Math.min(dadosPagamento.credito_disponivel, dadosPagamento.valor_saldo_parcela || parcelaPagamento?.valor_parcela || 0) 
+                            : 0)
+                        )}</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </>
+              )}
+            </>
+          )}
+        </View></View>
       </Modal>
 
-      {/* Modal Fechar Dia */}
-      <Modal visible={modalFecharVisible} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            {fechandoEtapa === 'confirmar' ? (
-              <>
-                <Text style={styles.modalTitle}>{t.encerrarDia}</Text>
-                <Text style={styles.modalDescricao}>{t.confirmarEncerramento}</Text>
-                <View style={styles.modalAtencao}><Text style={styles.modalAtencaoText}>⚠️ {t.atencao}</Text></View>
-                <View style={styles.modalButtons}>
-                  <TouchableOpacity style={styles.modalButtonCancel} onPress={() => setModalFecharVisible(false)}>
-                    <Text style={styles.modalButtonCancelText}>{t.cancelar}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.modalButtonConfirm, styles.modalButtonAmber]} onPress={handleEncerrarDia}>
-                    <Text style={styles.modalButtonConfirmText}>{t.encerrarDia}</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            ) : (
-              <View style={{ alignItems: 'center', paddingVertical: 30 }}>
-                <ActivityIndicator size="large" color="#F59E0B" style={{ marginBottom: 20 }} />
-                <Text style={{ fontSize: 18, fontWeight: '700', color: '#1F2937', marginBottom: 8 }}>
-                  {fechandoEtapa === 'processando' ? '🔒 Fechando liquidação...' : '📄 Gerando extrato...'}
-                </Text>
-                <Text style={{ fontSize: 14, color: '#6B7280', textAlign: 'center' }}>
-                  {fechandoEtapa === 'processando' 
-                    ? 'Calculando valores e validando caixa'
-                    : 'Aguarde, preparando o comprovante'}
-                </Text>
-                {fechandoEtapa === 'gerando' && (
-                  <Text style={{ fontSize: 12, color: '#9CA3AF', marginTop: 12 }}>✅ Liquidação fechada com sucesso</Text>
-                )}
-              </View>
-            )}
-          </View>
-        </View>
+      {/* MODAL ESTORNO */}
+      <Modal visible={modalEstornoVisible} animationType="fade" transparent={true} onRequestClose={() => setModalEstornoVisible(false)}>
+        <View style={S.modalOverlay}><View style={S.modalEstorno}>
+          <View style={S.estHeader}><Text style={S.estHeaderIcon}>↩</Text><Text style={S.estHeaderTitle}>{t.estornarPagamento}</Text><TouchableOpacity onPress={() => setModalEstornoVisible(false)} style={S.modalClose}><Text style={S.modalCloseX}>✕</Text></TouchableOpacity></View>
+          {parcelaEstorno && (<>
+            <View style={S.estInfo}><Text style={S.estInfoParcela}>{t.parcela} {parcelaEstorno.numero_parcela}</Text><Text style={S.estInfoCliente}>{clienteModal?.nome || ''}</Text><Text style={S.estInfoValor}>{t.pago} {fmt(parcelaEstorno.valor_pago || parcelaEstorno.valor_parcela)}</Text></View>
+            <View style={S.estInputBox}><Text style={S.estInputLabel}>{t.motivoEstorno}</Text><TextInput style={S.estInput} value={motivoEstorno} onChangeText={setMotivoEstorno} placeholder={lang === 'es' ? 'Escriba el motivo...' : 'Digite o motivo...'} multiline numberOfLines={3} /></View>
+            <View style={S.estBtns}><TouchableOpacity style={S.estBtnCancel} onPress={() => setModalEstornoVisible(false)}><Text style={S.estBtnCancelTx}>{t.cancelar}</Text></TouchableOpacity><TouchableOpacity style={[S.estBtnConfirm, (!motivoEstorno.trim() || processando) && S.estBtnDisabled]} onPress={confirmarEstorno} disabled={!motivoEstorno.trim() || processando}>{processando ? (<ActivityIndicator color="#fff" />) : (<Text style={S.estBtnConfirmTx}>{t.confirmarEstorno}</Text>)}</TouchableOpacity></View>
+          </>)}
+        </View></View>
       </Modal>
-
-      {/* Extrato pós-fechamento */}
-      {liqFechadaId && (
-        <ModalExtrato
-          visible={extratoFechamentoVisible}
-          onClose={handleFecharExtrato}
-          liquidacaoId={liqFechadaId}
-          caixaInicial={liqFechadaCaixaInicial}
-          caixaFinal={liqFechadaCaixaFinal}
-        />
-      )}
     </View>
   );
 }
 
-const { width } = Dimensions.get('window');
-const cellSize = (width - 64) / 7;
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#EEF2FF' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EEF2FF' },
-  header: { backgroundColor: '#3B82F6', paddingTop: 50, paddingBottom: 20, paddingHorizontal: 16, borderBottomLeftRadius: 24, borderBottomRightRadius: 24, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  headerTitle: { color: '#fff', fontSize: 18, fontWeight: '600' },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  statusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
-  langButton: { paddingHorizontal: 8, paddingVertical: 4 },
-  langText: { color: '#fff', fontSize: 12 },
-  iconButton: { padding: 6 },
-  iconText: { fontSize: 16 },
-  avatarButton: { marginLeft: 4 },
-  avatarSmall: { width: 32, height: 32, borderRadius: 16, borderWidth: 2, borderColor: 'rgba(255,255,255,0.6)' },
-  avatarSmallPlaceholder: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.25)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.6)' },
-  avatarSmallText: { fontSize: 16 },
-  fecharCalendarioBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#DBEAFE', marginHorizontal: 16, marginTop: 12, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1, borderColor: '#93C5FD' },
-  fecharCalendarioIcon: { fontSize: 18, color: '#2563EB', fontWeight: '700', marginRight: 10 },
-  fecharCalendarioText: { fontSize: 14, color: '#2563EB', fontWeight: '600' },
-  content: { flex: 1, paddingHorizontal: 16, paddingTop: 16 },
-  
-  // Banner Visualização
-  bannerVisualizacao: { backgroundColor: '#FEF3C7', paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#FDE68A' },
-  bannerConteudo: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  bannerIcone: { fontSize: 18, marginRight: 10 },
-  bannerTextos: { flex: 1 },
-  bannerTitulo: { fontSize: 14, fontWeight: '700', color: '#92400E' },
-  bannerSubtexto: { fontSize: 12, color: '#A16207', marginTop: 2 },
-  bannerBotoes: { flexDirection: 'row', gap: 8 },
-  bannerBtnSair: { flex: 1, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: '#F59E0B', alignItems: 'center' },
-  bannerBtnSairText: { color: '#D97706', fontSize: 13, fontWeight: '600' },
-  bannerBtnHoje: { flex: 1, backgroundColor: '#F59E0B', paddingVertical: 8, borderRadius: 6, alignItems: 'center' },
-  bannerBtnHojeText: { color: '#fff', fontSize: 13, fontWeight: '600' },
-  
-  // Card Visualização (sem liquidação)
-  cardVisualizacao: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 12, borderLeftWidth: 4, borderLeftColor: '#F59E0B' },
-  cardVisualizacaoHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  cardVisualizacaoIcone: { fontSize: 24, marginRight: 12 },
-  cardVisualizacaoTitulo: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
-  cardVisualizacaoData: { fontSize: 13, color: '#6B7280', marginTop: 2 },
-  cardVisualizacaoAviso: { fontSize: 13, color: '#6B7280', lineHeight: 20, backgroundColor: '#F9FAFB', padding: 12, borderRadius: 8 },
-  
-  // Loading Visualização
-  loadingVisualizacao: { alignItems: 'center', paddingVertical: 40 },
-  loadingVisualizacaoText: { fontSize: 13, color: '#6B7280', marginTop: 8 },
-  
-  // Totalizadores
-  totalizadoresRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  totalizadorCard: { flex: 1, backgroundColor: '#fff', borderRadius: 12, padding: 16, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 2 },
-  totalizadorTotal: { borderTopWidth: 3, borderTopColor: '#3B82F6' },
-  totalizadorAtivo: { borderTopWidth: 3, borderTopColor: '#10B981' },
-  totalizadorInativo: { borderTopWidth: 3, borderTopColor: '#EF4444' },
-  totalizadorValor: { fontSize: 28, fontWeight: '700', color: '#1F2937' },
-  totalizadorLabel: { fontSize: 11, fontWeight: '500', color: '#6B7280', marginTop: 4, textTransform: 'uppercase' },
-  
-  // Ver Clientes
-  verClientesBtn: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 12, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#E5E7EB' },
-  verClientesBtnIcon: { fontSize: 20, marginRight: 12 },
-  verClientesBtnText: { flex: 1, fontSize: 15, fontWeight: '600', color: '#3B82F6' },
-  verClientesBtnArrow: { fontSize: 24, color: '#9CA3AF' },
-  
-  // Sem Clientes
-  semClientesCard: { backgroundColor: '#F9FAFB', borderRadius: 12, padding: 24, alignItems: 'center', marginBottom: 12 },
-  semClientesIcone: { fontSize: 32, marginBottom: 8 },
-  semClientesTexto: { fontSize: 14, color: '#6B7280', textAlign: 'center' },
-  
-  // Info Card (Calendário)
-  infoCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 12, borderLeftWidth: 4, borderLeftColor: '#3B82F6' },
-  infoTitulo: { fontSize: 16, fontWeight: '700', color: '#1F2937', marginBottom: 8 },
-  infoTexto: { fontSize: 14, color: '#6B7280', lineHeight: 20 },
-  
-  // Calendário
-  calendarioCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 12 },
-  mesHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  mesNavBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  mesNavText: { fontSize: 28, color: '#6B7280', fontWeight: '300' },
-  mesTitulo: { fontSize: 16, fontWeight: '600', color: '#1F2937' },
-  diasSemanaRow: { flexDirection: 'row', marginBottom: 8 },
-  diaSemanaCell: { width: cellSize, alignItems: 'center', paddingVertical: 8 },
-  diaSemanaText: { fontSize: 12, fontWeight: '600', color: '#9CA3AF' },
-  diasGrid: { flexDirection: 'row', flexWrap: 'wrap' },
-  diaCell: { width: cellSize, height: cellSize + 12, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 4 },
-  diaCellHoje: { backgroundColor: '#EFF6FF', borderRadius: 8 },
-  diaNumero: { fontSize: 14, fontWeight: '500', color: '#1F2937' },
-  diaNumeroOutroMes: { color: '#D1D5DB' },
-  diaNumeroHoje: { color: '#3B82F6', fontWeight: '700' },
-  diaIndicador: { width: 20, height: 20, borderRadius: 10, marginTop: 2, justifyContent: 'center', alignItems: 'center' },
-  diaIcone: { fontSize: 10, color: '#9CA3AF' },
-  diaAberto: { backgroundColor: '#D1FAE5', borderWidth: 2, borderColor: '#10B981' },
-  diaFechado: { backgroundColor: '#DBEAFE', borderWidth: 2, borderColor: '#3B82F6' },
-  diaAprovado: { backgroundColor: '#E9D5FF', borderWidth: 2, borderColor: '#8B5CF6' },
-  diaReaberto: { backgroundColor: '#FEF3C7', borderWidth: 2, borderColor: '#F59E0B' },
-  diaSemRegistro: { backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#D1D5DB' },
-  iconeAberto: { color: '#10B981' },
-  iconeFechado: { color: '#3B82F6' },
-  iconeReaberto: { color: '#F59E0B' },
-  
-  // Legenda
-  legenda: { marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
-  legendaTitulo: { fontSize: 12, fontWeight: '600', color: '#6B7280', marginBottom: 12 },
-  legendaItens: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
-  legendaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  legendaCor: { width: 16, height: 16, borderRadius: 8 },
-  legendaCorAberto: { backgroundColor: '#D1FAE5', borderWidth: 2, borderColor: '#10B981' },
-  legendaCorFechado: { backgroundColor: '#DBEAFE', borderWidth: 2, borderColor: '#3B82F6' },
-  legendaCorAprovado: { backgroundColor: '#E9D5FF', borderWidth: 2, borderColor: '#8B5CF6' },
-  legendaCorReaberto: { backgroundColor: '#FEF3C7', borderWidth: 2, borderColor: '#F59E0B' },
-  legendaCorSemRegistro: { backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#D1D5DB' },
-  legendaTexto: { fontSize: 12, color: '#6B7280' },
-  
-  // Aviso Reaberto
-  avisoReaberto: { marginTop: 12, backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 8, padding: 10 },
-  avisoReabertoText: { fontSize: 12, color: '#92400E', lineHeight: 18 },
-  
-  // Cards originais
-  card: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 4, elevation: 3 },
-  cardVendedor: { borderTopWidth: 4 },
-  vendedorRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
-  avatarText: { fontSize: 20 },
-  vendedorNome: { fontSize: 16, fontWeight: '600', color: '#1F2937', flex: 1 },
-  statusRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
-  dataContainer: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  statusIcon: { fontSize: 14 },
-  dataText: { fontSize: 12, color: '#6B7280', fontWeight: '500' },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
-  statusText: { fontSize: 11, fontWeight: '700' },
-  verDatasButton: { marginTop: 12, borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 8, paddingVertical: 10, alignItems: 'center', backgroundColor: '#F0F9FF' },
-  verDatasText: { color: '#3B82F6', fontSize: 13, fontWeight: '500' },
-  metaRow: { flexDirection: 'row', marginBottom: 12 },
-  metaItem: { flex: 1, alignItems: 'center' },
-  metaLabel: { fontSize: 10, color: '#6B7280', fontWeight: '600', textTransform: 'uppercase', marginBottom: 4 },
-  metaValue: { fontSize: 14, fontWeight: '700', color: '#1F2937' },
-  metaProgresso: { color: '#3B82F6' },
-  progressBar: { height: 8, backgroundColor: '#E5E7EB', borderRadius: 4, overflow: 'hidden' },
-  progressFill: { height: '100%', backgroundColor: '#3B82F6', borderRadius: 4 },
-  sectionTitle: { fontSize: 14, fontWeight: '600', color: '#1F2937', marginBottom: 12 },
-  sectionTitleOutside: { fontSize: 14, fontWeight: '600', color: '#1F2937', marginBottom: 12, marginLeft: 4 },
-  clienteRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8 },
-  clienteRowTotal: { borderTopWidth: 1, borderTopColor: '#E5E7EB', marginTop: 8, paddingTop: 12 },
-  clienteLabel: { fontSize: 14, color: '#6B7280' },
-  clienteValue: { fontSize: 14, fontWeight: '600', color: '#1F2937' },
-  clienteLabelTotal: { fontSize: 14, fontWeight: '600', color: '#1F2937' },
-  clienteValueTotal: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
-  cardCaixa: { borderLeftWidth: 4, borderLeftColor: '#10B981' },
-  cardPagamentos: { borderLeftWidth: 4, borderLeftColor: '#EF4444' },
-  financeiroContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  financeiroLabel: { fontSize: 14, color: '#6B7280', marginBottom: 4 },
-  financeiroValor: { fontSize: 24, fontWeight: '700', color: '#1F2937' },
-  financeiroDetalhe: { fontSize: 12, color: '#9CA3AF', marginTop: 8 },
-  indicadorVerde: { width: 40, height: 40, backgroundColor: '#D1FAE5', borderRadius: 8 },
-  indicadorVermelho: { width: 40, height: 40, backgroundColor: '#FEE2E2', borderRadius: 8 },
-  operacoesRow: { flexDirection: 'row', gap: 6, marginBottom: 12 },
-  operacaoCard: { flex: 1, borderRadius: 8, padding: 8, borderLeftWidth: 2 },
-  operacaoVendas: { backgroundColor: '#ECFDF5', borderLeftColor: '#10B981' },
-  operacaoReceitas: { backgroundColor: '#EFF6FF', borderLeftColor: '#3B82F6' },
-  operacaoDespesas: { backgroundColor: '#FEF2F2', borderLeftColor: '#EF4444' },
-  opLabelVerde: { fontSize: 10, fontWeight: '500', color: '#059669' },
-  opValorVerde: { fontSize: 14, fontWeight: '700', color: '#065F46' },
-  opDetalheVerde: { fontSize: 10, color: '#047857' },
-  opLabelAzul: { fontSize: 10, fontWeight: '500', color: '#2563EB' },
-  opValorAzul: { fontSize: 14, fontWeight: '700', color: '#1E40AF' },
-  opDetalheAzul: { fontSize: 10, color: '#1D4ED8' },
-  opLabelVermelho: { fontSize: 10, fontWeight: '500', color: '#DC2626' },
-  opValorVermelho: { fontSize: 14, fontWeight: '700', color: '#991B1B' },
-  opDetalheVermelho: { fontSize: 10, color: '#B91C1C' },
-  microSeguroCard: { backgroundColor: '#FEF9C3', borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: '#FDE047' },
-  microSeguroHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  microSeguroIcon: { fontSize: 16, marginRight: 8 },
-  microSeguroTitle: { flex: 1, fontSize: 12, fontWeight: '600', color: '#A16207' },
-  microSeguroArrow: { fontSize: 20, color: '#CA8A04' },
-  microSeguroContent: { flexDirection: 'row' },
-  microSeguroItem: { flex: 1 },
-  microSeguroLabel: { fontSize: 12, color: '#6B7280', marginBottom: 2 },
-  microSeguroValue: { fontSize: 18, fontWeight: '700', color: '#1F2937' },
-  encerrarButton: { backgroundColor: '#D97706', borderRadius: 12, paddingVertical: 18, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginBottom: 12 },
-  encerrarButtonDisabled: { backgroundColor: '#9CA3AF' },
-  encerrarIcon: { fontSize: 18 },
-  encerrarText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  semLiquidacao: { alignItems: 'center', paddingVertical: 80 },
-  semLiquidacaoIcon: { fontSize: 64, marginBottom: 16 },
-  semLiquidacaoText: { fontSize: 16, color: '#6B7280', marginBottom: 24 },
-  iniciarButton: { backgroundColor: '#10B981', paddingHorizontal: 32, paddingVertical: 16, borderRadius: 12 },
-  iniciarText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 16 },
-  modalContent: { backgroundColor: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 400 },
-  modalTitle: { fontSize: 20, fontWeight: '700', color: '#1F2937', marginBottom: 16, textAlign: 'center' },
-  modalDescricao: { fontSize: 14, color: '#6B7280', textAlign: 'center', marginBottom: 16 },
-  modalAtencao: { backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 8, padding: 12, marginBottom: 20 },
-  modalAtencaoText: { fontSize: 13, color: '#92400E' },
-  modalLabel: { fontSize: 14, color: '#6B7280', marginBottom: 8 },
-  modalInputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', borderRadius: 8, marginBottom: 24 },
-  modalInputPrefix: { paddingLeft: 16, fontSize: 18, color: '#6B7280' },
-  modalInput: { flex: 1, padding: 16, fontSize: 18, color: '#1F2937' },
-  modalButtons: { flexDirection: 'row', gap: 12 },
-  modalButtonCancel: { flex: 1, paddingVertical: 14, borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', alignItems: 'center' },
-  modalButtonCancelText: { color: '#6B7280', fontWeight: '500' },
-  modalButtonConfirm: { flex: 1, paddingVertical: 14, borderRadius: 8, backgroundColor: '#10B981', alignItems: 'center' },
-  modalButtonAmber: { backgroundColor: '#D97706' },
-  modalButtonConfirmText: { color: '#fff', fontWeight: '600' },
-  // Caixa Inicial Automático (somente leitura)
-  caixaInicialInfo: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#EFF6FF', padding: 12, borderRadius: 8, marginBottom: 16, borderWidth: 1, borderColor: '#BFDBFE' },
-  caixaInicialInfoIcon: { fontSize: 14, marginRight: 8 },
-  caixaInicialInfoText: { flex: 1, fontSize: 13, color: '#1E40AF', lineHeight: 18 },
-  caixaInicialReadOnly: { backgroundColor: '#F0FDF4', borderWidth: 2, borderColor: '#86EFAC', borderRadius: 12, padding: 20, marginBottom: 24, alignItems: 'center' },
-  caixaInicialLabel: { fontSize: 13, color: '#166534', marginBottom: 8 },
-  caixaInicialValor: { fontSize: 28, fontWeight: '700', color: '#10B981' },
+const S = StyleSheet.create({
+  c: { flex: 1, backgroundColor: '#EEF2FF' },
+  lW: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EEF2FF' },
+  lT: { marginTop: 12, color: '#6B7280', fontSize: 14 },
+  hd: { backgroundColor: '#3B82F6', paddingTop: 48, paddingBottom: 14, paddingHorizontal: 16, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  hdT: { color: '#fff', fontSize: 18, fontWeight: '700' }, hdS: { color: 'rgba(255,255,255,0.75)', fontSize: 12, marginTop: 1 },
+  hdR: { flexDirection: 'row', alignItems: 'center', gap: 10 }, hdDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#10B981' }, hdI: { fontSize: 18 },
+  vizBanner: { backgroundColor: '#FEF3C7', paddingVertical: 10, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#FDE68A' },
+  vizBannerContent: { flexDirection: 'row', alignItems: 'center' },
+  vizBannerIcon: { fontSize: 16, marginRight: 10 },
+  vizBannerTexts: { flex: 1 },
+  vizBannerTitle: { fontSize: 13, fontWeight: '700', color: '#92400E' },
+  vizBannerDesc: { fontSize: 11, color: '#B45309', marginTop: 1 },
+  tabs: { flexDirection: 'row', marginHorizontal: 16, marginTop: 14, backgroundColor: '#E8EBF7', borderRadius: 12, padding: 3 },
+  tb: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 11, borderRadius: 10, gap: 5 }, tbOn: { backgroundColor: '#3B82F6' },
+  tbI: { fontSize: 13 }, tbTx: { fontSize: 13, fontWeight: '600', color: '#6B7280' }, tbTxOn: { color: '#fff' },
+  srR: { flexDirection: 'row', marginHorizontal: 16, marginTop: 10, gap: 8 },
+  srB: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 10, height: 40, borderWidth: 1, borderColor: '#E5E7EB' },
+  srI: { fontSize: 13, marginRight: 6, opacity: 0.5 }, srIn: { flex: 1, fontSize: 13, color: '#1F2937', padding: 0 },
+  orB: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 10, height: 40, gap: 4, borderWidth: 1, borderColor: '#E5E7EB' },
+  orI: { fontSize: 11 }, orTx: { fontSize: 12, color: '#6B7280' }, orCh: { fontSize: 8, color: '#9CA3AF' },
+  orDr: { position: 'absolute', top: 175, right: 16, zIndex: 100, backgroundColor: '#fff', borderRadius: 10, padding: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 8, elevation: 8 },
+  orOp: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8 }, orOpOn: { backgroundColor: '#EFF6FF' },
+  orOpTx: { fontSize: 13, color: '#6B7280' }, orOpTxOn: { color: '#3B82F6', fontWeight: '600' },
+  chs: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginTop: 10, gap: 8 },
+  ch: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#fff' }, chOn: { backgroundColor: '#1F2937', borderColor: '#1F2937' },
+  chTx: { fontSize: 12, fontWeight: '500', color: '#6B7280' }, chTxOn: { color: '#fff' },
+  chPOn: { backgroundColor: '#059669', borderColor: '#059669' }, chPOff: { backgroundColor: '#F3F4F6', borderColor: '#E5E7EB' },
+  chPTxOn: { color: '#fff' }, chPTxOff: { color: '#6B7280' }, chCh: { fontSize: 10, color: '#9CA3AF' },
+  tF: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginTop: 10, gap: 8, zIndex: 1000 },
+  tFB: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#fff', gap: 4 },
+  tFBT: { fontSize: 12, color: '#6B7280' }, tFC: { fontSize: 8, color: '#9CA3AF' },
+  tCnt: { flex: 1, textAlign: 'right', fontSize: 12, color: '#6B7280' }, tChv: { fontSize: 10, color: '#9CA3AF' },
+  tDD: { position: 'absolute', top: 36, left: 0, zIndex: 999, backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 6, elevation: 8, minWidth: 130 },
+  tDDI: { paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  tDDISel: { backgroundColor: '#EFF6FF' },
+  tDDIT: { fontSize: 13, color: '#374151' },
+  tDDITSel: { color: '#3B82F6', fontWeight: '600' },
+  ls: { flex: 1, marginTop: 10, zIndex: 1 }, lsI: { paddingHorizontal: 16 },
+  em: { alignItems: 'center', paddingTop: 60 }, emI: { fontSize: 48, marginBottom: 12 }, emT: { fontSize: 14, color: '#9CA3AF' },
+  card: { backgroundColor: '#fff', borderRadius: 12, padding: 12, marginBottom: 8, borderLeftWidth: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 2 },
+  cardRow: { flexDirection: 'row' },
+  av: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginRight: 10 }, avTx: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  cardInfo: { flex: 1 }, nameRow: { flexDirection: 'row', alignItems: 'center' },
+  nome: { flex: 1, fontSize: 14, fontWeight: '600', color: '#1F2937' },
+  bWarn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF2F2', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 10, marginLeft: 4, borderWidth: 1, borderColor: '#FECACA' },
+  bWarnI: { fontSize: 10, color: '#F59E0B', marginRight: 2 }, bWarnT: { fontSize: 10, fontWeight: '700', color: '#DC2626' },
+  bMul: { backgroundColor: '#FED7AA', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 10, marginLeft: 3 }, bMulT: { fontSize: 10, fontWeight: '700', color: '#C2410C' },
+  dots: { fontSize: 18, color: '#9CA3AF', marginLeft: 4, fontWeight: '700' }, sub: { fontSize: 11, color: '#6B7280', marginTop: 2 },
+  pRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+  pLblR: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }, pLbl: { fontSize: 11, color: '#6B7280' },
+  fBdg: { backgroundColor: '#EDE9FE', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }, fBdgT: { fontSize: 9, fontWeight: '600', color: '#7C3AED' },
+  pVal: { fontSize: 15, fontWeight: '700', color: '#1F2937' },
+  sCol: { alignItems: 'flex-end' }, sLbl: { fontSize: 11, color: '#6B7280', marginBottom: 2 }, sVal: { fontSize: 15, fontWeight: '700', color: '#1F2937' },
+  pgVal: { fontSize: 14, fontWeight: '700', color: '#059669' }, pgOrig: { fontSize: 10, color: '#9CA3AF' }, pgCred: { fontSize: 10, color: '#2563EB' },
+  exp: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+  aR: { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', borderRadius: 8, padding: 10, marginBottom: 10 }, aRT: { fontSize: 12, fontWeight: '600', color: '#DC2626' }, aRS: { fontSize: 11, color: '#B91C1C', marginTop: 2 },
+  aY: { backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 8, padding: 10, marginBottom: 10 }, aYT: { fontSize: 12, fontWeight: '600', color: '#D97706' }, aYS: { fontSize: 11, color: '#B45309', marginTop: 2 },
+  eNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 10, gap: 6 },
+  eNBtn: { width: 26, height: 26, borderRadius: 13, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' }, eNOff: { opacity: 0.3 }, eNBTx: { fontSize: 11, color: '#6B7280' },
+  eDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#D1D5DB' }, eDotOn: { backgroundColor: '#3B82F6' }, eNLbl: { fontSize: 10, color: '#6B7280' },
+  res: { backgroundColor: '#FAFAFA', borderRadius: 10, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: '#F3F4F6' },
+  resH: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }, resT: { fontSize: 12, fontWeight: '600', color: '#1F2937' },
+  stB: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }, stBT: { fontSize: 9, fontWeight: '700' },
+  g3: { flexDirection: 'row', marginBottom: 6 }, gi: { flex: 1 }, gl: { fontSize: 9, color: '#9CA3AF', marginBottom: 1 }, gv: { fontSize: 12, fontWeight: '700', color: '#1F2937' },
+  prL: { fontSize: 9, color: '#9CA3AF', marginTop: 4, marginBottom: 3 }, prB: { height: 5, backgroundColor: '#E5E7EB', borderRadius: 3, overflow: 'hidden' }, prF: { height: '100%', backgroundColor: '#3B82F6', borderRadius: 3 }, prR: { fontSize: 9, color: '#9CA3AF', marginTop: 2, textAlign: 'right' },
+  btR: { flexDirection: 'row', gap: 8, marginBottom: 6 },
+  bt: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 11, borderRadius: 10, gap: 5 },
+  btG: { backgroundColor: '#10B981' }, btBl: { backgroundColor: '#3B82F6' }, btRed: { backgroundColor: '#EF4444' },
+  btOG: { backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' }, btOB: { backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE' }, btOff: { opacity: 0.4 },
+  btI: { fontSize: 13 }, btW: { color: '#fff', fontSize: 12, fontWeight: '600' }, btTG: { color: '#059669', fontSize: 12, fontWeight: '600' }, btTB: { color: '#2563EB', fontSize: 12, fontWeight: '600' },
+  tSt: { fontSize: 11, fontWeight: '500', marginLeft: 8 },
+  tEmpCard: { backgroundColor: '#FAFAFA', borderRadius: 10, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#E5E7EB' },
+  tEmpHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  tEmpTitle: { fontSize: 13, fontWeight: '700', color: '#1F2937' }, tEmpParcela: { fontSize: 12, fontWeight: '500', color: '#6B7280' },
+  tEmpBody: { flexDirection: 'row', justifyContent: 'space-between' },
+  tEmpLbl: { fontSize: 10, color: '#9CA3AF', marginBottom: 2 }, tEmpVal: { fontSize: 14, fontWeight: '700', color: '#1F2937' },
+  tAddRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, marginBottom: 10, opacity: 0.35 },
+  tAddIcon: { fontSize: 16, color: '#9CA3AF', marginRight: 6 }, tAddText: { fontSize: 12, color: '#9CA3AF' },
+  tAddRowActive: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, marginBottom: 10, backgroundColor: '#EFF6FF', borderRadius: 8, borderWidth: 1, borderColor: '#3B82F6' },
+  tAddIconActive: { fontSize: 16, color: '#3B82F6', marginRight: 6, fontWeight: '700' as const }, tAddTextActive: { fontSize: 13, color: '#3B82F6', fontWeight: '600' as const },
+  btReneg: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, marginBottom: 10, backgroundColor: '#FFF7ED', borderRadius: 8, borderWidth: 1, borderColor: '#F97316' },
+  btRenegI: { fontSize: 16, marginRight: 6 }, btRenegT: { fontSize: 13, color: '#F97316', fontWeight: '600' as const },
+  // MODAIS
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  modalContainer: { width: '92%', maxHeight: '85%', backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  modalTitle: { fontSize: 16, fontWeight: '700', color: '#1F2937', flex: 1 },
+  modalClose: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
+  modalCloseX: { fontSize: 16, color: '#6B7280' },
+  modalScroll: { padding: 16 },
+  modalEmpty: { textAlign: 'center', color: '#9CA3AF', marginTop: 40 },
+  creditoBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#DBEAFE', padding: 12, marginHorizontal: 16, marginTop: 12, borderRadius: 10, borderWidth: 1, borderColor: '#93C5FD' },
+  creditoIcon: { fontSize: 18, marginRight: 10 },
+  creditoText: { fontSize: 13, fontWeight: '600', color: '#1D4ED8' },
+  mParcela: { backgroundColor: '#FAFAFA', borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#E5E7EB', borderLeftWidth: 4 },
+  mParcelaRow: { flexDirection: 'row', alignItems: 'center' },
+  mParcelaIcon: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
+  mParcelaInfo: { flex: 1 },
+  mParcelaNum: { fontSize: 14, fontWeight: '700', color: '#1F2937' },
+  mParcelaVenc: { fontSize: 11, color: '#6B7280', marginTop: 1 },
+  mParcelaValores: { alignItems: 'flex-end' },
+  mParcelaOriginal: { fontSize: 10, color: '#9CA3AF' },
+  mParcelaValor: { fontSize: 15, fontWeight: '700', color: '#1F2937', marginTop: 2 },
+  mParcelaPago: { fontSize: 13, fontWeight: '700', color: '#10B981' },
+  mParcelaRestante: { fontSize: 11, fontWeight: '600', color: '#D97706', marginTop: 1 },
+  mParcelaCredito: { fontSize: 10, color: '#2563EB' },
+  mParcelaStatus: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+  mParcelaStatusTx: { fontSize: 9, fontWeight: '700' },
+  mParcelaDataPg: { fontSize: 9, color: '#6B7280', marginTop: 1 },
+  mParcelaBtns: { marginLeft: 8, justifyContent: 'center' },
+  mBtnPagar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#10B981', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, gap: 6 },
+  mBtnPagarIcon: { fontSize: 14 },
+  mBtnPagarTx: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  mBtnEstornar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#EF4444', gap: 6 },
+  mBtnFecharWrap: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 20, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
+  mBtnFechar: { backgroundColor: '#3B82F6', paddingVertical: 14, borderRadius: 10, alignItems: 'center' },
+  mBtnFecharTx: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  mBtnEstornarIcon: { fontSize: 14, color: '#EF4444' },
+  mBtnEstornarTx: { color: '#EF4444', fontSize: 12, fontWeight: '600' },
+  modalPagamento: { width: '90%', backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden' },
+  pgHeader: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  pgHeaderIcon: { fontSize: 20, marginRight: 10 },
+  pgHeaderTitle: { fontSize: 16, fontWeight: '700', color: '#1F2937', flex: 1 },
+  pgInfoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 16 },
+  pgInfoParcela: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
+  pgInfoStatus: { backgroundColor: '#FEF3C7', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
+  pgInfoStatusTx: { fontSize: 10, fontWeight: '700', color: '#D97706' },
+  pgInfoCliente: { fontSize: 13, color: '#6B7280', paddingHorizontal: 16, marginTop: 4 },
+  pgInfoVenc: { fontSize: 12, color: '#9CA3AF', paddingHorizontal: 16, marginTop: 2 },
+  pgInputBox: { marginHorizontal: 16, marginTop: 16, backgroundColor: '#F9FAFB', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#E5E7EB' },
+  pgInputLabel: { fontSize: 12, color: '#6B7280', marginBottom: 8 },
+  pgInputRow: { flexDirection: 'row', alignItems: 'center' },
+  pgInputCurrency: { fontSize: 20, fontWeight: '700', color: '#6B7280', marginRight: 8 },
+  pgInput: { flex: 1, fontSize: 24, fontWeight: '700', color: '#1F2937', padding: 0 },
+  pgFormRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, marginTop: 16, gap: 12 },
+  pgFormLabel: { fontSize: 12, color: '#6B7280' },
+  pgFormSelect: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, gap: 8 },
+  pgFormSelectTx: { fontSize: 13, color: '#1F2937' },
+  pgFormSelectChev: { fontSize: 10, color: '#9CA3AF' },
+  pgGpsStatus: { flexDirection: 'row', alignItems: 'center', marginLeft: 'auto', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20, gap: 4 },
+  pgGpsOk: { backgroundColor: '#D1FAE5' },
+  pgGpsErro: { backgroundColor: '#FEE2E2' },
+  pgGpsIcon: { fontSize: 10 },
+  pgGpsTx: { fontSize: 11, fontWeight: '500' },
+  pgGpsTxOk: { color: '#059669' },
+  pgGpsTxErro: { color: '#DC2626' },
+  pgBtnPagar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#10B981', marginHorizontal: 16, marginVertical: 16, paddingVertical: 14, borderRadius: 12, gap: 8 },
+  pgBtnDisabled: { opacity: 0.5 },
+  pgBtnIcon: { fontSize: 16, color: '#fff' },
+  pgBtnTx: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  modalEstorno: { width: '90%', backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden' },
+  estHeader: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  estHeaderIcon: { fontSize: 20, color: '#EF4444', marginRight: 10 },
+  estHeaderTitle: { fontSize: 16, fontWeight: '700', color: '#1F2937', flex: 1 },
+  estInfo: { padding: 16, backgroundColor: '#FEF2F2', margin: 16, borderRadius: 12 },
+  estInfoParcela: { fontSize: 14, fontWeight: '700', color: '#1F2937' },
+  estInfoCliente: { fontSize: 13, color: '#6B7280', marginTop: 2 },
+  estInfoValor: { fontSize: 16, fontWeight: '700', color: '#DC2626', marginTop: 8 },
+  estInputBox: { marginHorizontal: 16 },
+  estInputLabel: { fontSize: 12, color: '#6B7280', marginBottom: 8 },
+  estInput: { backgroundColor: '#F9FAFB', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#E5E7EB', fontSize: 14, color: '#1F2937', minHeight: 80, textAlignVertical: 'top' },
+  estBtns: { flexDirection: 'row', gap: 12, padding: 16 },
+  estBtnCancel: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 12, backgroundColor: '#F3F4F6' },
+  estBtnCancelTx: { fontSize: 14, fontWeight: '600', color: '#6B7280' },
+  estBtnConfirm: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 12, backgroundColor: '#EF4444' },
+  estBtnDisabled: { opacity: 0.5 },
+  estBtnConfirmTx: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  // Loading do modal pagamento
+  pgLoading: { padding: 40, alignItems: 'center' },
+  pgLoadingText: { marginTop: 12, color: '#6B7280', fontSize: 14 },
+  // Linha de crédito disponível
+  pgCreditoRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
+  pgCreditoIcon: { fontSize: 16, marginRight: 8 },
+  pgCreditoText: { flex: 1, fontSize: 13, color: '#6B7280' },
+  pgCreditoBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: '#D1D5DB', backgroundColor: '#fff' },
+  pgCreditoBtnOn: { borderColor: '#10B981', backgroundColor: '#ECFDF5' },
+  pgCreditoCheck: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: '#D1D5DB', marginRight: 6, justifyContent: 'center', alignItems: 'center' },
+  pgCreditoCheckOn: { borderColor: '#10B981', backgroundColor: '#10B981' },
+  pgCreditoCheckIcon: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  pgCreditoBtnTx: { fontSize: 12, color: '#6B7280', fontWeight: '500' },
+  pgCreditoBtnTxOn: { color: '#059669' },
+  // Alerta amarelo (saldo anterior)
+  pgAlertYellow: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#FEF3C7', marginHorizontal: 16, marginTop: 12, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#FDE68A' },
+  pgAlertYellowIcon: { fontSize: 16, marginRight: 10, marginTop: 2 },
+  pgAlertYellowTexts: { flex: 1 },
+  pgAlertYellowTitle: { fontSize: 13, fontWeight: '600', color: '#92400E' },
+  pgAlertYellowDesc: { fontSize: 12, color: '#B45309', marginTop: 2 },
+  pgAlertYellowBtn: { alignSelf: 'flex-start', marginTop: 8, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: '#F59E0B' },
+  pgAlertYellowBtnTx: { fontSize: 12, fontWeight: '600', color: '#fff' },
+  // Alerta vermelho (bloqueio)
+  pgAlertRed: { backgroundColor: '#FEF2F2', marginHorizontal: 16, marginTop: 12, marginBottom: 16, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#FECACA' },
+  pgAlertRedIcon: { fontSize: 16, marginRight: 10 },
+  pgAlertRedTexts: { marginBottom: 10 },
+  pgAlertRedTitle: { fontSize: 13, fontWeight: '700', color: '#DC2626' },
+  pgAlertRedDesc: { fontSize: 12, color: '#B91C1C', marginTop: 4 },
+  pgAlertRedBtn: { alignSelf: 'flex-start', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#DC2626', backgroundColor: '#fff' },
+  pgAlertRedBtnTx: { fontSize: 12, fontWeight: '600', color: '#DC2626' },
+  // Banner sem liquidação
+  semLiqBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF2F2', paddingVertical: 10, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#FECACA' },
+  semLiqIcon: { fontSize: 18, marginRight: 10 },
+  semLiqTexts: { flex: 1 },
+  semLiqTitle: { fontSize: 13, fontWeight: '700', color: '#DC2626' },
+  semLiqDesc: { fontSize: 11, color: '#B91C1C', marginTop: 1 },
+  // Tab desabilitada
+  tbDisabled: { backgroundColor: '#E5E7EB', opacity: 0.6 },
+  tbTxDisabled: { color: '#9CA3AF' },
+  // Botão Pagar desabilitado no modal
+  mBtnPagarDisabled: { backgroundColor: '#E5E7EB', opacity: 0.5 },
+  // Alphabet sidebar
+  alphaBar: { position: 'absolute', right: 2, top: 15, bottom: 100, justifyContent: 'center', alignItems: 'center', width: 22, zIndex: 100, backgroundColor: 'rgba(255,255,255,0.85)', borderRadius: 11, paddingVertical: 4 },
+  alphaLetter: { fontSize: 10, color: '#9CA3AF', fontWeight: '600', paddingVertical: 1.5, paddingHorizontal: 4, textAlign: 'center' },
+  alphaLetterActive: { color: '#3B82F6', fontWeight: '800', fontSize: 12, backgroundColor: '#EFF6FF', borderRadius: 8, overflow: 'hidden' },
+  alphaIndicator: { position: 'absolute', left: '50%', top: '45%', marginLeft: -30, marginTop: -30, width: 60, height: 60, borderRadius: 12, backgroundColor: 'rgba(59,130,246,0.9)', justifyContent: 'center', alignItems: 'center', zIndex: 200 },
+  alphaIndicatorText: { color: '#fff', fontSize: 28, fontWeight: '800' },
 });

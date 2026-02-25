@@ -1,8 +1,9 @@
 import * as Location from 'expo-location';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Linking,
   Modal,
   Platform,
@@ -12,7 +13,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { Language, useLiquidacaoContext } from '../contexts/LiquidacaoContext';
@@ -250,12 +251,26 @@ const getIni = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(p => 
 const fmt = (v: number) => '$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtData = (d: string) => { if (!d) return ''; const [y, m, day] = d.split('-'); return `${day}/${m}/${y}`; };
 const fmtTel = (t: string) => t.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
+// Cor da borda por nível de atraso:
+// Verde: 0 parcelas de atraso (em dia)
+// Amarelo: 1-3 parcelas de atraso (leve)
+// Laranja: 4-7 parcelas de atraso (moderado)
+// Vermelho: 8+ parcelas de atraso (crítico)
+const corAtraso = (vencidas: number): string => {
+  if (vencidas <= 0) return '#10B981'; // verde
+  if (vencidas <= 3) return '#F59E0B'; // amarelo
+  if (vencidas <= 7) return '#F97316'; // laranja
+  return '#EF4444'; // vermelho
+};
+
 const borderOf = (e: EmprestimoData, paga: boolean) => {
   if (paga) return '#10B981';
-  if (e.is_parcela_atrasada) return '#EF4444';
-  return ({ PAGO: '#10B981', EM_ATRASO: '#EF4444', PARCIAL: '#F59E0B', PENDENTE: '#D1D5DB' } as any)[e.status_dia] || '#D1D5DB';
+  const vencidas = e.total_parcelas_vencidas || 0;
+  if (vencidas > 0) return corAtraso(vencidas);
+  if (e.is_parcela_atrasada) return '#F59E0B';
+  return ({ PAGO: '#10B981', EM_ATRASO: '#F59E0B', PARCIAL: '#F59E0B', PENDENTE: '#D1D5DB' } as any)[e.status_dia] || '#D1D5DB';
 };
-const bgOf = (_e: EmprestimoData, paga: boolean) => paga ? 'rgba(16,185,129,0.07)' : '#fff';
+const bgOf = (_e: EmprestimoData, paga: boolean) => paga ? 'rgba(16,185,129,0.05)' : '#fff';
 const isPaga = (pid: string, sd: string, set: Set<string>) => set.has(pid) || sd === 'PAGO';
 const showAlert = (title: string, msg: string) => {
   if (Platform.OS === 'web') { window.alert(`${title}\n${msg}`); }
@@ -294,6 +309,126 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [showFiltroTipo, setShowFiltroTipo] = useState(false);
   const [showFiltroStatus, setShowFiltroStatus] = useState(false);
   const [ocultarLiquidacao, setOcultarLiquidacao] = useState(false);
+
+  // Refs para snap-to-top das FlatLists
+  const flatListLiqRef = useRef<FlatList>(null);
+  const flatListTodosRef = useRef<FlatList>(null);
+  const cardHeightsLiq = useRef<number[]>([]);
+  const cardHeightsTodos = useRef<number[]>([]);
+
+  const onCardLayout = useCallback((heights: React.MutableRefObject<number[]>, index: number, height: number) => {
+    heights.current[index] = height;
+  }, []);
+
+  const snapToNearestItem = useCallback((ref: React.RefObject<FlatList>, event: any, heights: React.MutableRefObject<number[]>) => {
+    if (!ref.current) return;
+    const scrollY = event.nativeEvent.contentOffset.y;
+    const contentHeight = event.nativeEvent.contentSize.height;
+    const viewHeight = event.nativeEvent.layoutMeasurement.height;
+    
+    // Não snapar no topo nem quando está perto do final (evita trava)
+    if (scrollY <= 5 || scrollY + viewHeight >= contentHeight - 50) return;
+    
+    // Encontrar o item mais próximo do topo
+    let accumulated = 0;
+    let targetOffset = 0;
+    for (let i = 0; i < heights.current.length; i++) {
+      const h = heights.current[i] || 92;
+      if (accumulated + h * 0.4 > scrollY) {
+        targetOffset = accumulated;
+        break;
+      }
+      accumulated += h;
+      targetOffset = accumulated;
+    }
+    
+    // Só snapar se a diferença for significativa (evita micro-ajustes irritantes)
+    if (Math.abs(targetOffset - scrollY) > 5 && Math.abs(targetOffset - scrollY) < 60) {
+      ref.current.scrollToOffset({ offset: targetOffset, animated: true });
+    }
+  }, []);
+
+  // Alphabet sidebar
+  const [activeLetterLiq, setActiveLetterLiq] = useState<string | null>(null);
+  const [activeLetterTodos, setActiveLetterTodos] = useState<string | null>(null);
+  const alphabetTimeoutRef = useRef<any>(null);
+
+  const getAvailableLetters = useCallback((data: { nome: string }[]) => {
+    const letters = new Set<string>();
+    data.forEach(item => {
+      const first = item.nome.trim().charAt(0).toUpperCase();
+      if (first && /[A-ZÀ-Ü]/.test(first)) letters.add(first.normalize('NFD').replace(/[\u0300-\u036f]/g, '').charAt(0));
+    });
+    return 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').filter(l => letters.has(l));
+  }, []);
+
+  const scrollToLetter = useCallback((
+    letter: string, 
+    ref: React.RefObject<FlatList>, 
+    data: { nome: string }[],
+    heights: React.MutableRefObject<number[]>,
+    setActive: (l: string | null) => void
+  ) => {
+    const normalLetter = letter.normalize('NFD').replace(/[\u0300-\u036f]/g, '').charAt(0).toUpperCase();
+    const targetIndex = data.findIndex(item => {
+      const first = item.nome.trim().charAt(0).normalize('NFD').replace(/[\u0300-\u036f]/g, '').charAt(0).toUpperCase();
+      return first >= normalLetter;
+    });
+    if (targetIndex >= 0 && ref.current) {
+      let offset = 0;
+      for (let i = 0; i < targetIndex; i++) offset += heights.current[i] || 92;
+      ref.current.scrollToOffset({ offset, animated: false });
+    }
+    setActive(letter);
+    if (alphabetTimeoutRef.current) clearTimeout(alphabetTimeoutRef.current);
+    alphabetTimeoutRef.current = setTimeout(() => setActive(null), 1200);
+  }, []);
+
+  const AlphabetSidebar = useCallback(({ 
+    data, flatRef, heights, activeLetter, setActive 
+  }: { 
+    data: { nome: string }[]; 
+    flatRef: React.RefObject<FlatList>; 
+    heights: React.MutableRefObject<number[]>;
+    activeLetter: string | null;
+    setActive: (l: string | null) => void;
+  }) => {
+    const letters = getAvailableLetters(data);
+    const sidebarRef = useRef<View>(null);
+    const sidebarYRef = useRef(0);
+    const letterHeightRef = useRef(0);
+
+    return (
+      <View 
+        ref={sidebarRef}
+        style={S.alphaBar}
+        onLayout={(e) => {
+          sidebarRef.current?.measureInWindow((_x, y, _w, h) => {
+            sidebarYRef.current = y;
+            letterHeightRef.current = h / letters.length;
+          });
+        }}
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderGrant={(e) => {
+          const idx = Math.floor((e.nativeEvent.pageY - sidebarYRef.current) / letterHeightRef.current);
+          if (idx >= 0 && idx < letters.length) scrollToLetter(letters[idx], flatRef, data, heights, setActive);
+        }}
+        onResponderMove={(e) => {
+          const idx = Math.floor((e.nativeEvent.pageY - sidebarYRef.current) / letterHeightRef.current);
+          if (idx >= 0 && idx < letters.length) scrollToLetter(letters[idx], flatRef, data, heights, setActive);
+        }}
+        onResponderRelease={() => {
+          if (alphabetTimeoutRef.current) clearTimeout(alphabetTimeoutRef.current);
+          alphabetTimeoutRef.current = setTimeout(() => setActive(null), 800);
+        }}
+      >
+        {letters.map(l => (
+          <Text key={l} style={[S.alphaLetter, activeLetter === l && S.alphaLetterActive]}>{l}</Text>
+        ))}
+      </View>
+    );
+  }, [getAvailableLetters, scrollToLetter]);
   const [empIdxTodos, setEmpIdxTodos] = useState<Record<string, number>>({});
   const [todosCount, setTodosCount] = useState<number | null>(null);
 
@@ -1039,9 +1174,9 @@ export default function ClientesScreen({ navigation, route }: any) {
     return (
       <TouchableOpacity key={c.cliente_id} activeOpacity={0.7} onPress={() => setExpanded(p => p === c.cliente_id ? null : c.cliente_id)} style={[S.card, { borderLeftColor: bc, backgroundColor: bg }]}>
         <View style={S.cardRow}>
-          <View style={[S.av, { backgroundColor: bc === '#D1D5DB' ? '#3B82F6' : bc }]}><Text style={S.avTx}>{getIni(c.nome)}</Text></View>
+          <View style={[S.av, { backgroundColor: '#64748B' }]}><Text style={S.avTx}>{getIni(c.nome)}</Text></View>
           <View style={S.cardInfo}>
-            <View style={S.nameRow}><Text style={S.nome} numberOfLines={1}>{c.nome.toLowerCase()}</Text>{e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && <View style={S.bWarn}><Text style={S.bWarnI}>⚠</Text><Text style={S.bWarnT}>{e.total_parcelas_vencidas}</Text></View>}{c.tem_multiplos_vencimentos && <View style={S.bMul}><Text style={S.bMulT}>{c.qtd_emprestimos}</Text></View>}<Text style={S.dots}>⋮</Text></View>
+            <View style={S.nameRow}><Text style={S.nome} numberOfLines={1}>{c.nome.toLowerCase()}</Text>{e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && <View style={[S.bWarn, { backgroundColor: corAtraso(e.total_parcelas_vencidas) + '20' }]}><Text style={[S.bWarnI, { color: corAtraso(e.total_parcelas_vencidas) }]}>⚠</Text><Text style={[S.bWarnT, { color: corAtraso(e.total_parcelas_vencidas) }]}>{e.total_parcelas_vencidas}</Text></View>}{c.tem_multiplos_vencimentos && <View style={S.bMul}><Text style={S.bMulT}>{c.qtd_emprestimos}</Text></View>}<Text style={S.dots}>⋮</Text></View>
             {c.telefone_celular ? <Text style={S.sub}>📞 {fmtTel(c.telefone_celular)}</Text> : null}
             {c.endereco ? <Text style={S.sub} numberOfLines={1}>📍 {c.endereco}</Text> : null}
           </View>
@@ -1091,17 +1226,22 @@ export default function ClientesScreen({ navigation, route }: any) {
   }, [todosList, busca, filtroTipo, filtroStatus, ocultarLiquidacao, clientesLiqIds]);
 
   const renderTodos = (c: ClienteTodos) => {
-    const a = c.tem_atraso; const cor = a ? '#EF4444' : '#3B82F6';
-    const ex = expandedTodos === c.id; const ei = empIdxTodos[c.id] || 0;
+    const a = c.tem_atraso; 
+    // Calcular total vencidas do empréstimo atual
+    const ei = empIdxTodos[c.id] || 0;
     const emp = c.emprestimos[Math.min(ei, c.emprestimos.length - 1)];
+    const vencidas = emp?.total_parcelas_vencidas || 0;
+    const cor = a ? corAtraso(vencidas) : '#D1D5DB';
+    const ex = expandedTodos === c.id;
     const isVencido = emp?.status === 'VENCIDO';
     const isRenegociado = emp?.status === 'RENEGOCIADO';
     const isQuitado = emp?.status === 'QUITADO';
     const empStatusLabel = isRenegociado ? t.empRenegociado : isQuitado ? t.empQuitado : isVencido ? t.empVencido : t.empAtivo;
     const empStatusColor = isRenegociado ? '#9333EA' : isQuitado ? '#10B981' : isVencido ? '#EF4444' : '#1F2937';
+    const statusAtrasoLabel = vencidas > 0 ? `${vencidas} ${t.parcelasVencidas}` : '';
     return (
       <TouchableOpacity key={c.id} activeOpacity={0.7} onPress={() => setExpandedTodos(p => p === c.id ? null : c.id)} style={[S.card, { borderLeftColor: cor }]}>
-        <View style={S.cardRow}><View style={[S.av, { backgroundColor: cor }]}><Text style={S.avTx}>{getIni(c.nome)}</Text></View><View style={S.cardInfo}><View style={S.nameRow}><Text style={S.nome} numberOfLines={1}>{c.nome.toLowerCase()}</Text>{a && <Text style={[S.tSt, { color: '#EF4444' }]}>{t.statusAtraso}</Text>}<Text style={S.dots}>⋮</Text></View></View></View>
+        <View style={S.cardRow}><View style={[S.av, { backgroundColor: '#64748B' }]}><Text style={S.avTx}>{getIni(c.nome)}</Text></View><View style={S.cardInfo}><View style={S.nameRow}><Text style={S.nome} numberOfLines={1}>{c.nome.toLowerCase()}</Text>{vencidas > 0 && <View style={[S.bWarn, { backgroundColor: corAtraso(vencidas) + '20' }]}><Text style={[S.bWarnI, { color: corAtraso(vencidas) }]}>⚠</Text><Text style={[S.bWarnT, { color: corAtraso(vencidas) }]}>{vencidas}</Text></View>}<Text style={S.dots}>⋮</Text></View></View></View>
         {ex && emp && (<View style={S.exp}>
           {emp.total_parcelas_vencidas > 0 && <View style={S.aR}><Text style={S.aRT}>⚠ {emp.total_parcelas_vencidas} {t.parcelasVencidas}</Text><Text style={S.aRS}>{t.totalAtraso} {fmt(emp.valor_total_vencido)}</Text></View>}
           <View style={S.tEmpCard}><View style={S.tEmpHead}><Text style={[S.tEmpTitle, { color: empStatusColor }]}>{empStatusLabel}</Text><Text style={S.tEmpParcela}>{emp.numero_parcela_atual}/{emp.numero_parcelas}</Text></View><View style={S.tEmpBody}><View><Text style={S.tEmpLbl}>{t.valorParcela}</Text><Text style={S.tEmpVal}>{fmt(emp.valor_parcela)}</Text></View><View style={{ alignItems: 'flex-end' }}><Text style={S.tEmpLbl}>{isRenegociado ? t.saldoRenegociado : t.saldoDevedor}</Text><Text style={[S.tEmpVal, { color: isRenegociado ? '#9333EA' : emp.saldo_emprestimo > 0 ? '#F59E0B' : '#10B981' }]}>{fmt(isRenegociado ? emp.valor_principal : emp.saldo_emprestimo)}</Text></View></View></View>
@@ -1239,10 +1379,73 @@ export default function ClientesScreen({ navigation, route }: any) {
           </TouchableOpacity>
         </View>
       )}
-      <ScrollView style={S.ls} contentContainerStyle={S.lsI} refreshControl={!isViz ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined} showsVerticalScrollIndicator={false} onScrollBeginDrag={() => { setShowFiltroTipo(false); setShowFiltroStatus(false); }}>
-        {tab === 'liquidacao' ? (filtered.length === 0 ? <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View> : filtered.map(renderCard)) : (loadTodos ? <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} /> : todosFilt.length === 0 ? <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View> : todosFilt.map(renderTodos))}
-        <View style={{ height: 90 }} />
-      </ScrollView>
+      {tab === 'liquidacao' ? (
+        filtered.length === 0 ? (
+          <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View>
+        ) : (
+          <View style={{ flex: 1 }}>
+            <FlatList
+              ref={flatListLiqRef}
+              data={filtered}
+              keyExtractor={(item) => item.cliente_id}
+              renderItem={({ item, index }) => (
+                <View onLayout={(e) => onCardLayout(cardHeightsLiq, index, e.nativeEvent.layout.height)}>
+                  {renderCard(item)}
+                </View>
+              )}
+              style={S.ls}
+              contentContainerStyle={S.lsI}
+              refreshControl={!isViz ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined}
+              showsVerticalScrollIndicator={false}
+              onScrollBeginDrag={() => { setShowFiltroTipo(false); setShowFiltroStatus(false); }}
+              decelerationRate={0.92}
+              onMomentumScrollEnd={(e) => snapToNearestItem(flatListLiqRef, e, cardHeightsLiq)}
+              ListFooterComponent={<View style={{ height: 90 }} />}
+              viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
+            />
+            {ord === 'nome' && filtered.length > 10 && (
+              <AlphabetSidebar data={filtered} flatRef={flatListLiqRef} heights={cardHeightsLiq} activeLetter={activeLetterLiq} setActive={setActiveLetterLiq} />
+            )}
+            {activeLetterLiq && (
+              <View style={S.alphaIndicator}><Text style={S.alphaIndicatorText}>{activeLetterLiq}</Text></View>
+            )}
+          </View>
+        )
+      ) : (
+        loadTodos ? (
+          <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
+        ) : todosFilt.length === 0 ? (
+          <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View>
+        ) : (
+          <View style={{ flex: 1 }}>
+            <FlatList
+              ref={flatListTodosRef}
+              data={todosFilt}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item, index }) => (
+                <View onLayout={(e) => onCardLayout(cardHeightsTodos, index, e.nativeEvent.layout.height)}>
+                  {renderTodos(item)}
+                </View>
+              )}
+              style={S.ls}
+              contentContainerStyle={S.lsI}
+              refreshControl={!isViz ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined}
+              showsVerticalScrollIndicator={false}
+              onScrollBeginDrag={() => { setShowFiltroTipo(false); setShowFiltroStatus(false); }}
+              decelerationRate={0.92}
+              onMomentumScrollEnd={(e) => snapToNearestItem(flatListTodosRef, e, cardHeightsTodos)}
+              ListFooterComponent={<View style={{ height: 90 }} />}
+              viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
+            />
+            {todosFilt.length > 10 && (
+              <AlphabetSidebar data={todosFilt} flatRef={flatListTodosRef} heights={cardHeightsTodos} activeLetter={activeLetterTodos} setActive={setActiveLetterTodos} />
+            )}
+            {activeLetterTodos && (
+              <View style={S.alphaIndicator}><Text style={S.alphaIndicatorText}>{activeLetterTodos}</Text></View>
+            )}
+          </View>
+        )
+      )}
 
       {/* MODAL PARCELAS */}
       <Modal visible={modalParcelasVisible} animationType="slide" transparent={true} onRequestClose={() => setModalParcelasVisible(false)}>
@@ -1567,7 +1770,7 @@ const S = StyleSheet.create({
   tDDITSel: { color: '#3B82F6', fontWeight: '600' },
   ls: { flex: 1, marginTop: 10, zIndex: 1 }, lsI: { paddingHorizontal: 16 },
   em: { alignItems: 'center', paddingTop: 60 }, emI: { fontSize: 48, marginBottom: 12 }, emT: { fontSize: 14, color: '#9CA3AF' },
-  card: { backgroundColor: '#fff', borderRadius: 12, padding: 12, marginBottom: 8, borderLeftWidth: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 2 },
+  card: { backgroundColor: '#fff', borderRadius: 12, padding: 12, marginBottom: 8, borderLeftWidth: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 2 },
   cardRow: { flexDirection: 'row' },
   av: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginRight: 10 }, avTx: { color: '#fff', fontSize: 13, fontWeight: '700' },
   cardInfo: { flex: 1 }, nameRow: { flexDirection: 'row', alignItems: 'center' },
@@ -1736,4 +1939,10 @@ const S = StyleSheet.create({
   tbTxDisabled: { color: '#9CA3AF' },
   // Botão Pagar desabilitado no modal
   mBtnPagarDisabled: { backgroundColor: '#E5E7EB', opacity: 0.5 },
+  // Alphabet sidebar
+  alphaBar: { position: 'absolute', right: 2, top: 15, bottom: 100, justifyContent: 'center', alignItems: 'center', width: 22, zIndex: 100, backgroundColor: 'rgba(255,255,255,0.85)', borderRadius: 11, paddingVertical: 4 },
+  alphaLetter: { fontSize: 10, color: '#9CA3AF', fontWeight: '600', paddingVertical: 1.5, paddingHorizontal: 4, textAlign: 'center' },
+  alphaLetterActive: { color: '#3B82F6', fontWeight: '800', fontSize: 12, backgroundColor: '#EFF6FF', borderRadius: 8, overflow: 'hidden' },
+  alphaIndicator: { position: 'absolute', left: '50%', top: '45%', marginLeft: -30, marginTop: -30, width: 60, height: 60, borderRadius: 12, backgroundColor: 'rgba(59,130,246,0.9)', justifyContent: 'center', alignItems: 'center', zIndex: 200 },
+  alphaIndicatorText: { color: '#fff', fontSize: 28, fontWeight: '800' },
 });
