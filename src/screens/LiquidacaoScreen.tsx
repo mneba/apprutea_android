@@ -177,7 +177,6 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const [dataVisualizacao, setDataVisualizacaoLocal] = useState<Date | null>(null);
   const [mesAtual, setMesAtual] = useState(new Date().getMonth());
   const [anoAtual, setAnoAtual] = useState(new Date().getFullYear());
-  const [calGridWidth, setCalGridWidth] = useState(Dimensions.get('window').width - 64);
   
   // Wrappers que sincronizam estado local → contexto compartilhado
   const setModoVisualizacao = useCallback((v: boolean) => {
@@ -670,7 +669,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
             <View style={styles.diasSemanaRow}>
               {t.diasSemana.map((dia, index) => (
-                <View key={index} style={[styles.diaSemanaCell, { width: Math.floor(calGridWidth / 7) }]}>
+                <View key={index} style={[styles.diaSemanaCell, { width: '14.2857%' }]}>
                   <Text style={styles.diaSemanaText}>{dia}</Text>
                 </View>
               ))}
@@ -678,14 +677,12 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
             <View 
               style={styles.diasGrid}
-              onLayout={(e) => setCalGridWidth(e.nativeEvent.layout.width)}
             >
               {diasDoMes.map((dia, index) => {
-                const cellW = Math.floor(calGridWidth / 7);
                 return (
                 <TouchableOpacity
                   key={index}
-                  style={[styles.diaCell, { width: cellW, height: cellW + 10 }, dia.ehHoje && styles.diaCellHoje]}
+                  style={[styles.diaCell, { width: '14.2857%' }, dia.ehHoje && styles.diaCellHoje]}
                   onPress={() => handleClickDia(dia)}
                   disabled={!dia.mesAtual || dia.ehFuturo}
                 >
@@ -1309,7 +1306,7 @@ const styles = StyleSheet.create({
   diaSemanaCell: { alignItems: 'center', paddingVertical: 8 },
   diaSemanaText: { fontSize: 12, fontWeight: '600', color: '#9CA3AF' },
   diasGrid: { flexDirection: 'row', flexWrap: 'wrap' },
-  diaCell: { alignItems: 'center', justifyContent: 'flex-start', paddingTop: 4 },
+  diaCell: { alignItems: 'center', justifyContent: 'flex-start', paddingTop: 4, paddingBottom: 6, minHeight: 52 },
   diaCellHoje: { backgroundColor: '#EFF6FF', borderRadius: 8 },
   diaNumero: { fontSize: 14, fontWeight: '500', color: '#1F2937' },
   diaNumeroOutroMes: { color: '#D1D5DB' },
