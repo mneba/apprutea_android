@@ -282,8 +282,19 @@ export default function ClientesScreen({ navigation, route }: any) {
   const liqCtx = useLiquidacaoContext();
   const rotaId = route?.params?.rotaId || vendedor?.rota_id;
   const dataLiq = liqCtx.dataVisualizacao || route?.params?.dataLiquidacao || (liqCtx.liquidacaoAtual?.data_abertura ? liqCtx.liquidacaoAtual.data_abertura.split('T')[0] : new Date().toISOString().split('T')[0]);
-  const liqId = liqCtx.liquidacaoIdVisualizacao || route?.params?.liquidacaoId;
+  const liqId = liqCtx.liquidacaoIdVisualizacao || route?.params?.liquidacaoId || (liqCtx.temLiquidacaoAberta ? liqCtx.liquidacaoAtual?.id : null);
   const isViz = liqCtx.modoVisualizacao || route?.params?.isVisualizacao || false;
+
+  // DEBUG TEMPORÁRIO - REMOVER DEPOIS
+  console.log('🔍 DEBUG ClientesScreen:', JSON.stringify({
+    liqId: liqId || 'NULL',
+    ctxAtualId: liqCtx.liquidacaoAtual?.id || 'NULL',
+    ctxAtualStatus: liqCtx.liquidacaoAtual?.status || 'NULL',
+    ctxTemAberta: liqCtx.temLiquidacaoAberta,
+    ctxLoading: liqCtx.loadingLiquidacao,
+    ctxIdViz: liqCtx.liquidacaoIdVisualizacao || 'NULL',
+    vendedorRotaId: vendedor?.rota_id || 'NULL',
+  }));
 
   const lang = liqCtx.language || 'pt-BR';
   // Se não há liquidação aberta, força tab "todos"
@@ -681,6 +692,13 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   useEffect(() => { loadLiq(); }, [loadLiq]);
   useEffect(() => { if (tab === 'todos') loadTodosClientes(); }, [tab, loadTodosClientes]);
+  
+  // Quando o contexto carrega a liquidação aberta, ativar aba liquidação
+  useEffect(() => {
+    if (liqCtx.temLiquidacaoAberta && liqCtx.liquidacaoAtual?.id && tab === 'todos') {
+      setTab('liquidacao');
+    }
+  }, [liqCtx.temLiquidacaoAberta, liqCtx.liquidacaoAtual?.id]);
   
   // Contagem rápida de clientes para exibir no tab "Todos" antes de carregar
   useEffect(() => {
