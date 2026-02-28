@@ -450,7 +450,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [parcelasModal, setParcelasModal] = useState<ParcelaModal[]>([]);
   const [loadingParcelas, setLoadingParcelas] = useState(false);
   const [creditoDisponivel, setCreditoDisponivel] = useState(0);
-  const [clienteModal, setClienteModal] = useState<{ id: string; nome: string; emprestimo_id: string; emprestimo_status?: string } | null>(null);
+  const [clienteModal, setClienteModal] = useState<{ id: string; nome: string; emprestimo_id: string; emprestimo_status?: string; saldo_emprestimo?: number } | null>(null);
   
   const [parcelaPagamento, setParcelaPagamento] = useState<ParcelaModal | null>(null);
   const [dadosPagamento, setDadosPagamento] = useState<any>(null);
@@ -472,11 +472,69 @@ export default function ClientesScreen({ navigation, route }: any) {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') { setGpsStatus('erro'); return; }
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      setCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude, acc: loc.coords.accuracy || 0 });
-      setGpsStatus('ok');
+      
+      // Tenta com precisão alta primeiro (timeout 5s)
+      try {
+        const loc = await Promise.race([
+          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+        ]);
+        setCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude, acc: loc.coords.accuracy || 0 });
+        setGpsStatus('ok');
+        return;
+      } catch {
+        // Alta precisão falhou, tenta com precisão balanceada
+        console.log('⚠️ GPS High falhou, tentando Balanced...');
+      }
+      
+      // Fallback: precisão balanceada (mais rápido)
+      try {
+        const loc = await Promise.race([
+          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+        ]);
+        setCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude, acc: loc.coords.accuracy || 0 });
+        setGpsStatus('ok');
+        return;
+      } catch {
+        console.log('⚠️ GPS Balanced falhou, tentando última posição conhecida...');
+      }
+      
+      // Último recurso: última posição conhecida
+      const lastKnown = await Location.getLastKnownPositionAsync();
+      if (lastKnown) {
+        setCoords({ lat: lastKnown.coords.latitude, lng: lastKnown.coords.longitude, acc: lastKnown.coords.accuracy || 999 });
+        setGpsStatus('ok');
+      } else {
+        setGpsStatus('erro');
+      }
     } catch { setGpsStatus('erro'); }
   }, []);
+
+  // Iniciar GPS ao montar a tela (não esperar abrir modal)
+  const gpsInicializado = useRef(false);
+  useEffect(() => {
+    if (!gpsInicializado.current) {
+      gpsInicializado.current = true;
+      carregarGPS();
+    }
+    // Watch contínuo para manter coords atualizadas
+    let watchSub: Location.LocationSubscription | null = null;
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') return;
+        watchSub = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.Balanced, timeInterval: 10000, distanceInterval: 10 },
+          (loc) => {
+            setCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude, acc: loc.coords.accuracy || 0 });
+            setGpsStatus('ok');
+          }
+        );
+      } catch (e) { console.log('⚠️ watchPosition falhou:', e); }
+    })();
+    return () => { watchSub?.remove(); };
+  }, [carregarGPS]);
 
   const loadLiq = useCallback(async () => {
     if (!rotaId) {
@@ -785,8 +843,16 @@ export default function ClientesScreen({ navigation, route }: any) {
   }, []);
 
   // FUNÇÃO ATUALIZADA - Busca dados completos via RPC antes de abrir modal
-  const abrirPagamento = useCallback(async (parcela: ParcelaModal) => {
+  const abrirPagamento = useCallback(async (parcela: ParcelaModal, clienteInfo?: { id: string; nome: string; emprestimo_id: string; saldo_emprestimo?: number; emprestimo_status?: string }) => {
     if (!liqId && !isViz) { Alert.alert(t.atencao, t.liquidacaoNecessaria); return; }
+    
+    // Atualizar clienteModal se info do cliente foi passada (evita dados stale do cliente anterior)
+    if (clienteInfo) {
+      setClienteModal({ 
+        id: clienteInfo.id, nome: clienteInfo.nome, emprestimo_id: clienteInfo.emprestimo_id, 
+        saldo_emprestimo: clienteInfo.saldo_emprestimo, emprestimo_status: clienteInfo.emprestimo_status 
+      });
+    }
     
     setParcelaPagamento(parcela);
     setDadosPagamento(null);
@@ -794,7 +860,8 @@ export default function ClientesScreen({ navigation, route }: any) {
     setUsarCredito(false);
     setFormaPagamento('DINHEIRO');
     setModalPagamentoVisible(true);
-    carregarGPS();
+    // GPS já roda em background via watchPosition, mas força refresh rápido
+    if (gpsStatus !== 'ok') carregarGPS();
     
     try {
       const { data, error } = await supabase.rpc('fn_consultar_parcela_para_pagamento', { p_parcela_id: parcela.parcela_id });
@@ -1208,7 +1275,7 @@ export default function ClientesScreen({ navigation, route }: any) {
           {(e.status_parcela === 'PARCIAL' || (e.valor_pago_parcela > 0 && !pg)) && !pg && <View style={S.aY}><Text style={S.aYT}>{t.parcialStatus}: {fmt(e.valor_pago_parcela)} / {fmt(e.valor_parcela)}</Text><Text style={S.aYS}>{lang === 'es' ? 'Restante:' : 'Restante:'} {fmt(e.saldo_parcela)}</Text></View>}
           {c.tem_multiplos_vencimentos && (<View style={S.eNav}><TouchableOpacity onPress={() => eSet(c.cliente_id, Math.max(0, ei - 1))} disabled={ei === 0} style={[S.eNBtn, ei === 0 && S.eNOff]}><Text style={S.eNBTx}>◀</Text></TouchableOpacity>{c.emprestimos.map((_, i) => <View key={i} style={[S.eDot, i === ei && S.eDotOn]} />)}<TouchableOpacity onPress={() => eSet(c.cliente_id, Math.min(c.emprestimos.length - 1, ei + 1))} disabled={ei >= c.emprestimos.length - 1} style={[S.eNBtn, ei >= c.emprestimos.length - 1 && S.eNOff]}><Text style={S.eNBTx}>▶</Text></TouchableOpacity><Text style={S.eNLbl}> {t.emprestimo} {ei + 1}/{c.qtd_emprestimos}</Text></View>)}
           <View style={S.res}><View style={S.resH}><Text style={S.resT}>{t.emprestimo} {ei + 1}/{c.qtd_emprestimos}</Text><View style={[S.stB, { backgroundColor: e.status_dia === 'EM_ATRASO' ? '#FEE2E2' : pg ? '#D1FAE5' : '#F3F4F6' }]}><Text style={[S.stBT, { color: e.status_dia === 'EM_ATRASO' ? '#DC2626' : pg ? '#059669' : '#6B7280' }]}>{pg ? t.pagoStatus : e.status_dia}</Text></View></View><View style={S.g3}><View style={S.gi}><Text style={S.gl}>{t.principal}</Text><Text style={S.gv}>{fmt(e.valor_principal)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.juros}</Text><Text style={[S.gv, { color: '#F59E0B' }]}>{fmt(juros)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.total}</Text><Text style={S.gv}>{fmt(totalE)}</Text></View></View><View style={S.g3}><View style={S.gi}><Text style={S.gl}>{t.jaPago}</Text><Text style={[S.gv, { color: '#10B981' }]}>{fmt(totalE - e.saldo_emprestimo)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.saldo}</Text><Text style={[S.gv, { color: '#EF4444' }]}>{fmt(e.saldo_emprestimo)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.parcelas}</Text><Text style={S.gv}>{pp}/{e.numero_parcelas}</Text></View></View><Text style={S.prL}>{t.progresso}</Text><View style={S.prB}><View style={[S.prF, { width: `${pct}%` }]} /></View><Text style={S.prR}>{pr} {t.restantes}</Text></View>
-          <View style={S.btR}><TouchableOpacity style={[S.bt, S.btG, (!liqId || isViz || pg) && S.btOff]} onPress={() => { if (liqId && !isViz && !pg) abrirPagamento({ parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0, valor_pago: e.valor_pago_parcela || 0, valor_saldo: e.saldo_parcela || e.valor_parcela }); }} disabled={!liqId || isViz || pg}><Text style={S.btI}>💰</Text><Text style={S.btW}>{t.pagar}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btBl]} onPress={() => abrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}><Text style={S.btI}>👁</Text><Text style={S.btW}>{t.verParcelas}</Text></TouchableOpacity></View>
+          <View style={S.btR}><TouchableOpacity style={[S.bt, S.btG, (!liqId || isViz || pg) && S.btOff]} onPress={() => { if (liqId && !isViz && !pg) abrirPagamento({ parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0, valor_pago: e.valor_pago_parcela || 0, valor_saldo: e.saldo_parcela || e.valor_parcela }, { id: c.cliente_id, nome: c.nome, emprestimo_id: e.emprestimo_id, saldo_emprestimo: e.saldo_emprestimo, emprestimo_status: e.status_emprestimo }); }} disabled={!liqId || isViz || pg}><Text style={S.btI}>💰</Text><Text style={S.btW}>{t.pagar}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btBl]} onPress={() => abrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}><Text style={S.btI}>👁</Text><Text style={S.btW}>{t.verParcelas}</Text></TouchableOpacity></View>
           {e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && (
             <TouchableOpacity style={[S.btReneg, (!liqId || isViz) && S.btOff]} onPress={async () => {
               if (!liqId || isViz) return;
