@@ -15,6 +15,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import { ModalCriarNota } from '../components/NotasComponent';
 import { useAuth } from '../contexts/AuthContext';
 import { Language, useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
@@ -462,6 +463,13 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [coords, setCoords] = useState<{ lat: number; lng: number; acc: number } | null>(null);
   const [processando, setProcessando] = useState(false);
 
+  // Notas
+  const [modalNotaVisible, setModalNotaVisible] = useState(false);
+  const [notaClienteId, setNotaClienteId] = useState<string | null>(null);
+  const [notaClienteNome, setNotaClienteNome] = useState<string | null>(null);
+  const [notaEmprestimoId, setNotaEmprestimoId] = useState<string | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [parcelaEstorno, setParcelaEstorno] = useState<ParcelaModal | null>(null);
   const [motivoEstorno, setMotivoEstorno] = useState('');
 
@@ -540,6 +548,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     if (!rotaId) {
       console.log('❌ loadLiq: rotaId não definido');
       setLoading(false);
+      setRefreshing(false);
       return;
     }
     console.log('🔍 loadLiq: Buscando clientes...', { rotaId, dataLiq, liqId });
@@ -712,8 +721,8 @@ export default function ClientesScreen({ navigation, route }: any) {
     finally { setLoading(false); setRefreshing(false); }
   }, [rotaId, dataLiq, liqId]);
 
-  const loadTodosClientes = useCallback(async () => {
-    if (!rotaId || todosList.length > 0) return;
+  const loadTodosClientes = useCallback(async (forceReload = false) => {
+    if (!rotaId || (!forceReload && todosList.length > 0)) { setRefreshing(false); return; }
     setLoadTodos(true);
     try {
       // Query 1: Todos os empréstimos da rota com dados do cliente
@@ -745,7 +754,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       }
       setTodosList(Array.from(cliMap.values()));
     } catch (e) { console.error('Erro loadTodos:', e); }
-    finally { setLoadTodos(false); }
+    finally { setLoadTodos(false); setRefreshing(false); }
   }, [rotaId, todosList.length]);
 
   useEffect(() => { loadLiq(); }, [loadLiq]);
@@ -776,7 +785,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     if (tab === 'liquidacao') loadLiq();
-    else { setTodosList([]); loadTodosClientes(); }
+    else { setTodosList([]); loadTodosClientes(true); }
   }, [tab, loadLiq, loadTodosClientes]);
 
   const abrirParcelas = useCallback(async (clienteId: string, clienteNome: string, emprestimoId: string, empStatus?: string) => {
@@ -1257,7 +1266,17 @@ export default function ClientesScreen({ navigation, route }: any) {
     const totalE = e.valor_principal + juros; const pp = e.numero_parcela - 1 + (pg ? 1 : 0);
     const pr = e.numero_parcelas - pp; const pct = e.numero_parcelas > 0 ? Math.min(100, Math.round((pp / e.numero_parcelas) * 100)) : 0;
     return (
-      <TouchableOpacity key={c.cliente_id} activeOpacity={0.7} onPress={() => setExpanded(p => p === c.cliente_id ? null : c.cliente_id)} style={[S.card, { borderLeftColor: bc, backgroundColor: bg }]}>
+      <TouchableOpacity key={c.cliente_id} activeOpacity={0.7} 
+        onPress={() => setExpanded(p => p === c.cliente_id ? null : c.cliente_id)} 
+        onPressIn={() => {
+          longPressTimer.current = setTimeout(() => {
+            const msg = lang === 'es' ? '¿Incluir nueva nota?' : 'Incluir nova nota?';
+            if (Platform.OS === 'web') { if (window.confirm(msg)) { setNotaClienteId(c.cliente_id); setNotaClienteNome(c.nome); setNotaEmprestimoId(e.emprestimo_id); setModalNotaVisible(true); } }
+            else { Alert.alert('📝', msg, [{ text: lang === 'es' ? 'No' : 'Não', style: 'cancel' }, { text: lang === 'es' ? 'Sí' : 'Sim', onPress: () => { setNotaClienteId(c.cliente_id); setNotaClienteNome(c.nome); setNotaEmprestimoId(e.emprestimo_id); setModalNotaVisible(true); } }]); }
+          }, 1500);
+        }}
+        onPressOut={() => { if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; } }}
+        style={[S.card, { borderLeftColor: bc, backgroundColor: bg }]}>
         <View style={S.cardRow}>
           <View style={[S.av, { backgroundColor: '#64748B' }]}><Text style={S.avTx}>{getIni(c.nome)}</Text></View>
           <View style={S.cardInfo}>
@@ -1325,7 +1344,17 @@ export default function ClientesScreen({ navigation, route }: any) {
     const empStatusColor = isRenegociado ? '#9333EA' : isQuitado ? '#10B981' : isVencido ? '#EF4444' : '#1F2937';
     const statusAtrasoLabel = vencidas > 0 ? `${vencidas} ${t.parcelasVencidas}` : '';
     return (
-      <TouchableOpacity key={c.id} activeOpacity={0.7} onPress={() => setExpandedTodos(p => p === c.id ? null : c.id)} style={[S.card, { borderLeftColor: cor }]}>
+      <TouchableOpacity key={c.id} activeOpacity={0.7} 
+        onPress={() => setExpandedTodos(p => p === c.id ? null : c.id)} 
+        onPressIn={() => {
+          longPressTimer.current = setTimeout(() => {
+            const msg = lang === 'es' ? '¿Incluir nueva nota?' : 'Incluir nova nota?';
+            if (Platform.OS === 'web') { if (window.confirm(msg)) { setNotaClienteId(c.id); setNotaClienteNome(c.nome); setNotaEmprestimoId(emp?.id || null); setModalNotaVisible(true); } }
+            else { Alert.alert('📝', msg, [{ text: lang === 'es' ? 'No' : 'Não', style: 'cancel' }, { text: lang === 'es' ? 'Sí' : 'Sim', onPress: () => { setNotaClienteId(c.id); setNotaClienteNome(c.nome); setNotaEmprestimoId(emp?.id || null); setModalNotaVisible(true); } }]); }
+          }, 1500);
+        }}
+        onPressOut={() => { if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; } }}
+        style={[S.card, { borderLeftColor: cor }]}>
         <View style={S.cardRow}><View style={[S.av, { backgroundColor: '#64748B' }]}><Text style={S.avTx}>{getIni(c.nome)}</Text></View><View style={S.cardInfo}><View style={S.nameRow}><Text style={S.nome} numberOfLines={1}>{c.nome.toLowerCase()}</Text>{vencidas > 0 && <View style={[S.bWarn, { backgroundColor: corAtraso(vencidas) + '20' }]}><Text style={[S.bWarnI, { color: corAtraso(vencidas) }]}>⚠</Text><Text style={[S.bWarnT, { color: corAtraso(vencidas) }]}>{vencidas}</Text></View>}<Text style={S.dots}>⋮</Text></View></View></View>
         {ex && emp && (<View style={S.exp}>
           {emp.total_parcelas_vencidas > 0 && <View style={S.aR}><Text style={S.aRT}>⚠ {emp.total_parcelas_vencidas} {t.parcelasVencidas}</Text><Text style={S.aRS}>{t.totalAtraso} {fmt(emp.valor_total_vencido)}</Text></View>}
@@ -1811,6 +1840,26 @@ export default function ClientesScreen({ navigation, route }: any) {
           </>)}
         </View></View>
       </Modal>
+
+      {/* Modal Criar Nota via Long Press */}
+      <ModalCriarNota
+        visible={modalNotaVisible}
+        onClose={() => { setModalNotaVisible(false); setNotaClienteId(null); setNotaClienteNome(null); setNotaEmprestimoId(null); }}
+        onSalvar={() => { setModalNotaVisible(false); setNotaClienteId(null); setNotaClienteNome(null); setNotaEmprestimoId(null); }}
+        rotaId={vendedor?.rota_id || ''}
+        empresaId={vendedor?.empresa_id || ''}
+        vendedorId={vendedor?.id || ''}
+        autorNome={vendedor?.nome || ''}
+        autorTipo="VENDEDOR"
+        liquidacaoId={liqId || undefined}
+        clienteId={notaClienteId}
+        clienteNome={notaClienteNome}
+        emprestimoId={notaEmprestimoId}
+        dataReferencia={new Date().toISOString().split('T')[0]}
+        obsLocal="Cliente"
+        lang={lang}
+        coords={coords}
+      />
     </View>
   );
 }

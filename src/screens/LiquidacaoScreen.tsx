@@ -14,6 +14,7 @@ import {
   View
 } from 'react-native';
 import { ModalExtrato, ModalFinanceiro, ModalMicroseguro, ModalPagamentos } from '../components/LiquidacaoDetalhes';
+import { ModalNotasLista } from '../components/NotasComponent';
 import { useAuth } from '../contexts/AuthContext';
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
@@ -41,6 +42,7 @@ const textos = {
     aberto: 'ABERTO',
     fechado: 'FECHADO',
     verOutrasDatas: 'Ver Outras Datas',
+    notas: 'Notas',
     voltarHoje: 'Voltar para Hoje',
     meta: 'META',
     atual: 'ATUAL',
@@ -94,6 +96,7 @@ const textos = {
     aberto: 'ABIERTO',
     fechado: 'CERRADO',
     verOutrasDatas: 'Ver Otras Fechas',
+    notas: 'Notas',
     voltarHoje: 'Volver a Hoy',
     meta: 'META',
     atual: 'ACTUAL',
@@ -168,6 +171,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const [modalReceitasVisible, setModalReceitasVisible] = useState(false);
   const [modalDespesasVisible, setModalDespesasVisible] = useState(false);
   const [modalMicroseguroVisible, setModalMicroseguroVisible] = useState(false);
+  const [modalNotasVisible, setModalNotasVisible] = useState(false);
+  const [notasCount, setNotasCount] = useState(0);
   const [contaRota, setContaRota] = useState<ContaRota | null>(null);
   const [salvando, setSalvando] = useState(false);
   
@@ -199,6 +204,18 @@ export default function LiquidacaoScreen({ navigation }: any) {
       liqCtx.setLiquidacaoAtual(null);
     }
   }, [liquidacao?.id, liquidacao?.status]);
+
+  // Buscar contagem de notas ativas da rota
+  useEffect(() => {
+    if (!vendedor?.rota_id) return;
+    (async () => {
+      try {
+        const { data } = await supabase.rpc('fn_contar_notas_ativas', { p_rota_id: vendedor.rota_id });
+        const res = Array.isArray(data) ? data[0] : data;
+        setNotasCount(res?.total || 0);
+      } catch { }
+    })();
+  }, [liquidacao?.id, vendedor?.rota_id]);
   
   // Dados do modo visualização (dias sem liquidação)
   const [dadosVisualizacao, setDadosVisualizacao] = useState<{
@@ -869,6 +886,18 @@ export default function LiquidacaoScreen({ navigation }: any) {
                 </View>
               )}
 
+              {/* NOTAS - Label clicável */}
+              <TouchableOpacity style={styles.notasLabel} onPress={() => setModalNotasVisible(true)} activeOpacity={0.7}>
+                <Text style={styles.notasLabelIcon}>📝</Text>
+                <Text style={styles.notasLabelText}>{t.notas}</Text>
+                {notasCount > 0 && (
+                  <View style={styles.notasBadge}>
+                    <Text style={styles.notasBadgeText}>{notasCount}</Text>
+                  </View>
+                )}
+                <Text style={styles.notasLabelArrow}>›</Text>
+              </TouchableOpacity>
+
               {/* BOTÃO VER OUTRAS DATAS - AGORA COM onPress! */}
               <TouchableOpacity style={styles.verDatasButton} onPress={handleAbrirCalendario}>
                 <Text style={styles.verDatasText}>{t.verOutrasDatas}</Text>
@@ -1217,6 +1246,27 @@ export default function LiquidacaoScreen({ navigation }: any) {
             totalValor={liquidacao.total_microseguro_dia || 0}
             totalQtd={liquidacao.qtd_microseguros_dia || 0}
           />
+
+          <ModalNotasLista
+            visible={modalNotasVisible}
+            onClose={() => {
+              setModalNotasVisible(false);
+              supabase.rpc('fn_contar_notas_ativas', { p_rota_id: vendedor?.rota_id }).then(({ data }) => {
+                const res = Array.isArray(data) ? data[0] : data;
+                setNotasCount(res?.total || 0);
+              }).catch(() => {});
+            }}
+            rotaId={vendedor?.rota_id || ''}
+            empresaId={vendedor?.empresa_id || ''}
+            vendedorId={vendedor?.id || ''}
+            autorNome={vendedor?.nome || ''}
+            autorTipo="VENDEDOR"
+            liquidacaoId={liquidacao.id}
+            dataReferencia={liquidacao.data_abertura?.split('T')[0]}
+            lang={language}
+            permitirCriar={true}
+            obsLocalPadrao="Geral"
+          />
         </>
       )}
     </View>
@@ -1352,6 +1402,12 @@ const styles = StyleSheet.create({
   dataText: { fontSize: 12, color: '#6B7280', fontWeight: '500' },
   statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   statusText: { fontSize: 11, fontWeight: '700' },
+  notasLabel: { flexDirection: 'row', alignItems: 'center', marginTop: 12, paddingVertical: 10, paddingHorizontal: 12, backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 8 },
+  notasLabelIcon: { fontSize: 14, marginRight: 6 },
+  notasLabelText: { fontSize: 13, fontWeight: '600', color: '#92400E', flex: 1 },
+  notasBadge: { backgroundColor: '#F59E0B', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 1, marginRight: 6 },
+  notasBadgeText: { fontSize: 11, fontWeight: '700', color: '#FFF' },
+  notasLabelArrow: { fontSize: 18, color: '#D97706', fontWeight: '300' },
   verDatasButton: { marginTop: 12, borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 8, paddingVertical: 10, alignItems: 'center', backgroundColor: '#F0F9FF' },
   verDatasText: { color: '#3B82F6', fontSize: 13, fontWeight: '500' },
   metaRow: { flexDirection: 'row', marginBottom: 12 },
