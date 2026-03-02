@@ -15,7 +15,8 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { ModalCriarNota } from '../components/NotasComponent';
+import ClienteDetalhesModal from '../components/ClienteDetalhesModal';
+import { ModalCriarNota, ModalNotasLista, buscarNotasCountPorClientes } from '../components/NotasComponent';
 import { useAuth } from '../contexts/AuthContext';
 import { Language, useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
@@ -106,7 +107,7 @@ const textos = {
     emprestimo: 'Empréstimo', principal: 'Principal', juros: 'Juros',
     total: 'Total', jaPago: 'Já Pago', saldo: 'Saldo', parcelas: 'Parcelas',
     progresso: 'Progresso', restantes: 'restante(s)',
-    pagar: 'Pagar', verParcelas: 'Parcelas', contato: 'Contato', ir: 'IR',
+    pagar: 'Pagar', verParcelas: 'Parcelas', contato: 'Contato', ir: 'IR', notas: 'Notas',
     semClientes: 'Nenhum cliente encontrado', carregando: 'Carregando clientes...',
     statusAtraso: 'Atraso', statusInativo: 'Inativo',
     tipoFiltro: 'Tipo:...', statusFiltro: 'Status:...',
@@ -179,7 +180,7 @@ const textos = {
     emprestimo: 'Préstamo', principal: 'Principal', juros: 'Intereses',
     total: 'Total', jaPago: 'Ya Pagó', saldo: 'Saldo', parcelas: 'Cuotas',
     progresso: 'Progreso', restantes: 'restante(s)',
-    pagar: 'Pagar', verParcelas: 'Cuotas', contato: 'Contacto', ir: 'IR',
+    pagar: 'Pagar', verParcelas: 'Cuotas', contato: 'Contacto', ir: 'IR', notas: 'Notas',
     semClientes: 'Ningún cliente encontrado', carregando: 'Cargando clientes...',
     statusAtraso: 'Atraso', statusInativo: 'Inactivo',
     tipoFiltro: 'Tipo:...', statusFiltro: 'Estado:...',
@@ -469,6 +470,12 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [notaClienteNome, setNotaClienteNome] = useState<string | null>(null);
   const [notaEmprestimoId, setNotaEmprestimoId] = useState<string | null>(null);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [notasCountMap, setNotasCountMap] = useState<Map<string, number>>(new Map());
+  const [modalNotasClienteVisible, setModalNotasClienteVisible] = useState(false);
+  const [notasClienteId, setNotasClienteId] = useState<string | null>(null);
+  const [notasClienteNome, setNotasClienteNome] = useState<string | null>(null);
+  const [modalDetalhesVisible, setModalDetalhesVisible] = useState(false);
+  const [detalhesCliente, setDetalhesCliente] = useState<{ id: string; nome: string; telefone?: string | null; documento?: string | null; endereco?: string | null; codigo_cliente?: string | number | null } | null>(null);
 
   const [parcelaEstorno, setParcelaEstorno] = useState<ParcelaModal | null>(null);
   const [motivoEstorno, setMotivoEstorno] = useState('');
@@ -759,6 +766,15 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   useEffect(() => { loadLiq(); }, [loadLiq]);
   useEffect(() => { if (tab === 'todos') loadTodosClientes(); }, [tab, loadTodosClientes]);
+
+  // Buscar contagem de notas por cliente quando lista muda
+  useEffect(() => {
+    const ids = new Set<string>();
+    raw.forEach(r => ids.add(r.cliente_id));
+    todosList.forEach(c => ids.add(c.id));
+    if (ids.size === 0) return;
+    buscarNotasCountPorClientes(Array.from(ids)).then(setNotasCountMap);
+  }, [raw.length, todosList.length]);
   
   // Quando o contexto carrega a liquidação aberta, ativar aba liquidação
   useEffect(() => {
@@ -1280,7 +1296,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         <View style={S.cardRow}>
           <View style={[S.av, { backgroundColor: '#64748B' }]}><Text style={S.avTx}>{getIni(c.nome)}</Text></View>
           <View style={S.cardInfo}>
-            <View style={S.nameRow}><Text style={S.nome} numberOfLines={1}>{c.nome.toLowerCase()}</Text>{e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && <View style={[S.bWarn, { backgroundColor: corAtraso(e.total_parcelas_vencidas) + '20' }]}><Text style={[S.bWarnI, { color: corAtraso(e.total_parcelas_vencidas) }]}>⚠</Text><Text style={[S.bWarnT, { color: corAtraso(e.total_parcelas_vencidas) }]}>{e.total_parcelas_vencidas}</Text></View>}{c.tem_multiplos_vencimentos && <View style={S.bMul}><Text style={S.bMulT}>{c.qtd_emprestimos}</Text></View>}<Text style={S.dots}>⋮</Text></View>
+            <View style={S.nameRow}><Text style={S.nome} numberOfLines={1}>{c.nome.toLowerCase()}</Text>{e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && <View style={[S.bWarn, { backgroundColor: corAtraso(e.total_parcelas_vencidas) + '20' }]}><Text style={[S.bWarnI, { color: corAtraso(e.total_parcelas_vencidas) }]}>⚠</Text><Text style={[S.bWarnT, { color: corAtraso(e.total_parcelas_vencidas) }]}>{e.total_parcelas_vencidas}</Text></View>}{(notasCountMap.get(c.cliente_id) || 0) > 0 && <View style={S.bNota}><Text style={S.bNotaI}>📝</Text><Text style={S.bNotaT}>{notasCountMap.get(c.cliente_id)}</Text></View>}{c.tem_multiplos_vencimentos && <View style={S.bMul}><Text style={S.bMulT}>{c.qtd_emprestimos}</Text></View>}<Text style={S.dots}>⋮</Text></View>
             {c.telefone_celular ? <Text style={S.sub}>📞 {fmtTel(c.telefone_celular)}</Text> : null}
             {c.endereco ? <Text style={S.sub} numberOfLines={1}>📍 {c.endereco}</Text> : null}
           </View>
@@ -1294,7 +1310,7 @@ export default function ClientesScreen({ navigation, route }: any) {
           {(e.status_parcela === 'PARCIAL' || (e.valor_pago_parcela > 0 && !pg)) && !pg && <View style={S.aY}><Text style={S.aYT}>{t.parcialStatus}: {fmt(e.valor_pago_parcela)} / {fmt(e.valor_parcela)}</Text><Text style={S.aYS}>{lang === 'es' ? 'Restante:' : 'Restante:'} {fmt(e.saldo_parcela)}</Text></View>}
           {c.tem_multiplos_vencimentos && (<View style={S.eNav}><TouchableOpacity onPress={() => eSet(c.cliente_id, Math.max(0, ei - 1))} disabled={ei === 0} style={[S.eNBtn, ei === 0 && S.eNOff]}><Text style={S.eNBTx}>◀</Text></TouchableOpacity>{c.emprestimos.map((_, i) => <View key={i} style={[S.eDot, i === ei && S.eDotOn]} />)}<TouchableOpacity onPress={() => eSet(c.cliente_id, Math.min(c.emprestimos.length - 1, ei + 1))} disabled={ei >= c.emprestimos.length - 1} style={[S.eNBtn, ei >= c.emprestimos.length - 1 && S.eNOff]}><Text style={S.eNBTx}>▶</Text></TouchableOpacity><Text style={S.eNLbl}> {t.emprestimo} {ei + 1}/{c.qtd_emprestimos}</Text></View>)}
           <View style={S.res}><View style={S.resH}><Text style={S.resT}>{t.emprestimo} {ei + 1}/{c.qtd_emprestimos}</Text><View style={[S.stB, { backgroundColor: e.status_dia === 'EM_ATRASO' ? '#FEE2E2' : pg ? '#D1FAE5' : '#F3F4F6' }]}><Text style={[S.stBT, { color: e.status_dia === 'EM_ATRASO' ? '#DC2626' : pg ? '#059669' : '#6B7280' }]}>{pg ? t.pagoStatus : e.status_dia}</Text></View></View><View style={S.g3}><View style={S.gi}><Text style={S.gl}>{t.principal}</Text><Text style={S.gv}>{fmt(e.valor_principal)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.juros}</Text><Text style={[S.gv, { color: '#F59E0B' }]}>{fmt(juros)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.total}</Text><Text style={S.gv}>{fmt(totalE)}</Text></View></View><View style={S.g3}><View style={S.gi}><Text style={S.gl}>{t.jaPago}</Text><Text style={[S.gv, { color: '#10B981' }]}>{fmt(totalE - e.saldo_emprestimo)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.saldo}</Text><Text style={[S.gv, { color: '#EF4444' }]}>{fmt(e.saldo_emprestimo)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.parcelas}</Text><Text style={S.gv}>{pp}/{e.numero_parcelas}</Text></View></View><Text style={S.prL}>{t.progresso}</Text><View style={S.prB}><View style={[S.prF, { width: `${pct}%` }]} /></View><Text style={S.prR}>{pr} {t.restantes}</Text></View>
-          <View style={S.btR}><TouchableOpacity style={[S.bt, S.btG, (!liqId || isViz || pg) && S.btOff]} onPress={() => { if (liqId && !isViz && !pg) abrirPagamento({ parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0, valor_pago: e.valor_pago_parcela || 0, valor_saldo: e.saldo_parcela || e.valor_parcela }, { id: c.cliente_id, nome: c.nome, emprestimo_id: e.emprestimo_id, saldo_emprestimo: e.saldo_emprestimo, emprestimo_status: e.status_emprestimo }); }} disabled={!liqId || isViz || pg}><Text style={S.btI}>💰</Text><Text style={S.btW}>{t.pagar}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btBl]} onPress={() => abrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}><Text style={S.btI}>👁</Text><Text style={S.btW}>{t.verParcelas}</Text></TouchableOpacity></View>
+          <View style={S.btR}><TouchableOpacity style={[S.bt, S.btG, (!liqId || isViz || pg) && S.btOff]} onPress={() => { if (liqId && !isViz && !pg) abrirPagamento({ parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0, valor_pago: e.valor_pago_parcela || 0, valor_saldo: e.saldo_parcela || e.valor_parcela }, { id: c.cliente_id, nome: c.nome, emprestimo_id: e.emprestimo_id, saldo_emprestimo: e.saldo_emprestimo, emprestimo_status: e.status_emprestimo }); }} disabled={!liqId || isViz || pg}><Text style={S.btI}>💰</Text><Text style={S.btW}>{t.pagar}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btBl]} onPress={() => abrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}><Text style={S.btI}>👁</Text><Text style={S.btW}>{t.verParcelas}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btOY]} onPress={() => { setNotasClienteId(c.cliente_id); setNotasClienteNome(c.nome); setModalNotasClienteVisible(true); }}><Text style={S.btI}>📝</Text><Text style={S.btW}>{(notasCountMap.get(c.cliente_id) || 0) > 0 ? `${t.notas || 'Notas'} (${notasCountMap.get(c.cliente_id)})` : (t.notas || 'Notas')}</Text></TouchableOpacity></View>
           {e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && (
             <TouchableOpacity style={[S.btReneg, (!liqId || isViz) && S.btOff]} onPress={async () => {
               if (!liqId || isViz) return;
@@ -1309,7 +1325,7 @@ export default function ClientesScreen({ navigation, route }: any) {
               nav.navigate('NovoCliente', { renegociacao: { emprestimo_id: e.emprestimo_id, cliente_id: c.cliente_id, cliente_nome: c.nome, saldo_devedor: e.saldo_emprestimo, telefone_celular: c.telefone_celular, codigo_cliente: c.codigo_cliente } });
             }} disabled={!liqId || isViz}><Text style={S.btRenegI}>🔄</Text><Text style={S.btRenegT}>{t.renegociar}</Text></TouchableOpacity>
           )}
-          <View style={S.btR}><TouchableOpacity style={[S.bt, S.btOG]} onPress={() => c.telefone_celular && Linking.openURL(`tel:${c.telefone_celular.replace(/\D/g, '')}`)} disabled={!c.telefone_celular}><Text style={S.btI}>📱</Text><Text style={S.btTG}>{t.contato}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btOB]} onPress={() => { if (c.latitude && c.longitude) Linking.openURL(Platform.OS === 'ios' ? `maps:?daddr=${c.latitude},${c.longitude}` : `google.navigation:q=${c.latitude},${c.longitude}`); }} disabled={!c.latitude}><Text style={S.btI}>🧭</Text><Text style={S.btTB}>{t.ir}</Text></TouchableOpacity></View>
+          <View style={S.btR}><TouchableOpacity style={[S.bt, S.btOG]} onPress={() => c.telefone_celular && Linking.openURL(`tel:${c.telefone_celular.replace(/\D/g, '')}`)} disabled={!c.telefone_celular}><Text style={S.btI}>📱</Text><Text style={S.btTG}>{t.contato}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btOB]} onPress={() => { if (c.endereco && c.endereco.trim()) { const url = Platform.OS === 'ios' ? `maps:?daddr=${encodeURIComponent(c.endereco)}` : `google.navigation:q=${encodeURIComponent(c.endereco)}`; Linking.openURL(url).catch(() => { Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.endereco)}`).catch(() => { if (Platform.OS === 'web') window.alert(lang === 'es' ? 'No se pudo abrir la navegación' : 'Não foi possível abrir a navegação'); else Alert.alert('⚠️', lang === 'es' ? 'No se pudo abrir la navegación' : 'Não foi possível abrir a navegação'); }); }); } else { if (Platform.OS === 'web') window.alert(lang === 'es' ? 'Este cliente no tiene dirección registrada' : 'Este cliente não possui endereço cadastrado'); else Alert.alert('⚠️', lang === 'es' ? 'Este cliente no tiene dirección registrada' : 'Este cliente não possui endereço cadastrado'); } }}><Text style={S.btI}>🧭</Text><Text style={S.btTB}>{t.ir}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, { backgroundColor: '#6366F1' }]} onPress={() => { setDetalhesCliente({ id: c.cliente_id, nome: c.nome, telefone: c.telefone_celular, endereco: c.endereco, codigo_cliente: c.codigo_cliente }); setModalDetalhesVisible(true); }}><Text style={S.btI}>ℹ️</Text><Text style={S.btW}>{t.detalhes || 'Detalhes'}</Text></TouchableOpacity></View>
         </View>)}
       </TouchableOpacity>);
   };
@@ -1355,7 +1371,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         }}
         onPressOut={() => { if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; } }}
         style={[S.card, { borderLeftColor: cor }]}>
-        <View style={S.cardRow}><View style={[S.av, { backgroundColor: '#64748B' }]}><Text style={S.avTx}>{getIni(c.nome)}</Text></View><View style={S.cardInfo}><View style={S.nameRow}><Text style={S.nome} numberOfLines={1}>{c.nome.toLowerCase()}</Text>{vencidas > 0 && <View style={[S.bWarn, { backgroundColor: corAtraso(vencidas) + '20' }]}><Text style={[S.bWarnI, { color: corAtraso(vencidas) }]}>⚠</Text><Text style={[S.bWarnT, { color: corAtraso(vencidas) }]}>{vencidas}</Text></View>}<Text style={S.dots}>⋮</Text></View></View></View>
+        <View style={S.cardRow}><View style={[S.av, { backgroundColor: '#64748B' }]}><Text style={S.avTx}>{getIni(c.nome)}</Text></View><View style={S.cardInfo}><View style={S.nameRow}><Text style={S.nome} numberOfLines={1}>{c.nome.toLowerCase()}</Text>{vencidas > 0 && <View style={[S.bWarn, { backgroundColor: corAtraso(vencidas) + '20' }]}><Text style={[S.bWarnI, { color: corAtraso(vencidas) }]}>⚠</Text><Text style={[S.bWarnT, { color: corAtraso(vencidas) }]}>{vencidas}</Text></View>}{(notasCountMap.get(c.id) || 0) > 0 && <View style={S.bNota}><Text style={S.bNotaI}>📝</Text><Text style={S.bNotaT}>{notasCountMap.get(c.id)}</Text></View>}<Text style={S.dots}>⋮</Text></View></View></View>
         {ex && emp && (<View style={S.exp}>
           {emp.total_parcelas_vencidas > 0 && <View style={S.aR}><Text style={S.aRT}>⚠ {emp.total_parcelas_vencidas} {t.parcelasVencidas}</Text><Text style={S.aRS}>{t.totalAtraso} {fmt(emp.valor_total_vencido)}</Text></View>}
           <View style={S.tEmpCard}><View style={S.tEmpHead}><Text style={[S.tEmpTitle, { color: empStatusColor }]}>{empStatusLabel}</Text><Text style={S.tEmpParcela}>{emp.numero_parcela_atual}/{emp.numero_parcelas}</Text></View><View style={S.tEmpBody}><View><Text style={S.tEmpLbl}>{t.valorParcela}</Text><Text style={S.tEmpVal}>{fmt(emp.valor_parcela)}</Text></View><View style={{ alignItems: 'flex-end' }}><Text style={S.tEmpLbl}>{isRenegociado ? t.saldoRenegociado : t.saldoDevedor}</Text><Text style={[S.tEmpVal, { color: isRenegociado ? '#9333EA' : emp.saldo_emprestimo > 0 ? '#F59E0B' : '#10B981' }]}>{fmt(isRenegociado ? emp.valor_principal : emp.saldo_emprestimo)}</Text></View></View></View>
@@ -1396,7 +1412,8 @@ export default function ClientesScreen({ navigation, route }: any) {
             }
             return null;
           })()}
-          <View style={S.btR}><TouchableOpacity style={[S.bt, S.btRed]} onPress={() => c.telefone_celular && Linking.openURL(`tel:${c.telefone_celular.replace(/\D/g, '')}`)} disabled={!c.telefone_celular}><Text style={S.btI}>💬</Text><Text style={S.btW}>{t.contato}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btBl]} onPress={() => abrirParcelas(c.id, c.nome, emp.id, emp.status)}><Text style={S.btI}>👁</Text><Text style={S.btW}>{t.detalhes}</Text></TouchableOpacity></View>
+          <View style={S.btR}><TouchableOpacity style={[S.bt, S.btRed]} onPress={() => c.telefone_celular && Linking.openURL(`tel:${c.telefone_celular.replace(/\D/g, '')}`)} disabled={!c.telefone_celular}><Text style={S.btI}>💬</Text><Text style={S.btW}>{t.contato}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btBl]} onPress={() => abrirParcelas(c.id, c.nome, emp.id, emp.status)}><Text style={S.btI}>👁</Text><Text style={S.btW}>{t.verParcelas}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btOY]} onPress={() => { setNotasClienteId(c.id); setNotasClienteNome(c.nome); setModalNotasClienteVisible(true); }}><Text style={S.btI}>📝</Text><Text style={S.btW}>{(notasCountMap.get(c.id) || 0) > 0 ? `${t.notas || 'Notas'} (${notasCountMap.get(c.id)})` : (t.notas || 'Notas')}</Text></TouchableOpacity></View>
+          <TouchableOpacity style={S.btDetalhes} onPress={() => { setDetalhesCliente({ id: c.id, nome: c.nome, telefone: c.telefone_celular, codigo_cliente: c.codigo_cliente }); setModalDetalhesVisible(true); }}><Text style={S.btDetalhesIcon}>ℹ️</Text><Text style={S.btDetalhesTx}>{lang === 'es' ? 'Ficha del Cliente' : 'Ficha do Cliente'}</Text></TouchableOpacity>
         </View>)}
       </TouchableOpacity>);
   };
@@ -1845,7 +1862,12 @@ export default function ClientesScreen({ navigation, route }: any) {
       <ModalCriarNota
         visible={modalNotaVisible}
         onClose={() => { setModalNotaVisible(false); setNotaClienteId(null); setNotaClienteNome(null); setNotaEmprestimoId(null); }}
-        onSalvar={() => { setModalNotaVisible(false); setNotaClienteId(null); setNotaClienteNome(null); setNotaEmprestimoId(null); }}
+        onSalvar={() => { 
+          setModalNotaVisible(false); setNotaClienteId(null); setNotaClienteNome(null); setNotaEmprestimoId(null);
+          // Recarregar contagem de notas
+          const ids = new Set<string>(); raw.forEach(r => ids.add(r.cliente_id)); todosList.forEach(c => ids.add(c.id));
+          if (ids.size > 0) buscarNotasCountPorClientes(Array.from(ids)).then(setNotasCountMap);
+        }}
         rotaId={vendedor?.rota_id || ''}
         empresaId={vendedor?.empresa_id || ''}
         vendedorId={vendedor?.id || ''}
@@ -1859,6 +1881,36 @@ export default function ClientesScreen({ navigation, route }: any) {
         obsLocal="Cliente"
         lang={lang}
         coords={coords}
+      />
+
+      {/* Modal Lista Notas do Cliente */}
+      <ModalNotasLista
+        visible={modalNotasClienteVisible}
+        onClose={() => { 
+          setModalNotasClienteVisible(false); setNotasClienteId(null); setNotasClienteNome(null);
+          const ids = new Set<string>(); raw.forEach(r => ids.add(r.cliente_id)); todosList.forEach(c => ids.add(c.id));
+          if (ids.size > 0) buscarNotasCountPorClientes(Array.from(ids)).then(setNotasCountMap);
+        }}
+        rotaId={vendedor?.rota_id || ''}
+        empresaId={vendedor?.empresa_id || ''}
+        vendedorId={vendedor?.id || ''}
+        autorNome={vendedor?.nome || ''}
+        autorTipo="VENDEDOR"
+        liquidacaoId={liqId || undefined}
+        clienteId={notasClienteId}
+        clienteNome={notasClienteNome}
+        lang={lang}
+        coords={coords}
+        permitirCriar={true}
+        obsLocalPadrao="Cliente"
+      />
+
+      {/* Modal Detalhes do Cliente */}
+      <ClienteDetalhesModal
+        visible={modalDetalhesVisible}
+        onClose={() => { setModalDetalhesVisible(false); setDetalhesCliente(null); }}
+        cliente={detalhesCliente}
+        lang={lang}
       />
     </View>
   );
@@ -1912,6 +1964,7 @@ const S = StyleSheet.create({
   bWarn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF2F2', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 10, marginLeft: 4, borderWidth: 1, borderColor: '#FECACA' },
   bWarnI: { fontSize: 10, color: '#F59E0B', marginRight: 2 }, bWarnT: { fontSize: 10, fontWeight: '700', color: '#DC2626' },
   bMul: { backgroundColor: '#FED7AA', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 10, marginLeft: 3 }, bMulT: { fontSize: 10, fontWeight: '700', color: '#C2410C' },
+  bNota: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#EFF6FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 4, gap: 2, borderWidth: 1, borderColor: '#BFDBFE' }, bNotaI: { fontSize: 8 }, bNotaT: { fontSize: 9, fontWeight: '700', color: '#2563EB' },
   dots: { fontSize: 18, color: '#9CA3AF', marginLeft: 4, fontWeight: '700' }, sub: { fontSize: 11, color: '#6B7280', marginTop: 2 },
   pRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
   pLblR: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }, pLbl: { fontSize: 11, color: '#6B7280' },
@@ -1932,7 +1985,10 @@ const S = StyleSheet.create({
   prL: { fontSize: 9, color: '#9CA3AF', marginTop: 4, marginBottom: 3 }, prB: { height: 5, backgroundColor: '#E5E7EB', borderRadius: 3, overflow: 'hidden' }, prF: { height: '100%', backgroundColor: '#3B82F6', borderRadius: 3 }, prR: { fontSize: 9, color: '#9CA3AF', marginTop: 2, textAlign: 'right' },
   btR: { flexDirection: 'row', gap: 8, marginBottom: 6 },
   bt: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 11, borderRadius: 10, gap: 5 },
-  btG: { backgroundColor: '#10B981' }, btBl: { backgroundColor: '#3B82F6' }, btRed: { backgroundColor: '#EF4444' },
+  btG: { backgroundColor: '#10B981' }, btBl: { backgroundColor: '#3B82F6' }, btRed: { backgroundColor: '#EF4444' }, btOY: { backgroundColor: '#F59E0B' },
+  btDetalhes: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 8, marginTop: 6, backgroundColor: '#F5F3FF', borderRadius: 8, borderWidth: 1, borderColor: '#DDD6FE', gap: 6 },
+  btDetalhesIcon: { fontSize: 12 },
+  btDetalhesTx: { fontSize: 12, fontWeight: '600', color: '#6366F1' },
   btOG: { backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' }, btOB: { backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE' }, btOff: { opacity: 0.4 },
   btI: { fontSize: 13 }, btW: { color: '#fff', fontSize: 12, fontWeight: '600' }, btTG: { color: '#059669', fontSize: 12, fontWeight: '600' }, btTB: { color: '#2563EB', fontSize: 12, fontWeight: '600' },
   tSt: { fontSize: 11, fontWeight: '500', marginLeft: 8 },

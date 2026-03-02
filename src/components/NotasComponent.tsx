@@ -173,106 +173,109 @@ export function ModalNotasLista({
   // Locais únicos para breadcrumbs
   const locaisUnicos = [...new Set(notas.map(n => n.obs_local).filter(Boolean))];
   
-  // Notas filtradas
+  // Notas filtradas - vendedor só vê as próprias
   const notasFiltradas = notas.filter(n => {
+    if (autorTipo === 'VENDEDOR' && n.autor_id !== vendedorId) return false;
     if (filtroLocal && n.obs_local !== filtroLocal) return false;
-    if (filtroAutor && n.autor_tipo !== filtroAutor) return false;
+    if (autorTipo === 'MONITOR' && filtroAutor && n.autor_tipo !== filtroAutor) return false;
     return true;
   });
 
-  const handleResolver = useCallback(async (nota: Nota) => {
-    const executar = async (obs?: string) => {
-      try {
-        const { data, error } = await supabase.rpc('fn_resolver_nota', {
-          p_nota_id: nota.id,
-          p_resolvida_por: vendedorId,
-          p_resolvida_nome: autorNome,
-          p_observacao: obs || null,
-        });
-        if (error) throw error;
-        showAlert('✅', t.notaResolvida);
-        carregarNotas();
-      } catch (e: any) {
-        showAlert('Erro', e.message);
-      }
-    };
+  // Edição de nota (apenas na liquidação atual)
+  const [editandoId, setEditandoId] = useState<string | null>(null);
+  const [editandoTexto, setEditandoTexto] = useState('');
+  const [salvandoEdicao, setSalvandoEdicao] = useState(false);
 
-    if (Platform.OS === 'web') {
-      const obs = window.prompt(t.observacao);
-      if (obs !== null) executar(obs);
-    } else {
-      Alert.alert(t.confirmarResolver, '', [
-        { text: t.cancelar, style: 'cancel' },
-        { text: t.resolver, onPress: () => executar() },
-      ]);
+  const handleEditar = useCallback(async (notaId: string) => {
+    if (!editandoTexto.trim()) return;
+    setSalvandoEdicao(true);
+    try {
+      const { error } = await supabase.from('notas').update({ nota: editandoTexto.trim() }).eq('id', notaId);
+      if (error) throw error;
+      setEditandoId(null);
+      setEditandoTexto('');
+      carregarNotas();
+    } catch (e: any) {
+      showAlert('❌', e.message);
+    } finally {
+      setSalvandoEdicao(false);
     }
-  }, [vendedorId, autorNome, t, carregarNotas]);
+  }, [editandoTexto, carregarNotas]);
 
   const renderNota = ({ item: n }: { item: Nota }) => {
     const isExpanded = expanded === n.id;
-    const cor = corPrioridade[n.prioridade] || corPrioridade.NORMAL;
-    const isResolvida = n.status === 'RESOLVIDA';
+    const isEditando = editandoId === n.id;
+    const podeEditar = liquidacaoId && n.liquidacao_id === liquidacaoId;
 
     return (
       <TouchableOpacity
-        style={[S.notaCard, { borderLeftColor: cor.text, borderLeftWidth: 4 }, isResolvida && S.notaResolvida]}
-        onPress={() => setExpanded(isExpanded ? null : n.id)}
+        style={S.notaCard}
+        onPress={() => { if (!isEditando) setExpanded(isExpanded ? null : n.id); }}
         activeOpacity={0.7}
       >
-        {/* Header */}
-        <View style={S.notaHeader}>
-          <View style={S.notaHeaderLeft}>
-            <Text style={S.notaPrioridadeIcon}>{iconePrioridade[n.prioridade]}</Text>
-            <View style={[S.notaLocalBadge, { backgroundColor: cor.bg, borderColor: cor.border }]}>
-              <Text style={[S.notaLocalText, { color: cor.text }]}>{n.obs_local}</Text>
-            </View>
-            {isResolvida && (
-              <View style={S.notaResolvidaBadge}>
-                <Text style={S.notaResolvidaText}>✓ {t.resolvida}</Text>
-              </View>
-            )}
-          </View>
-          <Text style={S.notaHora}>{fmtHora(n.created_at)}</Text>
-        </View>
-
-        {/* Nota texto (truncado se não expandido) */}
-        <Text style={[S.notaTexto, isResolvida && S.notaTextoResolvida]} numberOfLines={isExpanded ? undefined : 2}>
-          {n.nota}
-        </Text>
-
-        {/* Autor */}
-        <View style={S.notaFooter}>
-          <Text style={S.notaAutor}>
-            {n.autor_tipo === 'MONITOR' ? '👁' : '👤'} {n.autor_nome}
-          </Text>
-          {n.cliente_nome && (
-            <Text style={S.notaCliente}>👤 {n.cliente_nome}</Text>
+        {/* Linha 1: Tipo (Rota/Cliente) */}
+        <View style={S.notaClienteRow}>
+          {n.cliente_nome ? (
+            <>
+              <View style={S.notaTipoBadgeCliente}><Text style={S.notaTipoBadgeClienteTx}>{lang === 'es' ? 'Nota de Cliente' : 'Nota de Cliente'}</Text></View>
+              <Text style={S.notaClienteNome}>👤 {n.cliente_nome}</Text>
+              {n.numero_parcela && <Text style={S.notaParcelaTag}>P. {n.numero_parcela}</Text>}
+            </>
+          ) : (
+            <View style={S.notaTipoBadgeRota}><Text style={S.notaTipoBadgeRotaTx}>{lang === 'es' ? 'Nota de Ruta' : 'Nota da Rota'}</Text></View>
           )}
         </View>
 
-        {/* Detalhes expandidos */}
-        {isExpanded && (
-          <View style={S.notaDetalhes}>
-            {n.numero_parcela && (
-              <Text style={S.notaDetalheItem}>📄 {t.parcela} #{n.numero_parcela}</Text>
-            )}
-            {n.latitude && n.longitude && (
-              <Text style={S.notaDetalheItem}>📍 {n.latitude.toFixed(4)}, {n.longitude.toFixed(4)}</Text>
-            )}
-            {isResolvida && n.resolvida_nome && (
-              <View style={S.notaResolucaoBox}>
-                <Text style={S.notaResolucaoLabel}>Resolvida por: {n.resolvida_nome}</Text>
-                {n.resolucao_observacao && (
-                  <Text style={S.notaResolucaoObs}>{n.resolucao_observacao}</Text>
-                )}
-              </View>
-            )}
-            {!isResolvida && (
-              <TouchableOpacity style={S.btnResolver} onPress={() => handleResolver(n)}>
-                <Text style={S.btnResolverText}>✓ {t.resolver}</Text>
+        {/* Linha 2: Nota (destaque principal) */}
+        {isEditando ? (
+          <View style={S.notaEditBox}>
+            <TextInput
+              style={S.notaEditInput}
+              value={editandoTexto}
+              onChangeText={setEditandoTexto}
+              multiline
+              autoFocus
+            />
+            <View style={S.notaEditBtns}>
+              <TouchableOpacity style={S.notaEditBtnCancel} onPress={() => { setEditandoId(null); setEditandoTexto(''); }}>
+                <Text style={S.notaEditBtnCancelTx}>✕</Text>
               </TouchableOpacity>
-            )}
+              <TouchableOpacity 
+                style={[S.notaEditBtnSave, salvandoEdicao && { opacity: 0.5 }]} 
+                onPress={() => handleEditar(n.id)} 
+                disabled={salvandoEdicao}
+              >
+                <Text style={S.notaEditBtnSaveTx}>✓</Text>
+              </TouchableOpacity>
+            </View>
           </View>
+        ) : (
+          <Text style={S.notaTexto} numberOfLines={isExpanded ? undefined : 2}>
+            {n.nota}
+          </Text>
+        )}
+
+        {/* Linha 3: Autor + obs_local + hora */}
+        <View style={S.notaMetaRow}>
+          <Text style={S.notaAutor}>
+            {n.autor_tipo === 'MONITOR' ? '👁 ' : ''}{n.autor_nome}
+          </Text>
+          <View style={S.notaMetaRight}>
+            <View style={S.notaLocalBadge}>
+              <Text style={S.notaLocalText}>{n.obs_local}</Text>
+            </View>
+            <Text style={S.notaHora}>{fmtHora(n.created_at)}</Text>
+          </View>
+        </View>
+
+        {/* Expandido: botão editar */}
+        {isExpanded && podeEditar && !isEditando && (
+          <TouchableOpacity 
+            style={S.notaBtnEditar} 
+            onPress={() => { setEditandoId(n.id); setEditandoTexto(n.nota); }}
+          >
+            <Text style={S.notaBtnEditarTx}>✏️ {lang === 'es' ? 'Editar' : 'Editar'}</Text>
+          </TouchableOpacity>
         )}
       </TouchableOpacity>
     );
@@ -320,7 +323,8 @@ export function ModalNotasLista({
               </View>
             )}
 
-            {/* Filtro autor: Vendedor / Monitor */}
+            {/* Filtro autor: somente para monitor */}
+            {autorTipo === 'MONITOR' && (
             <View style={S.filtrosRow}>
               <TouchableOpacity
                 style={[S.filtroBadge, !filtroAutor && S.filtroBadgeAtivo]}
@@ -341,6 +345,7 @@ export function ModalNotasLista({
                 <Text style={[S.filtroTexto, filtroAutor === 'MONITOR' && S.filtroTextoAtivo]}>👁 {t.monitor}</Text>
               </TouchableOpacity>
             </View>
+            )}
 
             {/* Lista */}
             {loading ? (
@@ -573,30 +578,30 @@ const S = StyleSheet.create({
   filtroCount: { fontSize: 10, fontWeight: '700', color: '#9CA3AF', backgroundColor: '#E5E7EB', borderRadius: 8, paddingHorizontal: 5, paddingVertical: 1, overflow: 'hidden' },
 
   // Nota card
-  notaCard: { marginHorizontal: 16, marginTop: 8, padding: 12, backgroundColor: '#FFF', borderRadius: 10, borderWidth: 1, borderColor: '#F3F4F6', elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2 },
-  notaResolvida: { opacity: 0.6 },
-  notaHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  notaHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
-  notaPrioridadeIcon: { fontSize: 10 },
-  notaLocalBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, borderWidth: 1 },
-  notaLocalText: { fontSize: 10, fontWeight: '600' },
-  notaResolvidaBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8, backgroundColor: '#D1FAE5' },
-  notaResolvidaText: { fontSize: 9, fontWeight: '600', color: '#059669' },
+  notaCard: { marginHorizontal: 16, marginTop: 8, padding: 12, backgroundColor: '#FFF', borderRadius: 10, borderWidth: 1, borderColor: '#E5E7EB', elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2 },
+  notaClienteRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 6, flexWrap: 'wrap' },
+  notaClienteNome: { fontSize: 13, fontWeight: '700', color: '#1F2937', flex: 1 },
+  notaTipoBadgeRota: { backgroundColor: '#EFF6FF', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, borderWidth: 1, borderColor: '#BFDBFE' },
+  notaTipoBadgeRotaTx: { fontSize: 10, fontWeight: '600', color: '#2563EB' },
+  notaTipoBadgeCliente: { backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, borderWidth: 1, borderColor: '#FDE68A' },
+  notaTipoBadgeClienteTx: { fontSize: 10, fontWeight: '600', color: '#92400E' },
+  notaParcelaTag: { fontSize: 10, fontWeight: '600', color: '#6B7280', backgroundColor: '#F3F4F6', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, overflow: 'hidden' },
+  notaTexto: { fontSize: 14, color: '#374151', lineHeight: 20, marginBottom: 8 },
+  notaMetaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  notaAutor: { fontSize: 11, color: '#9CA3AF' },
+  notaMetaRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  notaLocalBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: '#F3F4F6' },
+  notaLocalText: { fontSize: 10, fontWeight: '600', color: '#6B7280' },
   notaHora: { fontSize: 11, color: '#9CA3AF' },
-  notaTexto: { fontSize: 13, color: '#374151', lineHeight: 18 },
-  notaTextoResolvida: { textDecorationLine: 'line-through', color: '#9CA3AF' },
-  notaFooter: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 },
-  notaAutor: { fontSize: 11, color: '#6B7280' },
-  notaCliente: { fontSize: 11, color: '#3B82F6' },
-  notaDetalhes: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
-  notaDetalheItem: { fontSize: 11, color: '#6B7280', marginBottom: 3 },
-  notaResolucaoBox: { backgroundColor: '#F0FDF4', padding: 8, borderRadius: 6, marginTop: 4 },
-  notaResolucaoLabel: { fontSize: 11, fontWeight: '600', color: '#059669' },
-  notaResolucaoObs: { fontSize: 11, color: '#374151', marginTop: 2 },
-
-  // Botão resolver
-  btnResolver: { marginTop: 8, paddingVertical: 8, paddingHorizontal: 16, backgroundColor: '#D1FAE5', borderRadius: 8, alignSelf: 'flex-start' },
-  btnResolverText: { fontSize: 12, fontWeight: '600', color: '#059669' },
+  notaBtnEditar: { marginTop: 8, paddingVertical: 6, paddingHorizontal: 12, backgroundColor: '#EFF6FF', borderRadius: 6, alignSelf: 'flex-start' },
+  notaBtnEditarTx: { fontSize: 12, fontWeight: '500', color: '#2563EB' },
+  notaEditBox: { marginBottom: 8 },
+  notaEditInput: { borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 8, padding: 8, fontSize: 14, color: '#1F2937', backgroundColor: '#F9FAFB', minHeight: 60, textAlignVertical: 'top' },
+  notaEditBtns: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 6 },
+  notaEditBtnCancel: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#FEE2E2', alignItems: 'center', justifyContent: 'center' },
+  notaEditBtnCancelTx: { fontSize: 14, color: '#DC2626', fontWeight: '600' },
+  notaEditBtnSave: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#D1FAE5', alignItems: 'center', justifyContent: 'center' },
+  notaEditBtnSaveTx: { fontSize: 14, color: '#059669', fontWeight: '600' },
 
   // Empty
   emptyBox: { alignItems: 'center', paddingTop: 60 },
@@ -622,3 +627,20 @@ const S = StyleSheet.create({
   btnSalvarText: { fontSize: 14, fontWeight: '600', color: '#FFF' },
   btnDesabilitado: { opacity: 0.5 },
 });
+
+// ==================== UTILITÁRIO: Buscar contagem de notas por lista de clientes ====================
+export async function buscarNotasCountPorClientes(clienteIds: string[]): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (clienteIds.length === 0) return map;
+  try {
+    const { data } = await supabase
+      .from('notas')
+      .select('cliente_id')
+      .in('cliente_id', clienteIds)
+      .eq('status', 'ATIVA');
+    (data || []).forEach((n: any) => {
+      map.set(n.cliente_id, (map.get(n.cliente_id) || 0) + 1);
+    });
+  } catch { }
+  return map;
+}
