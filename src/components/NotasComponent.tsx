@@ -137,6 +137,37 @@ export function ModalNotasLista({
   const [notas, setNotas] = useState<Nota[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
+  // Filtros
+  const [filtroLocal, setFiltroLocal] = useState<string | null>(null);
+  const [filtroAutor, setFiltroAutor] = useState<string | null>(null);
+
+  const carregarNotas = useCallback(async () => {
+    if (!rotaId) return;
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.rpc('fn_listar_notas', {
+        p_rota_id: rotaId,
+        p_data_inicio: dataReferencia || null,
+        p_data_fim: dataReferencia || null,
+        p_cliente_id: clienteId || null,
+        p_liquidacao_id: liquidacaoId || null,
+        p_status: null,
+        p_prioridade: null,
+        p_limite: 100,
+      });
+      if (error) throw error;
+      setNotas((data || []) as Nota[]);
+    } catch (e) {
+      console.error('Erro ao carregar notas:', e);
+    } finally {
+      setLoading(false);
+    }
+  }, [rotaId, dataReferencia, clienteId, liquidacaoId]);
+
+  useEffect(() => {
+    if (visible) carregarNotas();
+  }, [visible, carregarNotas]);
+
   // Edição de nota
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [editandoTexto, setEditandoTexto] = useState('');
@@ -157,37 +188,6 @@ export function ModalNotasLista({
       setSalvandoEdicao(false);
     }
   }, [editandoTexto, carregarNotas]);
-
-  // Filtros
-  const [filtroLocal, setFiltroLocal] = useState<string | null>(null);
-  const [filtroAutor, setFiltroAutor] = useState<string | null>(null);
-
-  const carregarNotas = useCallback(async () => {
-    if (!rotaId) return;
-    setLoading(true);
-    try {
-      const { data, error } = await supabase.rpc('fn_listar_notas', {
-        p_rota_id: rotaId,
-        p_data_inicio: dataReferencia || null,
-        p_data_fim: dataReferencia || null,
-        p_cliente_id: clienteId || null,
-        p_liquidacao_id: liquidacaoId || null,
-        p_status: null, // todas
-        p_prioridade: null,
-        p_limite: 100,
-      });
-      if (error) throw error;
-      setNotas((data || []) as Nota[]);
-    } catch (e) {
-      console.error('Erro ao carregar notas:', e);
-    } finally {
-      setLoading(false);
-    }
-  }, [rotaId, dataReferencia, clienteId, liquidacaoId]);
-
-  useEffect(() => {
-    if (visible) carregarNotas();
-  }, [visible, carregarNotas]);
 
   // Locais únicos para breadcrumbs
   const locaisUnicos = [...new Set(notas.map(n => n.obs_local).filter(Boolean))];

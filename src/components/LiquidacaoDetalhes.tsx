@@ -37,10 +37,7 @@ const fmtData = (d: string | null) => {
 
 const fmtHora = (d: string | null) => {
   if (!d) return '';
-  // Supabase retorna timestamp sem timezone mas em UTC
-  // Adicionar 'Z' para forçar interpretação como UTC, aí toLocaleTimeString converte para local
-  const raw = d.includes('Z') || d.includes('+') ? d : d.replace(' ', 'T') + 'Z';
-  const dt = new Date(raw);
+  const dt = new Date(d);
   return dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 };
 
@@ -52,10 +49,10 @@ type Lang = 'pt-BR' | 'es';
 const i18n: Record<Lang, Record<string, string>> = {
   'pt-BR': {
     extratoDia: 'EXTRATO DO DIA', extratoLiq: 'EXTRATO LIQUIDAÇÃO DIÁRIA',
-    caixaInicial: 'CAIXA INICIAL', entradas: '(+) ENTRADAS', saidas: '(-) SAIDAS',
+    caixaInicial: 'CAIXA INICIAL', saidas: '(-) SAIDAS',
     cobrancas: '(+) COBRANÇAS', caixaFinal: 'CAIXA FINAL',
     movimentacoes: 'MOVIMENTAÇÕES', nenhuma: 'Nenhuma movimentação',
-    totalEntradas: 'TOTAL ENTRADAS', totalCobrancas: 'TOTAL COBRANÇAS',
+    totalCobrancas: 'TOTAL COBRANÇAS',
     totalSaidas: 'TOTAL SAIDAS', saldoFinal: 'SALDO FINAL',
     fimExtrato: '*** FIM DO EXTRATO ***', compartilhar: 'Compartilhar Extrato',
     pagamentos: 'Pagamentos', pagos: 'Pagos', naoPagos: 'Não Pagos',
@@ -72,10 +69,10 @@ const i18n: Record<Lang, Record<string, string>> = {
   },
   'es': {
     extratoDia: 'EXTRACTO DEL DÍA', extratoLiq: 'EXTRACTO LIQUIDACIÓN DIARIA',
-    caixaInicial: 'CAJA INICIAL', entradas: '(+) ENTRADAS', saidas: '(-) SALIDAS',
+    caixaInicial: 'CAJA INICIAL', saidas: '(-) SALIDAS',
     cobrancas: '(+) COBROS', caixaFinal: 'CAJA FINAL',
     movimentacoes: 'MOVIMIENTOS', nenhuma: 'Ningún movimiento',
-    totalEntradas: 'TOTAL ENTRADAS', totalCobrancas: 'TOTAL COBROS',
+    totalCobrancas: 'TOTAL COBROS',
     totalSaidas: 'TOTAL SALIDAS', saldoFinal: 'SALDO FINAL',
     fimExtrato: '*** FIN DEL EXTRACTO ***', compartilhar: 'Compartir Extracto',
     pagamentos: 'Pagos', pagos: 'Pagados', naoPagos: 'No Pagados',
@@ -173,7 +170,6 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
     }
   };
 
-  const totalEntradas = registros.filter(r => r.tipo === 'RECEBER').reduce((s, r) => s + parseFloat(r.valor), 0);
   const totalSaidas = registros.filter(r => r.tipo === 'PAGAR').reduce((s, r) => s + parseFloat(r.valor), 0);
   const totalPagamentos = pagamentos.reduce((s, p) => s + parseFloat(p.valor_pago_total || 0), 0);
   const dataHoje = new Date().toLocaleDateString('pt-BR');
@@ -205,12 +201,11 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
       console.error('Erro ao compartilhar:', e);
       // Fallback: compartilha como texto
       try {
-        let txt = `${rotaNome || 'Rota'} - Extrato ${dataHoje}\n`;
-        txt += `Caixa Inicial: ${fmt(caixaInicial)}\n`;
-        txt += `Entradas: ${fmt(totalEntradas)}\n`;
-        txt += `Cobranças: ${fmt(totalPagamentos)}\n`;
-        txt += `Saídas: ${fmt(totalSaidas)}\n`;
-        txt += `Caixa Final: ${fmt(caixaFinal)}`;
+        let txt = `${rotaNome || 'Rota'} - ${t.extratoDia} ${dataHoje}\n`;
+        txt += `${t.caixaInicial}: ${fmt(caixaInicial)}\n`;
+        txt += `${t.cobrancas}: ${fmt(totalPagamentos)}\n`;
+        txt += `${t.saidas}: ${fmt(totalSaidas)}\n`;
+        txt += `${t.caixaFinal}: ${fmt(caixaFinal)}`;
         await Share.share({ message: txt });
       } catch {}
     } finally {
@@ -244,10 +239,6 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
               <Text style={cupom.txt}>{fmt(caixaInicial)}</Text>
             </View>
             <Text style={cupom.div1}>{DIV}</Text>
-            <View style={cupom.linha}>
-              <Text style={cupom.txtVerde}>{t.entradas}</Text>
-              <Text style={cupom.txtVerde}>{fmt(totalEntradas)}</Text>
-            </View>
             <View style={cupom.linha}>
               <Text style={cupom.txtVerde}>{t.cobrancas}</Text>
               <Text style={cupom.txtVerde}>{fmt(totalPagamentos)}</Text>
@@ -317,10 +308,6 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
 
                 {/* Totais finais */}
                 <Text style={cupom.div2}>{DDIV}</Text>
-                <View style={cupom.linha}>
-                  <Text style={cupom.txt}>{t.totalEntradas}</Text>
-                  <Text style={cupom.txtVerde}>{fmt(totalEntradas)}</Text>
-                </View>
                 <View style={cupom.linha}>
                   <Text style={cupom.txt}>{t.totalCobrancas}</Text>
                   <Text style={cupom.txtVerde}>{fmt(totalPagamentos)}</Text>

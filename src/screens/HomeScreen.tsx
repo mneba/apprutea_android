@@ -143,15 +143,17 @@ export default function HomeScreen({ navigation }: any) {
     lqs.find(l => l.status === 'ABERTO' || l.status === 'REABERTO') || null;
 
   // ==================== CARREGAR DADOS ====================
+  const rotaId = vendedor?.rota_id;
+
   const carregarDados = useCallback(async () => {
-    if (!vendedor) return;
+    if (!rotaId) return;
     try {
       const dataInicio = new Date();
       dataInicio.setDate(dataInicio.getDate() - 60);
       
       const { data: liqData, error: liqError } = await supabase
         .from('liquidacoes_diarias').select('*')
-        .eq('rota_id', vendedor.rota_id)
+        .eq('rota_id', rotaId)
         .gte('data_abertura', dataInicio.toISOString())
         .order('data_abertura', { ascending: false });
 
@@ -166,12 +168,12 @@ export default function HomeScreen({ navigation }: any) {
 
       const { data: contaData } = await supabase
         .from('contas').select('id, saldo_atual')
-        .eq('rota_id', vendedor.rota_id).eq('tipo_conta', 'ROTA').eq('status', 'ATIVA')
+        .eq('rota_id', rotaId).eq('tipo_conta', 'ROTA').eq('status', 'ATIVA')
         .maybeSingle();
       if (contaData) setContaRota(contaData);
     } catch (error) { console.error('Erro:', error); }
     finally { setLoading(false); setRefreshing(false); }
-  }, [vendedor, modoVisualizacao]);
+  }, [rotaId, modoVisualizacao]);
 
   useEffect(() => { carregarDados(); }, [carregarDados]);
   
