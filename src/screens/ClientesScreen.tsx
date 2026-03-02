@@ -4,7 +4,6 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  Linking,
   Modal,
   Platform,
   RefreshControl,
@@ -1278,56 +1277,95 @@ export default function ClientesScreen({ navigation, route }: any) {
   const renderCard = (c: ClienteAgrupado) => {
     const e = eAtual(c); const ex = expanded === c.cliente_id; const ei = eIdx(c.cliente_id);
     const pg = isPaga(e.parcela_id, e.status_dia, pagasSet); const bc = borderOf(e, pg); const bg = bgOf(e, pg);
-    const pi = e.pagamento_info; const juros = e.valor_parcela * e.numero_parcelas - e.valor_principal;
-    const totalE = e.valor_principal + juros; const pp = e.numero_parcela - 1 + (pg ? 1 : 0);
-    const pr = e.numero_parcelas - pp; const pct = e.numero_parcelas > 0 ? Math.min(100, Math.round((pp / e.numero_parcelas) * 100)) : 0;
+    const pi = e.pagamento_info;
+    const valorAPagar = e.valor_pago_parcela > 0 && !pg ? e.saldo_parcela : e.valor_parcela;
+    const notasCli = notasCountMap.get(c.cliente_id) || 0;
     return (
       <TouchableOpacity key={c.cliente_id} activeOpacity={0.7} 
         onPress={() => setExpanded(p => p === c.cliente_id ? null : c.cliente_id)} 
         onPressIn={() => {
           longPressTimer.current = setTimeout(() => {
-            const msg = lang === 'es' ? '¿Incluir nueva nota?' : 'Incluir nova nota?';
-            if (Platform.OS === 'web') { if (window.confirm(msg)) { setNotaClienteId(c.cliente_id); setNotaClienteNome(c.nome); setNotaEmprestimoId(e.emprestimo_id); setModalNotaVisible(true); } }
-            else { Alert.alert('📝', msg, [{ text: lang === 'es' ? 'No' : 'Não', style: 'cancel' }, { text: lang === 'es' ? 'Sí' : 'Sim', onPress: () => { setNotaClienteId(c.cliente_id); setNotaClienteNome(c.nome); setNotaEmprestimoId(e.emprestimo_id); setModalNotaVisible(true); } }]); }
+            setDetalhesCliente({ id: c.cliente_id, nome: c.nome, telefone: c.telefone_celular, endereco: c.endereco, codigo_cliente: c.codigo_cliente });
+            setModalDetalhesVisible(true);
           }, 1500);
         }}
         onPressOut={() => { if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; } }}
         style={[S.card, { borderLeftColor: bc, backgroundColor: bg }]}>
+        {/* === LINHA 1: Avatar + Nome + Badges === */}
         <View style={S.cardRow}>
-          <View style={[S.av, { backgroundColor: '#64748B' }]}><Text style={S.avTx}>{getIni(c.nome)}</Text></View>
+          <View style={[S.av, { backgroundColor: pg ? '#10B981' : e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 ? '#EF4444' : '#3B82F6' }]}>
+            <Text style={S.avTx}>{getIni(c.nome)}</Text>
+          </View>
           <View style={S.cardInfo}>
-            <View style={S.nameRow}><Text style={S.nome} numberOfLines={1}>{c.nome.toLowerCase()}</Text>{e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && <View style={[S.bWarn, { backgroundColor: corAtraso(e.total_parcelas_vencidas) + '20' }]}><Text style={[S.bWarnI, { color: corAtraso(e.total_parcelas_vencidas) }]}>⚠</Text><Text style={[S.bWarnT, { color: corAtraso(e.total_parcelas_vencidas) }]}>{e.total_parcelas_vencidas}</Text></View>}{(notasCountMap.get(c.cliente_id) || 0) > 0 && <View style={S.bNota}><Text style={S.bNotaI}>📝</Text><Text style={S.bNotaT}>{notasCountMap.get(c.cliente_id)}</Text></View>}{c.tem_multiplos_vencimentos && <View style={S.bMul}><Text style={S.bMulT}>{c.qtd_emprestimos}</Text></View>}<Text style={S.dots}>⋮</Text></View>
-            {c.telefone_celular ? <Text style={S.sub}>📞 {fmtTel(c.telefone_celular)}</Text> : null}
-            {c.endereco ? <Text style={S.sub} numberOfLines={1}>📍 {c.endereco}</Text> : null}
+            <View style={S.nameRow}>
+              <Text style={S.nome} numberOfLines={1}>{c.nome}</Text>
+              {e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && (
+                <View style={S.bWarnNew}><Text style={S.bWarnNewI}>⚠</Text><Text style={S.bWarnNewT}>{e.total_parcelas_vencidas}</Text></View>
+              )}
+            </View>
+            <Text style={S.sub} numberOfLines={1}>
+              {c.telefone_celular ? `📞 ${fmtTel(c.telefone_celular)}` : ''}{c.telefone_celular && c.endereco ? '  ◦  ' : ''}{c.endereco ? `📍 ${c.endereco}` : ''}
+            </Text>
           </View>
         </View>
+
+        {/* === LINHA 2: Parcela + Frequência + Valor === */}
         <View style={S.pRow}>
-          <View><View style={S.pLblR}><Text style={S.pLbl}>{t.parcela} {e.numero_parcela}/{e.numero_parcelas}</Text><View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento}</Text></View></View>{pg && pi ? (<><Text style={S.pgVal}>{t.pago} {fmt(pi.valorPago)}</Text><Text style={S.pgOrig}>{t.original} {fmt(pi.valorParcela)}</Text>{pi.creditoGerado > 0 && <Text style={S.pgCred}>{t.credito} {fmt(pi.creditoGerado)}</Text>}</>) : e.valor_pago_parcela > 0 && !pg ? (<><Text style={S.pgVal}>{t.pago} {fmt(e.valor_pago_parcela)}</Text><Text style={S.mParcelaRestante}>{lang === 'es' ? 'Restante:' : 'Restante:'} {fmt(e.saldo_parcela)}</Text></>) : (<Text style={S.pVal}>{fmt(e.valor_parcela)}</Text>)}</View>
-          <View style={S.sCol}><Text style={S.sLbl}>{t.saldoEmprestimo}</Text><Text style={S.sVal}>{fmt(e.saldo_emprestimo)}</Text></View>
+          <View>
+            <View style={S.pLblR}>
+              <Text style={S.pLbl}>{t.parcela} {e.numero_parcela}/{e.numero_parcelas}</Text>
+              <View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento}</Text></View>
+            </View>
+          </View>
+          <View style={S.sCol}>
+            {pg && pi ? (
+              <Text style={[S.pValBig, { color: '#10B981' }]}>{fmt(pi.valorPago)}</Text>
+            ) : (
+              <Text style={S.pValBig}>{fmt(valorAPagar)}</Text>
+            )}
+            <Text style={S.sLbl}>{t.saldoEmprestimo} {fmt(e.saldo_emprestimo)}</Text>
+          </View>
         </View>
-        {ex && (<View style={S.exp}>
-          {e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && <View style={S.aR}><Text style={S.aRT}>⚠ {e.total_parcelas_vencidas} {t.parcelasVencidas}</Text><Text style={S.aRS}>{t.totalAtraso} {fmt(e.valor_total_vencido)}</Text></View>}
-          {(e.status_parcela === 'PARCIAL' || (e.valor_pago_parcela > 0 && !pg)) && !pg && <View style={S.aY}><Text style={S.aYT}>{t.parcialStatus}: {fmt(e.valor_pago_parcela)} / {fmt(e.valor_parcela)}</Text><Text style={S.aYS}>{lang === 'es' ? 'Restante:' : 'Restante:'} {fmt(e.saldo_parcela)}</Text></View>}
-          {c.tem_multiplos_vencimentos && (<View style={S.eNav}><TouchableOpacity onPress={() => eSet(c.cliente_id, Math.max(0, ei - 1))} disabled={ei === 0} style={[S.eNBtn, ei === 0 && S.eNOff]}><Text style={S.eNBTx}>◀</Text></TouchableOpacity>{c.emprestimos.map((_, i) => <View key={i} style={[S.eDot, i === ei && S.eDotOn]} />)}<TouchableOpacity onPress={() => eSet(c.cliente_id, Math.min(c.emprestimos.length - 1, ei + 1))} disabled={ei >= c.emprestimos.length - 1} style={[S.eNBtn, ei >= c.emprestimos.length - 1 && S.eNOff]}><Text style={S.eNBTx}>▶</Text></TouchableOpacity><Text style={S.eNLbl}> {t.emprestimo} {ei + 1}/{c.qtd_emprestimos}</Text></View>)}
-          <View style={S.res}><View style={S.resH}><Text style={S.resT}>{t.emprestimo} {ei + 1}/{c.qtd_emprestimos}</Text><View style={[S.stB, { backgroundColor: e.status_dia === 'EM_ATRASO' ? '#FEE2E2' : pg ? '#D1FAE5' : '#F3F4F6' }]}><Text style={[S.stBT, { color: e.status_dia === 'EM_ATRASO' ? '#DC2626' : pg ? '#059669' : '#6B7280' }]}>{pg ? t.pagoStatus : e.status_dia}</Text></View></View><View style={S.g3}><View style={S.gi}><Text style={S.gl}>{t.principal}</Text><Text style={S.gv}>{fmt(e.valor_principal)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.juros}</Text><Text style={[S.gv, { color: '#F59E0B' }]}>{fmt(juros)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.total}</Text><Text style={S.gv}>{fmt(totalE)}</Text></View></View><View style={S.g3}><View style={S.gi}><Text style={S.gl}>{t.jaPago}</Text><Text style={[S.gv, { color: '#10B981' }]}>{fmt(totalE - e.saldo_emprestimo)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.saldo}</Text><Text style={[S.gv, { color: '#EF4444' }]}>{fmt(e.saldo_emprestimo)}</Text></View><View style={S.gi}><Text style={S.gl}>{t.parcelas}</Text><Text style={S.gv}>{pp}/{e.numero_parcelas}</Text></View></View><Text style={S.prL}>{t.progresso}</Text><View style={S.prB}><View style={[S.prF, { width: `${pct}%` }]} /></View><Text style={S.prR}>{pr} {t.restantes}</Text></View>
-          <View style={S.btR}><TouchableOpacity style={[S.bt, S.btG, (!liqId || isViz || pg) && S.btOff]} onPress={() => { if (liqId && !isViz && !pg) abrirPagamento({ parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0, valor_pago: e.valor_pago_parcela || 0, valor_saldo: e.saldo_parcela || e.valor_parcela }, { id: c.cliente_id, nome: c.nome, emprestimo_id: e.emprestimo_id, saldo_emprestimo: e.saldo_emprestimo, emprestimo_status: e.status_emprestimo }); }} disabled={!liqId || isViz || pg}><Text style={S.btI}>💰</Text><Text style={S.btW}>{t.pagar}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btBl]} onPress={() => abrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}><Text style={S.btI}>👁</Text><Text style={S.btW}>{t.verParcelas}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btOY]} onPress={() => { setNotasClienteId(c.cliente_id); setNotasClienteNome(c.nome); setModalNotasClienteVisible(true); }}><Text style={S.btI}>📝</Text><Text style={S.btW}>{(notasCountMap.get(c.cliente_id) || 0) > 0 ? `${t.notas || 'Notas'} (${notasCountMap.get(c.cliente_id)})` : (t.notas || 'Notas')}</Text></TouchableOpacity></View>
-          {e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && (
-            <TouchableOpacity style={[S.btReneg, (!liqId || isViz) && S.btOff]} onPress={async () => {
-              if (!liqId || isViz) return;
-              // Verificar permite_renegociacao
-              const { data: cli } = await supabase.from('clientes').select('permite_renegociacao').eq('id', c.cliente_id).single();
-              if (!cli?.permite_renegociacao) {
-                if (Platform.OS === 'web') { window.alert(t.renegociacaoNaoPermitida); }
-                else { Alert.alert(t.atencao, t.renegociacaoNaoPermitida); }
-                return;
-              }
-              const nav = navigation.getParent() || navigation;
-              nav.navigate('NovoCliente', { renegociacao: { emprestimo_id: e.emprestimo_id, cliente_id: c.cliente_id, cliente_nome: c.nome, saldo_devedor: e.saldo_emprestimo, telefone_celular: c.telefone_celular, codigo_cliente: c.codigo_cliente } });
-            }} disabled={!liqId || isViz}><Text style={S.btRenegI}>🔄</Text><Text style={S.btRenegT}>{t.renegociar}</Text></TouchableOpacity>
-          )}
-          <View style={S.btR}><TouchableOpacity style={[S.bt, S.btOG]} onPress={() => c.telefone_celular && Linking.openURL(`tel:${c.telefone_celular.replace(/\D/g, '')}`)} disabled={!c.telefone_celular}><Text style={S.btI}>📱</Text><Text style={S.btTG}>{t.contato}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btOB]} onPress={() => { if (c.endereco && c.endereco.trim()) { const url = Platform.OS === 'ios' ? `maps:?daddr=${encodeURIComponent(c.endereco)}` : `google.navigation:q=${encodeURIComponent(c.endereco)}`; Linking.openURL(url).catch(() => { Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.endereco)}`).catch(() => { if (Platform.OS === 'web') window.alert(lang === 'es' ? 'No se pudo abrir la navegación' : 'Não foi possível abrir a navegação'); else Alert.alert('⚠️', lang === 'es' ? 'No se pudo abrir la navegación' : 'Não foi possível abrir a navegação'); }); }); } else { if (Platform.OS === 'web') window.alert(lang === 'es' ? 'Este cliente no tiene dirección registrada' : 'Este cliente não possui endereço cadastrado'); else Alert.alert('⚠️', lang === 'es' ? 'Este cliente no tiene dirección registrada' : 'Este cliente não possui endereço cadastrado'); } }}><Text style={S.btI}>🧭</Text><Text style={S.btTB}>{t.ir}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, { backgroundColor: '#6366F1' }]} onPress={() => { setDetalhesCliente({ id: c.cliente_id, nome: c.nome, telefone: c.telefone_celular, endereco: c.endereco, codigo_cliente: c.codigo_cliente }); setModalDetalhesVisible(true); }}><Text style={S.btI}>ℹ️</Text><Text style={S.btW}>{t.detalhes || 'Detalhes'}</Text></TouchableOpacity></View>
-        </View>)}
-      </TouchableOpacity>);
+
+        {/* === EXPANDIDO (1 clique) === */}
+        {ex && (
+          <View style={S.exp}>
+            {/* Pagar (flex) + Parcelas + Notas na mesma linha */}
+            <View style={S.expActRow}>
+              <TouchableOpacity 
+                style={[S.btPagarGrande, (pg || !liqId || isViz) && S.btPagarDisabled]}
+                onPress={() => { 
+                  if (liqId && !isViz && !pg) abrirPagamento(
+                    { parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0, valor_pago: e.valor_pago_parcela || 0, valor_saldo: e.saldo_parcela || e.valor_parcela },
+                    { id: c.cliente_id, nome: c.nome, emprestimo_id: e.emprestimo_id, saldo_emprestimo: e.saldo_emprestimo, emprestimo_status: e.status_emprestimo }
+                  ); 
+                }} 
+                disabled={pg || !liqId || isViz}
+              >
+                <Text style={S.btPagarIcon}>$</Text>
+                <Text style={S.btPagarText}>{t.pagar}</Text>
+                {!pg && <View style={S.btPagarValor}><Text style={S.btPagarValorText}>${Math.round(valorAPagar)}</Text></View>}
+              </TouchableOpacity>
+              <TouchableOpacity style={S.btSecVerde} onPress={() => abrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}>
+                <View style={S.btSecIconBox}><Text style={S.btSecIconTx}>☰</Text></View>
+              </TouchableOpacity>
+              <TouchableOpacity style={S.btSecAmarelo} onPress={() => { setNotasClienteId(c.cliente_id); setNotasClienteNome(c.nome); setModalNotasClienteVisible(true); }}>
+                <View style={S.btSecIconBox}><Text style={S.btSecIconTx}>✎</Text></View>
+                {notasCli > 0 && <View style={S.btSecBadge}><Text style={S.btSecBadgeT}>{notasCli}</Text></View>}
+              </TouchableOpacity>
+            </View>
+
+            {/* Link para detalhes */}
+            <TouchableOpacity style={S.linkDetalhes} onPress={() => {
+              setDetalhesCliente({ id: c.cliente_id, nome: c.nome, telefone: c.telefone_celular, endereco: c.endereco, codigo_cliente: c.codigo_cliente });
+              setModalDetalhesVisible(true);
+            }}>
+              <Text style={S.linkDetalhesTx}>{lang === 'es' ? 'Toque para ver detalles' : 'Toque para ver detalhes'} ▽</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
   };
 
   const todosFilt = useMemo(() => {
@@ -1347,74 +1385,101 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   const renderTodos = (c: ClienteTodos) => {
     const a = c.tem_atraso; 
-    // Calcular total vencidas do empréstimo atual
     const ei = empIdxTodos[c.id] || 0;
     const emp = c.emprestimos[Math.min(ei, c.emprestimos.length - 1)];
     const vencidas = emp?.total_parcelas_vencidas || 0;
     const cor = a ? corAtraso(vencidas) : '#D1D5DB';
     const ex = expandedTodos === c.id;
-    const isVencido = emp?.status === 'VENCIDO';
-    const isRenegociado = emp?.status === 'RENEGOCIADO';
-    const isQuitado = emp?.status === 'QUITADO';
-    const empStatusLabel = isRenegociado ? t.empRenegociado : isQuitado ? t.empQuitado : isVencido ? t.empVencido : t.empAtivo;
-    const empStatusColor = isRenegociado ? '#9333EA' : isQuitado ? '#10B981' : isVencido ? '#EF4444' : '#1F2937';
-    const statusAtrasoLabel = vencidas > 0 ? `${vencidas} ${t.parcelasVencidas}` : '';
+    const notasCli = notasCountMap.get(c.id) || 0;
     return (
       <TouchableOpacity key={c.id} activeOpacity={0.7} 
         onPress={() => setExpandedTodos(p => p === c.id ? null : c.id)} 
         onPressIn={() => {
           longPressTimer.current = setTimeout(() => {
-            const msg = lang === 'es' ? '¿Incluir nueva nota?' : 'Incluir nova nota?';
-            if (Platform.OS === 'web') { if (window.confirm(msg)) { setNotaClienteId(c.id); setNotaClienteNome(c.nome); setNotaEmprestimoId(emp?.id || null); setModalNotaVisible(true); } }
-            else { Alert.alert('📝', msg, [{ text: lang === 'es' ? 'No' : 'Não', style: 'cancel' }, { text: lang === 'es' ? 'Sí' : 'Sim', onPress: () => { setNotaClienteId(c.id); setNotaClienteNome(c.nome); setNotaEmprestimoId(emp?.id || null); setModalNotaVisible(true); } }]); }
+            setDetalhesCliente({ id: c.id, nome: c.nome, telefone: c.telefone_celular, codigo_cliente: c.codigo_cliente });
+            setModalDetalhesVisible(true);
           }, 1500);
         }}
         onPressOut={() => { if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; } }}
         style={[S.card, { borderLeftColor: cor }]}>
-        <View style={S.cardRow}><View style={[S.av, { backgroundColor: '#64748B' }]}><Text style={S.avTx}>{getIni(c.nome)}</Text></View><View style={S.cardInfo}><View style={S.nameRow}><Text style={S.nome} numberOfLines={1}>{c.nome.toLowerCase()}</Text>{vencidas > 0 && <View style={[S.bWarn, { backgroundColor: corAtraso(vencidas) + '20' }]}><Text style={[S.bWarnI, { color: corAtraso(vencidas) }]}>⚠</Text><Text style={[S.bWarnT, { color: corAtraso(vencidas) }]}>{vencidas}</Text></View>}{(notasCountMap.get(c.id) || 0) > 0 && <View style={S.bNota}><Text style={S.bNotaI}>📝</Text><Text style={S.bNotaT}>{notasCountMap.get(c.id)}</Text></View>}<Text style={S.dots}>⋮</Text></View></View></View>
-        {ex && emp && (<View style={S.exp}>
-          {emp.total_parcelas_vencidas > 0 && <View style={S.aR}><Text style={S.aRT}>⚠ {emp.total_parcelas_vencidas} {t.parcelasVencidas}</Text><Text style={S.aRS}>{t.totalAtraso} {fmt(emp.valor_total_vencido)}</Text></View>}
-          <View style={S.tEmpCard}><View style={S.tEmpHead}><Text style={[S.tEmpTitle, { color: empStatusColor }]}>{empStatusLabel}</Text><Text style={S.tEmpParcela}>{emp.numero_parcela_atual}/{emp.numero_parcelas}</Text></View><View style={S.tEmpBody}><View><Text style={S.tEmpLbl}>{t.valorParcela}</Text><Text style={S.tEmpVal}>{fmt(emp.valor_parcela)}</Text></View><View style={{ alignItems: 'flex-end' }}><Text style={S.tEmpLbl}>{isRenegociado ? t.saldoRenegociado : t.saldoDevedor}</Text><Text style={[S.tEmpVal, { color: isRenegociado ? '#9333EA' : emp.saldo_emprestimo > 0 ? '#F59E0B' : '#10B981' }]}>{fmt(isRenegociado ? emp.valor_principal : emp.saldo_emprestimo)}</Text></View></View></View>
-          {c.emprestimos.length > 1 && (<View style={S.eNav}><TouchableOpacity onPress={() => setEmpIdxTodos(p => ({ ...p, [c.id]: Math.max(0, ei - 1) }))} disabled={ei === 0} style={[S.eNBtn, ei === 0 && S.eNOff]}><Text style={S.eNBTx}>◀</Text></TouchableOpacity>{c.emprestimos.map((_, i) => <View key={i} style={[S.eDot, i === ei && S.eDotOn]} />)}<TouchableOpacity onPress={() => setEmpIdxTodos(p => ({ ...p, [c.id]: Math.min(c.emprestimos.length - 1, ei + 1) }))} disabled={ei >= c.emprestimos.length - 1} style={[S.eNBtn, ei >= c.emprestimos.length - 1 && S.eNOff]}><Text style={S.eNBTx}>▶</Text></TouchableOpacity><Text style={S.eNLbl}> {t.emprestimo} {ei + 1}/{c.emprestimos.length}</Text></View>)}
-          {(() => {
-            const temAtivo = c.emprestimos.some(e => e.status === 'ATIVO' || e.status === 'VENCIDO');
-            const temAtraso = c.tem_atraso;
-            if (!temAtivo) {
-              // Sem empréstimo ativo → Novo Empréstimo (Renovação)
-              return (<TouchableOpacity style={S.tAddRowActive} onPress={() => {
-                const confirmar = () => { 
-                  const nav = navigation.getParent() || navigation; 
-                  nav.navigate('NovoCliente', { clienteExistente: { id: c.id, nome: c.nome, telefone_celular: c.telefone_celular, documento: c.codigo_cliente?.toString() || '' } }); 
-                };
-                if (Platform.OS === 'web') {
-                  if (window.confirm(t.confirmarNovoEmprestimo)) confirmar();
-                } else {
-                  Alert.alert(t.novoEmprestimo, t.confirmarNovoEmprestimo, [
-                    { text: t.nao, style: 'cancel' },
-                    { text: t.sim, onPress: confirmar }
-                  ]);
-                }
-              }}><Text style={S.tAddIconActive}>＋</Text><Text style={S.tAddTextActive}>{t.novoEmprestimo}</Text></TouchableOpacity>);
-            }
-            if (temAtivo && temAtraso) {
-              // Com empréstimo ativo + atraso → Renegociar (se autorizado)
-              if (!c.permite_renegociacao) {
-                return (<View style={[S.btReneg, { opacity: 0.4 }]}><Text style={S.btRenegI}>🔄</Text><Text style={S.btRenegT}>{t.renegociar}</Text></View>);
+
+        {/* === LINHA 1: Avatar + Nome + Badges === */}
+        <View style={S.cardRow}>
+          <View style={[S.av, { backgroundColor: a ? '#EF4444' : '#64748B' }]}>
+            <Text style={S.avTx}>{getIni(c.nome)}</Text>
+          </View>
+          <View style={S.cardInfo}>
+            <View style={S.nameRow}>
+              <Text style={S.nome} numberOfLines={1}>{c.nome}</Text>
+              {vencidas > 0 && <View style={S.bWarnNew}><Text style={S.bWarnNewI}>⚠</Text><Text style={S.bWarnNewT}>{vencidas}</Text></View>}
+            </View>
+            {c.telefone_celular && <Text style={S.sub} numberOfLines={1}>📞 {fmtTel(c.telefone_celular)}</Text>}
+          </View>
+        </View>
+
+        {/* === LINHA 2: Info empréstimo === */}
+        {emp && (
+          <View style={S.pRow}>
+            <View>
+              <View style={S.pLblR}>
+                <Text style={S.pLbl}>{t.parcela} {emp.numero_parcela_atual}/{emp.numero_parcelas}</Text>
+                <View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[lang][emp.frequencia_pagamento] || emp.frequencia_pagamento}</Text></View>
+              </View>
+            </View>
+            <View style={S.sCol}>
+              <Text style={S.pValBig}>{fmt(emp.valor_parcela)}</Text>
+              <Text style={S.sLbl}>{t.saldoEmprestimo} {fmt(emp.saldo_emprestimo)}</Text>
+            </View>
+          </View>
+        )}
+
+        {/* === EXPANDIDO (1 clique) === */}
+        {ex && emp && (
+          <View style={S.exp}>
+            {/* Alerta vencidas */}
+            {emp.total_parcelas_vencidas > 0 && <View style={S.aR}><Text style={S.aRT}>⚠ {emp.total_parcelas_vencidas} {t.parcelasVencidas}</Text><Text style={S.aRS}>{t.totalAtraso} {fmt(emp.valor_total_vencido)}</Text></View>}
+
+            {/* Navegação múltiplos empréstimos */}
+            {c.emprestimos.length > 1 && (<View style={S.eNav}><TouchableOpacity onPress={() => setEmpIdxTodos(p => ({ ...p, [c.id]: Math.max(0, ei - 1) }))} disabled={ei === 0} style={[S.eNBtn, ei === 0 && S.eNOff]}><Text style={S.eNBTx}>◀</Text></TouchableOpacity>{c.emprestimos.map((_, i) => <View key={i} style={[S.eDot, i === ei && S.eDotOn]} />)}<TouchableOpacity onPress={() => setEmpIdxTodos(p => ({ ...p, [c.id]: Math.min(c.emprestimos.length - 1, ei + 1) }))} disabled={ei >= c.emprestimos.length - 1} style={[S.eNBtn, ei >= c.emprestimos.length - 1 && S.eNOff]}><Text style={S.eNBTx}>▶</Text></TouchableOpacity><Text style={S.eNLbl}> {t.emprestimo} {ei + 1}/{c.emprestimos.length}</Text></View>)}
+
+            {/* Ações: Renovação / Renegociação */}
+            {(() => {
+              const temAtivo = c.emprestimos.some(e => e.status === 'ATIVO' || e.status === 'VENCIDO');
+              const temAtraso = c.tem_atraso;
+              if (!temAtivo) {
+                return (<TouchableOpacity style={S.tAddRowActive} onPress={() => {
+                  const confirmar = () => { const nav = navigation.getParent() || navigation; nav.navigate('NovoCliente', { clienteExistente: { id: c.id, nome: c.nome, telefone_celular: c.telefone_celular, documento: c.codigo_cliente?.toString() || '' } }); };
+                  if (Platform.OS === 'web') { if (window.confirm(t.confirmarNovoEmprestimo)) confirmar(); }
+                  else { Alert.alert(t.novoEmprestimo, t.confirmarNovoEmprestimo, [{ text: t.nao, style: 'cancel' }, { text: t.sim, onPress: confirmar }]); }
+                }}><Text style={S.tAddIconActive}>＋</Text><Text style={S.tAddTextActive}>{t.novoEmprestimo}</Text></TouchableOpacity>);
               }
-              return (<TouchableOpacity style={S.btReneg} onPress={() => {
-                const nav = navigation.getParent() || navigation;
-                nav.navigate('NovoCliente', { renegociacao: { emprestimo_id: emp.id, cliente_id: c.id, cliente_nome: c.nome, saldo_devedor: emp.saldo_emprestimo, telefone_celular: c.telefone_celular, codigo_cliente: c.codigo_cliente } });
-              }}><Text style={S.btRenegI}>🔄</Text><Text style={S.btRenegT}>{t.renegociar}</Text></TouchableOpacity>);
-            }
-            if (c.emprestimos.length === 1) {
-              // Ativo sem atraso → Adicional desabilitado
-              return (<View style={S.tAddRow}><Text style={S.tAddIcon}>⊕</Text><Text style={S.tAddText}>{t.empAdicional}</Text></View>);
-            }
-            return null;
-          })()}
-          <View style={S.btR}><TouchableOpacity style={[S.bt, S.btRed]} onPress={() => c.telefone_celular && Linking.openURL(`tel:${c.telefone_celular.replace(/\D/g, '')}`)} disabled={!c.telefone_celular}><Text style={S.btI}>💬</Text><Text style={S.btW}>{t.contato}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btBl]} onPress={() => abrirParcelas(c.id, c.nome, emp.id, emp.status)}><Text style={S.btI}>👁</Text><Text style={S.btW}>{t.verParcelas}</Text></TouchableOpacity><TouchableOpacity style={[S.bt, S.btOY]} onPress={() => { setNotasClienteId(c.id); setNotasClienteNome(c.nome); setModalNotasClienteVisible(true); }}><Text style={S.btI}>📝</Text><Text style={S.btW}>{(notasCountMap.get(c.id) || 0) > 0 ? `${t.notas || 'Notas'} (${notasCountMap.get(c.id)})` : (t.notas || 'Notas')}</Text></TouchableOpacity></View>
-          <TouchableOpacity style={S.btDetalhes} onPress={() => { setDetalhesCliente({ id: c.id, nome: c.nome, telefone: c.telefone_celular, codigo_cliente: c.codigo_cliente }); setModalDetalhesVisible(true); }}><Text style={S.btDetalhesIcon}>ℹ️</Text><Text style={S.btDetalhesTx}>{lang === 'es' ? 'Ficha del Cliente' : 'Ficha do Cliente'}</Text></TouchableOpacity>
-        </View>)}
+              if (temAtivo && temAtraso) {
+                if (!c.permite_renegociacao) return (<View style={[S.btReneg, { opacity: 0.4 }]}><Text style={S.btRenegI}>🔄</Text><Text style={S.btRenegT}>{t.renegociar}</Text></View>);
+                return (<TouchableOpacity style={S.btReneg} onPress={() => { const nav = navigation.getParent() || navigation; nav.navigate('NovoCliente', { renegociacao: { emprestimo_id: emp.id, cliente_id: c.id, cliente_nome: c.nome, saldo_devedor: emp.saldo_emprestimo, telefone_celular: c.telefone_celular, codigo_cliente: c.codigo_cliente } }); }}><Text style={S.btRenegI}>🔄</Text><Text style={S.btRenegT}>{t.renegociar}</Text></TouchableOpacity>);
+              }
+              return null;
+            })()}
+
+            {/* Parcelas + Notas na mesma linha */}
+            <View style={S.expActRow}>
+              <TouchableOpacity style={S.btSecVerde} onPress={() => abrirParcelas(c.id, c.nome, emp.id, emp.status)}>
+                <View style={S.btSecIconBox}><Text style={S.btSecIconTx}>☰</Text></View>
+              </TouchableOpacity>
+              <TouchableOpacity style={S.btSecAmarelo} onPress={() => { setNotasClienteId(c.id); setNotasClienteNome(c.nome); setModalNotasClienteVisible(true); }}>
+                <View style={S.btSecIconBox}><Text style={S.btSecIconTx}>✎</Text></View>
+                {notasCli > 0 && <View style={S.btSecBadge}><Text style={S.btSecBadgeT}>{notasCli}</Text></View>}
+              </TouchableOpacity>
+            </View>
+
+            {/* Link detalhes */}
+            <TouchableOpacity style={S.linkDetalhes} onPress={() => {
+              setDetalhesCliente({ id: c.id, nome: c.nome, telefone: c.telefone_celular, codigo_cliente: c.codigo_cliente });
+              setModalDetalhesVisible(true);
+            }}>
+              <Text style={S.linkDetalhesTx}>{lang === 'es' ? 'Toque para ver detalles' : 'Toque para ver detalhes'} ▽</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </TouchableOpacity>);
   };
 
@@ -1962,6 +2027,34 @@ const S = StyleSheet.create({
   cardInfo: { flex: 1 }, nameRow: { flexDirection: 'row', alignItems: 'center' },
   nome: { flex: 1, fontSize: 14, fontWeight: '600', color: '#1F2937' },
   bWarn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF2F2', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 10, marginLeft: 4, borderWidth: 1, borderColor: '#FECACA' },
+  bWarnNew: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEE2E2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10, marginLeft: 6, gap: 2 },
+  bWarnNewI: { fontSize: 10, color: '#EF4444' },
+  bWarnNewT: { fontSize: 10, fontWeight: '700', color: '#EF4444' },
+
+  // Linha de ação expandida
+  expActRow: { flexDirection: 'row', gap: 8, marginBottom: 6, alignItems: 'center' },
+
+  // Botão grande Pagar
+  btPagarGrande: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#10B981', borderRadius: 10, paddingVertical: 12, gap: 8 },
+  btPagarDisabled: { backgroundColor: '#D1D5DB' },
+  btPagarIcon: { fontSize: 16, fontWeight: '800', color: '#FFF' },
+  btPagarText: { fontSize: 15, fontWeight: '700', color: '#FFF' },
+  btPagarValor: { backgroundColor: 'rgba(255,255,255,0.25)', paddingHorizontal: 10, paddingVertical: 2, borderRadius: 8 },
+  btPagarValorText: { fontSize: 13, fontWeight: '700', color: '#FFF' },
+
+  // Botões secundários (parcelas + notas)
+  btSecRow: { flexDirection: 'row', gap: 8 },
+  btSecVerde: { width: 46, height: 46, borderRadius: 10, backgroundColor: '#10B981', alignItems: 'center', justifyContent: 'center' },
+  btSecAmarelo: { width: 46, height: 46, borderRadius: 10, backgroundColor: '#F59E0B', alignItems: 'center', justifyContent: 'center' },
+  btSecIcon: { fontSize: 18 },
+  btSecIconBox: { alignItems: 'center', justifyContent: 'center' },
+  btSecIconTx: { fontSize: 20, color: '#FFF', fontWeight: '700' },
+  btSecBadge: { position: 'absolute', top: -4, right: -4, backgroundColor: '#EF4444', borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  btSecBadgeT: { fontSize: 9, fontWeight: '700', color: '#FFF' },
+
+  // Link detalhes
+  linkDetalhes: { alignItems: 'center', paddingVertical: 4 },
+  linkDetalhesTx: { fontSize: 12, color: '#9CA3AF' },
   bWarnI: { fontSize: 10, color: '#F59E0B', marginRight: 2 }, bWarnT: { fontSize: 10, fontWeight: '700', color: '#DC2626' },
   bMul: { backgroundColor: '#FED7AA', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 10, marginLeft: 3 }, bMulT: { fontSize: 10, fontWeight: '700', color: '#C2410C' },
   bNota: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#EFF6FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 4, gap: 2, borderWidth: 1, borderColor: '#BFDBFE' }, bNotaI: { fontSize: 8 }, bNotaT: { fontSize: 9, fontWeight: '700', color: '#2563EB' },
@@ -1970,6 +2063,7 @@ const S = StyleSheet.create({
   pLblR: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }, pLbl: { fontSize: 11, color: '#6B7280' },
   fBdg: { backgroundColor: '#EDE9FE', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }, fBdgT: { fontSize: 9, fontWeight: '600', color: '#7C3AED' },
   pVal: { fontSize: 15, fontWeight: '700', color: '#1F2937' },
+  pValBig: { fontSize: 18, fontWeight: '800', color: '#1F2937', textAlign: 'right' },
   sCol: { alignItems: 'flex-end' }, sLbl: { fontSize: 11, color: '#6B7280', marginBottom: 2 }, sVal: { fontSize: 15, fontWeight: '700', color: '#1F2937' },
   pgVal: { fontSize: 14, fontWeight: '700', color: '#059669' }, pgOrig: { fontSize: 10, color: '#9CA3AF' }, pgCred: { fontSize: 10, color: '#2563EB' },
   exp: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6' },

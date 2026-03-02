@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Linking,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -106,6 +107,30 @@ const fmtData = (d: string | null) => {
 const getIni = (nome: string) => {
   const p = nome.trim().split(' ');
   return (p[0]?.[0] || '') + (p[p.length > 1 ? p.length - 1 : 0]?.[0] || '');
+};
+
+// Formata número para WhatsApp: remove tudo exceto dígitos, adiciona código país se necessário
+const fmtWhatsApp = (tel: string): string => {
+  let digits = tel.replace(/\D/g, '');
+  // Se começa com 0, remove
+  if (digits.startsWith('0')) digits = digits.substring(1);
+  // Se não tem código país (menos de 11 dígitos ou não começa com 55/57/51)
+  if (digits.length <= 11 && !digits.startsWith('55') && !digits.startsWith('57') && !digits.startsWith('51')) {
+    // Tenta detectar: BR (11 dígitos celular), CO (10 dígitos), PE (9 dígitos)
+    if (digits.length === 11 || digits.length === 10) digits = '55' + digits; // Assume BR
+    else if (digits.length === 10) digits = '57' + digits; // CO
+    else if (digits.length === 9) digits = '51' + digits; // PE
+    else digits = '55' + digits; // Default BR
+  }
+  return digits;
+};
+
+const abrirMapa = (endereco: string) => {
+  const enc = encodeURIComponent(endereco);
+  const url = Platform.OS === 'ios' ? `maps:?daddr=${enc}` : `google.navigation:q=${enc}`;
+  Linking.openURL(url).catch(() => {
+    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${enc}`).catch(() => {});
+  });
 };
 
 const corStatus: Record<string, { bg: string; text: string }> = {
@@ -239,23 +264,39 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
             <Text style={S.dadoValue}>{cli.documento || cliente.documento}</Text>
           </View>
         )}
-        {(cli.telefone_celular || cliente.telefone) && (
-          <View style={S.dadoRow}>
-            <Text style={S.dadoLabel}>📱 {t.telefone}</Text>
-            <TouchableOpacity onPress={() => {
-              const tel = cli.telefone_celular || cliente.telefone;
-              if (tel) Linking.openURL(`tel:${tel.replace(/\D/g, '')}`);
-            }}>
-              <Text style={[S.dadoValue, { color: '#2563EB' }]}>{cli.telefone_celular || cliente.telefone}</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-        {(cli.endereco || cliente.endereco) && (
-          <View style={S.dadoRow}>
-            <Text style={S.dadoLabel}>📍 {t.endereco}</Text>
-            <Text style={S.dadoValue}>{cli.endereco || cliente.endereco}</Text>
-          </View>
-        )}
+        {(cli.telefone_celular || cliente.telefone) && (() => {
+          const tel = cli.telefone_celular || cliente.telefone || '';
+          return (
+            <View style={S.dadoRow}>
+              <Text style={S.dadoLabel}>📱 {t.telefone}</Text>
+              <View style={S.dadoActions}>
+                <TouchableOpacity onPress={() => Linking.openURL(`tel:${tel.replace(/\D/g, '')}`)}>
+                  <Text style={[S.dadoValue, { color: '#2563EB' }]}>{tel}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={S.whatsappBtn} onPress={() => {
+                  const num = fmtWhatsApp(tel);
+                  Linking.openURL(`https://wa.me/${num}`);
+                }}>
+                  <Text style={S.whatsappIcon}>💬</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        })()}
+        {(cli.endereco || cliente.endereco) && (() => {
+          const end = cli.endereco || cliente.endereco || '';
+          return (
+            <View style={S.dadoRow}>
+              <Text style={S.dadoLabel}>📍 {t.endereco}</Text>
+              <View style={S.dadoActions}>
+                <Text style={S.dadoValue} numberOfLines={2}>{end}</Text>
+                <TouchableOpacity style={S.mapaBtn} onPress={() => abrirMapa(end)}>
+                  <Text style={S.mapaIcon}>🧭</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        })()}
       </View>
 
       {/* Resumo rápido empréstimos */}
@@ -484,7 +525,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
 // ==================== ESTILOS ====================
 const S = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  container: { backgroundColor: '#FFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '92%', minHeight: '60%' },
+  container: { backgroundColor: '#FFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '95%', minHeight: '85%', flex: 1 },
 
   // Header
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
@@ -520,8 +561,13 @@ const S = StyleSheet.create({
 
   dadosCard: { backgroundColor: '#F9FAFB', borderRadius: 12, padding: 14, gap: 12 },
   dadoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  dadoLabel: { fontSize: 13, color: '#6B7280' },
+  dadoLabel: { fontSize: 13, color: '#6B7280', minWidth: 80 },
   dadoValue: { fontSize: 13, fontWeight: '600', color: '#1F2937', textAlign: 'right', flex: 1, marginLeft: 12 },
+  dadoActions: { flexDirection: 'row', alignItems: 'center', flex: 1, justifyContent: 'flex-end', gap: 8 },
+  whatsappBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#25D366', alignItems: 'center', justifyContent: 'center' },
+  whatsappIcon: { fontSize: 15 },
+  mapaBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' },
+  mapaIcon: { fontSize: 15 },
 
   resumoCard: { marginTop: 16, backgroundColor: '#EFF6FF', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#BFDBFE' },
   resumoTitle: { fontSize: 13, fontWeight: '600', color: '#1E40AF', marginBottom: 8 },
