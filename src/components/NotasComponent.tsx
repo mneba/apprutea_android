@@ -145,12 +145,15 @@ export function ModalNotasLista({
     if (!rotaId) return;
     setLoading(true);
     try {
+      // Se aberto para um cliente específico, buscar de TODAS as liquidações
+      // Se aberto da liquidação (sem cliente), filtrar pela liquidação atual
+      const filtrarLiquidacao = clienteId ? null : (liquidacaoId || null);
       const { data, error } = await supabase.rpc('fn_listar_notas', {
         p_rota_id: rotaId,
-        p_data_inicio: dataReferencia || null,
-        p_data_fim: dataReferencia || null,
+        p_data_inicio: filtrarLiquidacao ? null : (dataReferencia || null),
+        p_data_fim: filtrarLiquidacao ? null : (dataReferencia || null),
         p_cliente_id: clienteId || null,
-        p_liquidacao_id: liquidacaoId || null,
+        p_liquidacao_id: filtrarLiquidacao,
         p_status: null,
         p_prioridade: null,
         p_limite: 100,
@@ -261,9 +264,16 @@ export function ModalNotasLista({
   }, [novoTexto, empresaId, rotaId, vendedorId, autorNome, autorTipo, liquidacaoId, clienteId, dataReferencia, coords, obsLocalPadrao, carregarNotas, t]);
 
   // Formatar data/hora para exibição
+  // Formatar data/hora para exibição
   const fmtDataHora = (dt: string) => {
     const d = new Date(dt);
     return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  // Formatar data curta (dd/mm/yy)
+  const fmtDataCurta = (dt: string) => {
+    const d = new Date(dt.includes('T') ? dt : dt + 'T00:00:00');
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
   };
 
   const renderNota = ({ item: n }: { item: Nota }) => {
@@ -325,6 +335,22 @@ export function ModalNotasLista({
             {n.autor_tipo === 'MONITOR' ? '👁 ' : ''}{n.autor_nome}
           </Text>
         </View>
+
+        {/* Info liquidação + parcela (quando aberto de cliente, mostra contexto) */}
+        {clienteId && (n.data_referencia || n.numero_parcela) && (
+          <View style={S.notaContextRow}>
+            {n.data_referencia && (
+              <View style={S.notaContextBadge}>
+                <Text style={S.notaContextTx}>📅 {fmtDataCurta(n.data_referencia)}</Text>
+              </View>
+            )}
+            {n.numero_parcela && (
+              <View style={S.notaContextBadge}>
+                <Text style={S.notaContextTx}>{t.parcela} {n.numero_parcela}</Text>
+              </View>
+            )}
+          </View>
+        )}
 
         {/* Editar (expandido) */}
         {isExpanded && podeEditar && !isEditando && (
@@ -433,7 +459,7 @@ export function ModalNotasLista({
               </View>
             ) : (
               <TouchableOpacity style={S.inlineNovaBtn} onPress={() => { setCriando(true); setTimeout(() => inputNovoRef.current?.focus(), 200); }}>
-                <Text style={S.inlineNovaBtnTx}>+ {t.novaNota}</Text>
+                <Text style={S.inlineNovaBtnTx}>{t.novaNota}</Text>
               </TouchableOpacity>
             )
           )}
@@ -689,6 +715,11 @@ const S = StyleSheet.create({
   // Meta row da nota (data + autor)
   notaDataHora: { fontSize: 11, color: '#9CA3AF' },
   notaAutor: { fontSize: 11, color: '#6B7280', fontWeight: '500' },
+
+  // Contexto da nota (data liquidação + parcela)
+  notaContextRow: { flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' },
+  notaContextBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0F9FF', borderWidth: 1, borderColor: '#BAE6FD', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  notaContextTx: { fontSize: 10, fontWeight: '600', color: '#0369A1' },
   btnNovaNotaText: { fontSize: 14, fontWeight: '600', color: '#FFF' },
 
   // Criar nota
@@ -708,15 +739,18 @@ const S = StyleSheet.create({
 });
 
 // ==================== UTILITÁRIO: Buscar contagem de notas por lista de clientes ====================
-export async function buscarNotasCountPorClientes(clienteIds: string[]): Promise<Map<string, number>> {
+export async function buscarNotasCountPorClientes(clienteIds: string[], vendedorId?: string): Promise<Map<string, number>> {
   const map = new Map<string, number>();
   if (clienteIds.length === 0) return map;
   try {
-    const { data } = await supabase
+    let query = supabase
       .from('notas')
       .select('cliente_id')
       .in('cliente_id', clienteIds)
       .eq('status', 'ATIVA');
+    // Vendedor só vê notas que ele mesmo criou
+    if (vendedorId) query = query.eq('autor_id', vendedorId);
+    const { data } = await query;
     (data || []).forEach((n: any) => {
       map.set(n.cliente_id, (map.get(n.cliente_id) || 0) + 1);
     });

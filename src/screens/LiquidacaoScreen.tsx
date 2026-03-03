@@ -205,17 +205,21 @@ export default function LiquidacaoScreen({ navigation }: any) {
     }
   }, [liquidacao?.id, liquidacao?.status]);
 
-  // Buscar contagem de notas ativas da rota
+  // Buscar contagem de notas ativas da liquidação atual (só do vendedor)
   useEffect(() => {
-    if (!vendedor?.rota_id) return;
+    if (!vendedor?.rota_id || !liquidacao?.id) { setNotasCount(0); return; }
     (async () => {
       try {
-        const { data } = await supabase.rpc('fn_contar_notas_ativas', { p_rota_id: vendedor.rota_id });
+        const { data } = await supabase.rpc('fn_contar_notas_ativas', {
+          p_rota_id: vendedor.rota_id,
+          p_liquidacao_id: liquidacao.id,
+          p_vendedor_id: vendedor.id,
+        });
         const res = Array.isArray(data) ? data[0] : data;
         setNotasCount(res?.total || 0);
       } catch { }
     })();
-  }, [liquidacao?.id, vendedor?.rota_id]);
+  }, [liquidacao?.id, vendedor?.rota_id, vendedor?.id]);
   
   // Dados do modo visualização (dias sem liquidação)
   const [dadosVisualizacao, setDadosVisualizacao] = useState<{
@@ -1251,7 +1255,11 @@ export default function LiquidacaoScreen({ navigation }: any) {
             visible={modalNotasVisible}
             onClose={() => {
               setModalNotasVisible(false);
-              supabase.rpc('fn_contar_notas_ativas', { p_rota_id: vendedor?.rota_id }).then(({ data }) => {
+              supabase.rpc('fn_contar_notas_ativas', {
+                p_rota_id: vendedor?.rota_id,
+                p_liquidacao_id: liquidacao?.id || null,
+                p_vendedor_id: vendedor?.id || null,
+              }).then(({ data }) => {
                 const res = Array.isArray(data) ? data[0] : data;
                 setNotasCount(res?.total || 0);
               }).catch(() => {});

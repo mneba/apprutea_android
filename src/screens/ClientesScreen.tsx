@@ -772,7 +772,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     raw.forEach(r => ids.add(r.cliente_id));
     todosList.forEach(c => ids.add(c.id));
     if (ids.size === 0) return;
-    buscarNotasCountPorClientes(Array.from(ids)).then(setNotasCountMap);
+    buscarNotasCountPorClientes(Array.from(ids), vendedor?.id).then(setNotasCountMap);
   }, [raw.length, todosList.length]);
   
   // Quando o contexto carrega a liquidação aberta, ativar aba liquidação
@@ -1931,7 +1931,7 @@ export default function ClientesScreen({ navigation, route }: any) {
           setModalNotaVisible(false); setNotaClienteId(null); setNotaClienteNome(null); setNotaEmprestimoId(null);
           // Recarregar contagem de notas
           const ids = new Set<string>(); raw.forEach(r => ids.add(r.cliente_id)); todosList.forEach(c => ids.add(c.id));
-          if (ids.size > 0) buscarNotasCountPorClientes(Array.from(ids)).then(setNotasCountMap);
+          if (ids.size > 0) buscarNotasCountPorClientes(Array.from(ids), vendedor?.id).then(setNotasCountMap);
         }}
         rotaId={vendedor?.rota_id || ''}
         empresaId={vendedor?.empresa_id || ''}
@@ -1954,7 +1954,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         onClose={() => { 
           setModalNotasClienteVisible(false); setNotasClienteId(null); setNotasClienteNome(null);
           const ids = new Set<string>(); raw.forEach(r => ids.add(r.cliente_id)); todosList.forEach(c => ids.add(c.id));
-          if (ids.size > 0) buscarNotasCountPorClientes(Array.from(ids)).then(setNotasCountMap);
+          if (ids.size > 0) buscarNotasCountPorClientes(Array.from(ids), vendedor?.id).then(setNotasCountMap);
         }}
         rotaId={vendedor?.rota_id || ''}
         empresaId={vendedor?.empresa_id || ''}
