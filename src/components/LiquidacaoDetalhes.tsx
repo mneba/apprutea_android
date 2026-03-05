@@ -3,6 +3,7 @@
 // Arquivo: src/components/LiquidacaoDetalhes.tsx
 // =====================================================
 
+import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -18,7 +19,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { captureRef } from 'react-native-view-shot';
 import { supabase } from '../services/supabase';
 
 const { width, height } = Dimensions.get('window');
@@ -54,7 +54,7 @@ const i18n: Record<Lang, Record<string, string>> = {
     movimentacoes: 'MOVIMENTAÇÕES', nenhuma: 'Nenhuma movimentação',
     totalCobrancas: 'TOTAL COBRANÇAS',
     totalSaidas: 'TOTAL SAIDAS', saldoFinal: 'SALDO FINAL',
-    fimExtrato: '*** FIM DO EXTRATO ***', compartilhar: 'Compartilhar Extrato',
+    fimExtrato: '*** FIM DO EXTRATO ***', compartilhar: 'Compartilhar PDF',
     pagamentos: 'Pagamentos', pagos: 'Pagos', naoPagos: 'Não Pagos',
     recebido: 'Recebido', dinheiro: 'Dinheiro', transferencia: 'Transf/PIX',
     parcela: 'Parcela', credito: 'Crédito', creditoUsado: 'Crédito usado',
@@ -74,7 +74,7 @@ const i18n: Record<Lang, Record<string, string>> = {
     movimentacoes: 'MOVIMIENTOS', nenhuma: 'Ningún movimiento',
     totalCobrancas: 'TOTAL COBROS',
     totalSaidas: 'TOTAL SALIDAS', saldoFinal: 'SALDO FINAL',
-    fimExtrato: '*** FIN DEL EXTRACTO ***', compartilhar: 'Compartir Extracto',
+    fimExtrato: '*** FIN DEL EXTRACTO ***', compartilhar: 'Compartir PDF',
     pagamentos: 'Pagos', pagos: 'Pagados', naoPagos: 'No Pagados',
     recebido: 'Recibido', dinheiro: 'Efectivo', transferencia: 'Transf/PIX',
     parcela: 'Cuota', credito: 'Crédito', creditoUsado: 'Crédito usado',
@@ -181,25 +181,136 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const [compartilhando, setCompartilhando] = useState(false);
 
   const compartilharExtrato = async () => {
-    if (!extratoViewRef.current || compartilhando) return;
+    if (compartilhando) return;
     setCompartilhando(true);
     try {
-      const uri = await captureRef(extratoViewRef, {
-        format: 'png',
-        quality: 1,
-        result: 'tmpfile',
-      });
 
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        await Sharing.shareAsync(uri, {
-          mimeType: 'image/png',
-          dialogTitle: `Extrato ${dataHoje}`,
-        });
+      const html = `
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+  @page { margin: 10mm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 13px;
+    color: #222;
+    background: #FFF;
+    padding: 0;
+    display: flex;
+    justify-content: center;
+  }
+  .cupom {
+    width: 72mm;
+    margin: 0 auto;
+    padding: 4mm 0;
+  }
+  .c { text-align: center; }
+  .cb { text-align: center; font-weight: 700; }
+  .sub { text-align: center; color: #666; font-size: 10px; margin-top: 2px; }
+  .sep { border: none; border-top: 1px dashed #CCC; margin: 6px 0; }
+  .sep2 { border: none; border-top: 2px solid #AAA; margin: 6px 0; }
+  .row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 2px 0;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .row .r { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .sm { font-size: 11px; }
+  .b { font-weight: 700; }
+  .lg { font-size: 14px; font-weight: 700; }
+  .verde { color: #059669; }
+  .verm { color: #DC2626; }
+  .cinza { color: #999; }
+
+  .mov { margin-top: 5px; padding-bottom: 4px; border-bottom: 1px dotted #DDD; }
+  .mov:last-child { border-bottom: none; }
+  .mov-row { display: flex; align-items: baseline; }
+  .mov-idx { color: #999; width: 20px; font-size: 11px; flex-shrink: 0; }
+  .mov-cat { flex: 1; font-weight: 600; font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .mov-val { font-weight: 700; font-size: 12px; flex-shrink: 0; white-space: nowrap; padding-left: 6px; }
+  .mov-sub { color: #666; font-size: 10px; padding-left: 20px; margin-top: 1px; }
+  .mov-meta { display: flex; justify-content: space-between; color: #999; font-size: 9px; padding-left: 20px; }
+</style></head>
+<body>
+<div class="cupom">
+
+  <div class="cb" style="font-size:14px">${rotaNome || 'Rota'}</div>
+  <div class="sub">${t.extratoLiq}</div>
+  <hr class="sep2">
+  <div class="cb" style="font-size:12px">${dataHoje}&nbsp;&nbsp;${horaAgora}</div>
+  <hr class="sep">
+
+  <div class="row"><span>${t.caixaInicial}</span><span class="r">${fmt(caixaInicial)}</span></div>
+  <hr class="sep">
+  <div class="row"><span class="verde">${t.cobrancas}</span><span class="r verde">${fmt(totalPagamentos)}</span></div>
+  <div class="row"><span class="verm">${t.saidas}</span><span class="r verm">${fmt(totalSaidas)}</span></div>
+  <hr class="sep2">
+  <div class="row"><span class="lg">${t.caixaFinal}</span><span class="r lg">${fmt(caixaFinal)}</span></div>
+  <hr class="sep2">
+
+  ${registros.length > 0 ? `
+    <div class="cb" style="margin-top:10px;font-size:12px">${t.movimentacoes} (${registros.length})</div>
+    <hr class="sep">
+    ${registros.map((item, idx) => {
+      const isE = item.tipo === 'RECEBER';
+      const sinal = isE ? '+' : '-';
+      const cor = isE ? 'verde' : 'verm';
+      const sub = item.cliente_nome || item.descricao || '';
+      return `<div class="mov">
+        <div class="mov-row">
+          <span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span>
+          <span class="mov-cat">${formatarCategoria(item.categoria)}</span>
+          <span class="mov-val ${cor}">${sinal}${fmt(parseFloat(item.valor))}</span>
+        </div>
+        ${sub ? `<div class="mov-sub">${sub}</div>` : ''}
+        <div class="mov-meta"><span>${fmtHora(item.created_at)}</span>${item.forma_pagamento ? `<span>${item.forma_pagamento}</span>` : ''}</div>
+      </div>`;
+    }).join('')}
+  ` : `<div class="cb" style="margin-top:10px">${t.nenhuma}</div>`}
+
+  ${pagamentos.length > 0 ? `
+    <hr class="sep">
+    <div class="cb" style="margin-top:4px;font-size:12px">${t.cobrancas.replace('(+) ', '')} (${pagamentos.length})</div>
+    <hr class="sep">
+    ${pagamentos.map((p) => {
+      const nome = p.cliente?.nome || t.cliente;
+      return `<div class="row sm"><span>${nome}</span><span class="r verde b">+${fmt(parseFloat(p.valor_pago_total || 0))}</span></div>`;
+    }).join('')}
+  ` : ''}
+
+  <hr class="sep2">
+  <div class="row"><span>${t.totalCobrancas}</span><span class="r verde b">${fmt(totalPagamentos)}</span></div>
+  <div class="row"><span>${t.totalSaidas}</span><span class="r verm b">${fmt(totalSaidas)}</span></div>
+  <hr class="sep">
+  <div class="row"><span class="lg">${t.saldoFinal}</span><span class="r lg">${fmt(caixaFinal)}</span></div>
+  <hr class="sep2">
+  <div class="c" style="margin-top:8px;font-size:10px;color:#999">${t.fimExtrato}</div>
+
+</div>
+</body></html>`;
+
+      if (Platform.OS === 'web') {
+        // Web: abre diálogo de impressão do browser (pode salvar como PDF)
+        await Print.printAsync({ html });
+      } else {
+        // Mobile: gera arquivo PDF e compartilha
+        const result = await Print.printToFileAsync({ html });
+        if (result?.uri) {
+          const canShare = await Sharing.isAvailableAsync();
+          if (canShare) {
+            await Sharing.shareAsync(result.uri, {
+              mimeType: 'application/pdf',
+              dialogTitle: `${t.extratoDia} ${dataHoje}`,
+            });
+          }
+        }
       }
     } catch (e) {
-      console.error('Erro ao compartilhar:', e);
-      // Fallback: compartilha como texto
+      console.error('Erro ao gerar PDF:', e);
       try {
         let txt = `${rotaNome || 'Rota'} - ${t.extratoDia} ${dataHoje}\n`;
         txt += `${t.caixaInicial}: ${fmt(caixaInicial)}\n`;
