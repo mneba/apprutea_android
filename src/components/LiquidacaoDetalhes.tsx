@@ -49,13 +49,15 @@ type Lang = 'pt-BR' | 'es';
 const i18n: Record<Lang, Record<string, string>> = {
   'pt-BR': {
     extratoDia: 'EXTRATO DO DIA', extratoLiq: 'EXTRATO LIQUIDAÇÃO DIÁRIA',
-    caixaInicial: 'CAIXA INICIAL', saidas: '(-) SAIDAS',
+    caixaInicial: 'CAIXA INICIAL', saidas: '(-) SAÍDAS',
     cobrancas: '(+) COBRANÇAS', caixaFinal: 'CAIXA FINAL',
     movimentacoes: 'MOVIMENTAÇÕES', nenhuma: 'Nenhuma movimentação',
     totalCobrancas: 'TOTAL COBRANÇAS',
-    totalSaidas: 'TOTAL SAIDAS', saldoFinal: 'SALDO FINAL',
+    totalSaidas: 'TOTAL SAÍDAS', saldoFinal: 'SALDO FINAL',
     fimExtrato: '*** FIM DO EXTRATO ***', compartilhar: 'Compartilhar PDF',
-    pagamentos: 'Pagamentos', pagos: 'Pagos', naoPagos: 'Não Pagos',
+    detalheEntradas: 'DETALHES ENTRADAS', detalheSaidas: 'DETALHES SAÍDAS',
+    resumo: 'RESUMO',
+    pagamentos: 'Pagamentos', pagos: 'Clientes pagos', naoPagos: 'Não Pagos',
     recebido: 'Recebido', dinheiro: 'Dinheiro', transferencia: 'Transf/PIX',
     parcela: 'Parcela', credito: 'Crédito', creditoUsado: 'Crédito usado',
     creditoGerado: 'Crédito gerado', semPagamentos: 'Nenhum pagamento registrado',
@@ -65,7 +67,7 @@ const i18n: Record<Lang, Record<string, string>> = {
     totalVendido: 'Total Vendido', contratos: 'Contratos',
     semMicroseguro: 'Nenhuma venda de microseguro', emprestimo: 'Empréstimo',
     vendedor: 'Vendedor', cliente: 'Cliente', valor: 'Valor', hora: 'Hora',
-    fechar: 'Fechar',
+    fechar: 'Fechar', nenhumaEntrada: 'Nenhuma entrada', nenhunaSaida: 'Nenhuma saída',
   },
   'es': {
     extratoDia: 'EXTRACTO DEL DÍA', extratoLiq: 'EXTRACTO LIQUIDACIÓN DIARIA',
@@ -75,7 +77,9 @@ const i18n: Record<Lang, Record<string, string>> = {
     totalCobrancas: 'TOTAL COBROS',
     totalSaidas: 'TOTAL SALIDAS', saldoFinal: 'SALDO FINAL',
     fimExtrato: '*** FIN DEL EXTRACTO ***', compartilhar: 'Compartir PDF',
-    pagamentos: 'Pagos', pagos: 'Pagados', naoPagos: 'No Pagados',
+    detalheEntradas: 'DETALLE ENTRADAS', detalheSaidas: 'DETALLE SALIDAS',
+    resumo: 'RESUMEN',
+    pagamentos: 'Pagos', pagos: 'Clientes pagados', naoPagos: 'No Pagados',
     recebido: 'Recibido', dinheiro: 'Efectivo', transferencia: 'Transf/PIX',
     parcela: 'Cuota', credito: 'Crédito', creditoUsado: 'Crédito usado',
     creditoGerado: 'Crédito generado', semPagamentos: 'Ningún pago registrado',
@@ -85,7 +89,7 @@ const i18n: Record<Lang, Record<string, string>> = {
     totalVendido: 'Total Vendido', contratos: 'Contratos',
     semMicroseguro: 'Ninguna venta de microseguro', emprestimo: 'Préstamo',
     vendedor: 'Vendedor', cliente: 'Cliente', valor: 'Valor', hora: 'Hora',
-    fechar: 'Cerrar',
+    fechar: 'Cerrar', nenhumaEntrada: 'Ninguna entrada', nenhunaSaida: 'Ninguna salida',
   },
 };
 
@@ -171,7 +175,10 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   };
 
   const totalSaidas = registros.filter(r => r.tipo === 'PAGAR').reduce((s, r) => s + parseFloat(r.valor), 0);
+  const totalEntradas = registros.filter(r => r.tipo === 'RECEBER').reduce((s, r) => s + parseFloat(r.valor), 0);
   const totalPagamentos = pagamentos.reduce((s, p) => s + parseFloat(p.valor_pago_total || 0), 0);
+  const registrosEntradas = registros.filter(r => r.tipo === 'RECEBER');
+  const registrosSaidas = registros.filter(r => r.tipo === 'PAGAR');
   const dataHoje = new Date().toLocaleDateString('pt-BR');
   const horaAgora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
@@ -191,41 +198,21 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
 <style>
   @page { margin: 10mm; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: 'Courier New', Courier, monospace;
-    font-size: 13px;
-    color: #222;
-    background: #FFF;
-    padding: 0;
-    display: flex;
-    justify-content: center;
-  }
-  .cupom {
-    width: 72mm;
-    margin: 0 auto;
-    padding: 4mm 0;
-  }
+  body { font-family: 'Courier New', Courier, monospace; font-size: 13px; color: #222; background: #FFF; display: flex; justify-content: center; }
+  .cupom { width: 72mm; margin: 0 auto; padding: 4mm 0; }
   .c { text-align: center; }
   .cb { text-align: center; font-weight: 700; }
   .sub { text-align: center; color: #666; font-size: 10px; margin-top: 2px; }
   .sep { border: none; border-top: 1px dashed #CCC; margin: 6px 0; }
   .sep2 { border: none; border-top: 2px solid #AAA; margin: 6px 0; }
-  .row {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    padding: 2px 0;
-    font-size: 12px;
-    line-height: 1.6;
-  }
-  .row .r { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .row { display: flex; justify-content: space-between; align-items: baseline; padding: 2px 0; font-size: 12px; line-height: 1.6; }
+  .row .r { text-align: right; white-space: nowrap; }
   .sm { font-size: 11px; }
   .b { font-weight: 700; }
   .lg { font-size: 14px; font-weight: 700; }
   .verde { color: #059669; }
   .verm { color: #DC2626; }
   .cinza { color: #999; }
-
   .mov { margin-top: 5px; padding-bottom: 4px; border-bottom: 1px dotted #DDD; }
   .mov:last-child { border-bottom: none; }
   .mov-row { display: flex; align-items: baseline; }
@@ -234,6 +221,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   .mov-val { font-weight: 700; font-size: 12px; flex-shrink: 0; white-space: nowrap; padding-left: 6px; }
   .mov-sub { color: #666; font-size: 10px; padding-left: 20px; margin-top: 1px; }
   .mov-meta { display: flex; justify-content: space-between; color: #999; font-size: 9px; padding-left: 20px; }
+  .secao { text-align: center; font-weight: 700; font-size: 12px; margin-top: 14px; }
 </style></head>
 <body>
 <div class="cupom">
@@ -242,50 +230,44 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   <div class="sub">${t.extratoLiq}</div>
   <hr class="sep2">
   <div class="cb" style="font-size:12px">${dataHoje}&nbsp;&nbsp;${horaAgora}</div>
-  <hr class="sep">
+  <hr class="sep2">
 
   <div class="row"><span>${t.caixaInicial}</span><span class="r">${fmt(caixaInicial)}</span></div>
-  <hr class="sep">
-  <div class="row"><span class="verde">${t.cobrancas}</span><span class="r verde">${fmt(totalPagamentos)}</span></div>
+  <div class="row"><span class="verde">${t.cobrancas}</span><span class="r verde">${fmt(totalEntradas)}</span></div>
   <div class="row"><span class="verm">${t.saidas}</span><span class="r verm">${fmt(totalSaidas)}</span></div>
   <hr class="sep2">
   <div class="row"><span class="lg">${t.caixaFinal}</span><span class="r lg">${fmt(caixaFinal)}</span></div>
   <hr class="sep2">
 
-  ${registros.length > 0 ? `
-    <div class="cb" style="margin-top:10px;font-size:12px">${t.movimentacoes} (${registros.length})</div>
-    <hr class="sep">
-    ${registros.map((item, idx) => {
-      const isE = item.tipo === 'RECEBER';
-      const sinal = isE ? '+' : '-';
-      const cor = isE ? 'verde' : 'verm';
+  <div class="secao">${t.detalheEntradas} (${registrosEntradas.length})</div>
+  <hr class="sep">
+  ${registrosEntradas.length === 0 ? `<div class="c cinza">${t.nenhumaEntrada}</div>` :
+    registrosEntradas.map((item, idx) => {
       const sub = item.cliente_nome || item.descricao || '';
       return `<div class="mov">
-        <div class="mov-row">
-          <span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span>
-          <span class="mov-cat">${formatarCategoria(item.categoria)}</span>
-          <span class="mov-val ${cor}">${sinal}${fmt(parseFloat(item.valor))}</span>
-        </div>
+        <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${formatarCategoria(item.categoria)}</span><span class="mov-val verde">+${fmt(parseFloat(item.valor))}</span></div>
         ${sub ? `<div class="mov-sub">${sub}</div>` : ''}
         <div class="mov-meta"><span>${fmtHora(item.created_at)}</span>${item.forma_pagamento ? `<span>${item.forma_pagamento}</span>` : ''}</div>
       </div>`;
     }).join('')}
-  ` : `<div class="cb" style="margin-top:10px">${t.nenhuma}</div>`}
+  <hr class="sep">
+  <div class="row"><span class="verde b">${t.totalCobrancas}</span><span class="r verde b">${fmt(totalEntradas)}</span></div>
 
-  ${pagamentos.length > 0 ? `
-    <hr class="sep">
-    <div class="cb" style="margin-top:4px;font-size:12px">${t.cobrancas.replace('(+) ', '')} (${pagamentos.length})</div>
-    <hr class="sep">
-    ${pagamentos.map((p) => {
-      const nome = p.cliente?.nome || t.cliente;
-      return `<div class="row sm"><span>${nome}</span><span class="r verde b">+${fmt(parseFloat(p.valor_pago_total || 0))}</span></div>`;
+  <div class="secao">${t.detalheSaidas} (${registrosSaidas.length})</div>
+  <hr class="sep">
+  ${registrosSaidas.length === 0 ? `<div class="c cinza">${t.nenhunaSaida}</div>` :
+    registrosSaidas.map((item, idx) => {
+      const sub = item.cliente_nome || item.descricao || '';
+      return `<div class="mov">
+        <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${formatarCategoria(item.categoria)}</span><span class="mov-val verm">-${fmt(parseFloat(item.valor))}</span></div>
+        ${sub ? `<div class="mov-sub">${sub}</div>` : ''}
+        <div class="mov-meta"><span>${fmtHora(item.created_at)}</span>${item.forma_pagamento ? `<span>${item.forma_pagamento}</span>` : ''}</div>
+      </div>`;
     }).join('')}
-  ` : ''}
+  <hr class="sep">
+  <div class="row"><span class="verm b">${t.totalSaidas}</span><span class="r verm b">${fmt(totalSaidas)}</span></div>
 
   <hr class="sep2">
-  <div class="row"><span>${t.totalCobrancas}</span><span class="r verde b">${fmt(totalPagamentos)}</span></div>
-  <div class="row"><span>${t.totalSaidas}</span><span class="r verm b">${fmt(totalSaidas)}</span></div>
-  <hr class="sep">
   <div class="row"><span class="lg">${t.saldoFinal}</span><span class="r lg">${fmt(caixaFinal)}</span></div>
   <hr class="sep2">
   <div class="c" style="margin-top:8px;font-size:10px;color:#999">${t.fimExtrato}</div>
@@ -314,7 +296,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
       try {
         let txt = `${rotaNome || 'Rota'} - ${t.extratoDia} ${dataHoje}\n`;
         txt += `${t.caixaInicial}: ${fmt(caixaInicial)}\n`;
-        txt += `${t.cobrancas}: ${fmt(totalPagamentos)}\n`;
+        txt += `${t.cobrancas}: ${fmt(totalEntradas)}\n`;
         txt += `${t.saidas}: ${fmt(totalSaidas)}\n`;
         txt += `${t.caixaFinal}: ${fmt(caixaFinal)}`;
         await Share.share({ message: txt });
@@ -342,17 +324,16 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
             <Text style={cupom.centroSub}>{t.extratoLiq}</Text>
             <Text style={cupom.div2}>{DDIV}</Text>
             <Text style={cupom.centro}>{dataHoje}  {horaAgora}</Text>
-            <Text style={cupom.div1}>{DIV}</Text>
+            <Text style={cupom.div2}>{DDIV}</Text>
 
-            {/* Resumo */}
+            {/* ═══ RESUMO (5 linhas essenciais) ═══ */}
             <View style={cupom.linha}>
               <Text style={cupom.txt}>{t.caixaInicial}</Text>
               <Text style={cupom.txt}>{fmt(caixaInicial)}</Text>
             </View>
-            <Text style={cupom.div1}>{DIV}</Text>
             <View style={cupom.linha}>
               <Text style={cupom.txtVerde}>{t.cobrancas}</Text>
-              <Text style={cupom.txtVerde}>{fmt(totalPagamentos)}</Text>
+              <Text style={cupom.txtVerde}>{fmt(totalEntradas)}</Text>
             </View>
             <View style={cupom.linha}>
               <Text style={cupom.txtVerm}>{t.saidas}</Text>
@@ -369,65 +350,73 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
               <ActivityIndicator size="small" color="#333" style={{ marginVertical: 20 }} />
             ) : (
               <>
-                {/* Movimentações */}
-                <Text style={[cupom.centro, { marginTop: 10 }]}>{t.movimentacoes} ({registros.length})</Text>
+                {/* ═══ DETALHES ENTRADAS ═══ */}
+                <Text style={[cupom.centro, { marginTop: 14 }]}>{t.detalheEntradas} ({registrosEntradas.length})</Text>
                 <Text style={cupom.div1}>{DIV}</Text>
 
-                {registros.length === 0 ? (
-                  <Text style={cupom.centro}>{t.nenhuma}</Text>
+                {/* Receitas financeiras (inclui cobranças, microseguro, etc) */}
+                {registrosEntradas.length === 0 ? (
+                  <Text style={cupom.centro}>{t.nenhumaEntrada}</Text>
                 ) : (
-                  registros.map((item, idx) => {
-                    const isEntrada = item.tipo === 'RECEBER';
-                    const sinal = isEntrada ? '+' : '-';
-                    return (
-                      <View key={item.id}>
-                        <View style={cupom.itemRow}>
-                          <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
-                          <Text style={cupom.itemCat} numberOfLines={1}>{formatarCategoria(item.categoria)}</Text>
-                          <Text style={[cupom.itemVal, { color: isEntrada ? '#059669' : '#DC2626' }]}>{sinal}{fmt(parseFloat(item.valor))}</Text>
-                        </View>
-                        {(item.cliente_nome || item.descricao) && (
-                          <Text style={cupom.itemSub} numberOfLines={1}>   {item.cliente_nome || item.descricao}</Text>
-                        )}
-                        <View style={cupom.itemMeta}>
-                          <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
-                          {item.forma_pagamento && <Text style={cupom.itemHora}>{item.forma_pagamento}</Text>}
-                        </View>
-                        {idx < registros.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
+                  registrosEntradas.map((item, idx) => (
+                    <View key={item.id}>
+                      <View style={cupom.itemRow}>
+                        <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
+                        <Text style={cupom.itemCat} numberOfLines={1}>{formatarCategoria(item.categoria)}</Text>
+                        <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(parseFloat(item.valor))}</Text>
                       </View>
-                    );
-                  })
+                      {(item.cliente_nome || item.descricao) && (
+                        <Text style={cupom.itemSub} numberOfLines={1}>   {item.cliente_nome || item.descricao}</Text>
+                      )}
+                      <View style={cupom.itemMeta}>
+                        <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
+                        {item.forma_pagamento && <Text style={cupom.itemHora}>{item.forma_pagamento}</Text>}
+                      </View>
+                      {idx < registrosEntradas.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
+                    </View>
+                  ))
                 )}
 
-                {/* Cobranças */}
-                {pagamentos.length > 0 && (
-                  <>
-                    <Text style={cupom.div1}>{DIV}</Text>
-                    <Text style={[cupom.centro, { marginTop: 4 }]}>{t.cobrancas.replace('(+) ', '')} ({pagamentos.length})</Text>
-                    <Text style={cupom.div1}>{DIV}</Text>
-                    {pagamentos.map((p) => {
-                      const nome = p.cliente?.nome || t.cliente;
-                      return (
-                        <View key={p.id} style={cupom.linha}>
-                          <Text style={cupom.txtSmall} numberOfLines={1}>{nome}</Text>
-                          <Text style={cupom.txtSmallVerde}>+{fmt(parseFloat(p.valor_pago_total || 0))}</Text>
-                        </View>
-                      );
-                    })}
-                  </>
-                )}
-
-                {/* Totais finais */}
-                <Text style={cupom.div2}>{DDIV}</Text>
+                <Text style={cupom.div1}>{DIV}</Text>
                 <View style={cupom.linha}>
-                  <Text style={cupom.txt}>{t.totalCobrancas}</Text>
-                  <Text style={cupom.txtVerde}>{fmt(totalPagamentos)}</Text>
+                  <Text style={cupom.txtVerde}>{t.totalCobrancas}</Text>
+                  <Text style={cupom.txtVerde}>{fmt(totalEntradas)}</Text>
                 </View>
+
+                {/* ═══ DETALHES SAÍDAS ═══ */}
+                <Text style={[cupom.centro, { marginTop: 14 }]}>{t.detalheSaidas} ({registrosSaidas.length})</Text>
+                <Text style={cupom.div1}>{DIV}</Text>
+
+                {registrosSaidas.length === 0 ? (
+                  <Text style={cupom.centro}>{t.nenhunaSaida}</Text>
+                ) : (
+                  registrosSaidas.map((item, idx) => (
+                    <View key={item.id}>
+                      <View style={cupom.itemRow}>
+                        <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
+                        <Text style={cupom.itemCat} numberOfLines={1}>{formatarCategoria(item.categoria)}</Text>
+                        <Text style={[cupom.itemVal, { color: '#DC2626' }]}>-{fmt(parseFloat(item.valor))}</Text>
+                      </View>
+                      {(item.cliente_nome || item.descricao) && (
+                        <Text style={cupom.itemSub} numberOfLines={1}>   {item.cliente_nome || item.descricao}</Text>
+                      )}
+                      <View style={cupom.itemMeta}>
+                        <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
+                        {item.forma_pagamento && <Text style={cupom.itemHora}>{item.forma_pagamento}</Text>}
+                      </View>
+                      {idx < registrosSaidas.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
+                    </View>
+                  ))
+                )}
+
+                <Text style={cupom.div1}>{DIV}</Text>
                 <View style={cupom.linha}>
-                  <Text style={cupom.txt}>{t.totalSaidas}</Text>
+                  <Text style={cupom.txtVerm}>{t.totalSaidas}</Text>
                   <Text style={cupom.txtVerm}>{fmt(totalSaidas)}</Text>
                 </View>
-                <Text style={cupom.div1}>{DIV}</Text>
+
+                {/* ═══ SALDO FINAL ═══ */}
+                <Text style={cupom.div2}>{DDIV}</Text>
                 <View style={cupom.linha}>
                   <Text style={cupom.txtBold}>{t.saldoFinal}</Text>
                   <Text style={cupom.txtBold}>{fmt(caixaFinal)}</Text>
@@ -490,7 +479,7 @@ const cupom = StyleSheet.create({
 });
 
 // =====================================================
-// 2. MODAL PAGAMENTOS (PARCELAS)
+// 2. MODAL PAGAMENTOS (AGRUPADO POR CLIENTE)
 // =====================================================
 interface PagamentosProps {
   visible: boolean;
@@ -502,13 +491,23 @@ interface PagamentosProps {
   lang?: Lang;
 }
 
+interface ClienteGrupo {
+  clienteId: string;
+  clienteNome: string;
+  clienteCod: string;
+  totalPago: number;
+  parcelas: any[];
+}
+
 export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, totalNaoPagos, valorRecebido, lang = 'pt-BR' }: PagamentosProps) {
   const t = i18n[lang];
   const [registros, setRegistros] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandido, setExpandido] = useState<string | null>(null);
 
   useEffect(() => {
     if (visible && liquidacaoId) carregarPagamentos();
+    if (!visible) setExpandido(null);
   }, [visible, liquidacaoId]);
 
   const carregarPagamentos = async () => {
@@ -519,7 +518,7 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
         .select(`
           id, numero_parcela, valor_pago_total, valor_parcela, valor_saldo,
           forma_pagamento, valor_credito_usado, valor_credito_gerado,
-          status_parcela_atual, created_at,
+          status_parcela_atual, created_at, cliente_id,
           cliente:cliente_id(nome, consecutivo),
           emprestimo:emprestimo_id(valor_principal, numero_parcelas)
         `)
@@ -535,52 +534,92 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
     }
   };
 
+  // Agrupar por cliente
+  const clientesAgrupados: ClienteGrupo[] = React.useMemo(() => {
+    const map = new Map<string, ClienteGrupo>();
+    registros.forEach(r => {
+      const cId = r.cliente_id || 'unknown';
+      if (!map.has(cId)) {
+        map.set(cId, {
+          clienteId: cId,
+          clienteNome: r.cliente?.nome || t.cliente,
+          clienteCod: r.cliente?.consecutivo || '',
+          totalPago: 0,
+          parcelas: [],
+        });
+      }
+      const grupo = map.get(cId)!;
+      grupo.totalPago += parseFloat(r.valor_pago_total || 0);
+      grupo.parcelas.push(r);
+    });
+    return Array.from(map.values());
+  }, [registros]);
+
   const totalDinheiro = registros.filter(r => r.forma_pagamento === 'DINHEIRO').reduce((s, r) => s + parseFloat(r.valor_pago_total || 0), 0);
   const totalTransf = registros.filter(r => r.forma_pagamento !== 'DINHEIRO').reduce((s, r) => s + parseFloat(r.valor_pago_total || 0), 0);
 
-  const renderItem = ({ item }: any) => {
-    const clienteNome = item.cliente?.nome || 'Cliente';
-    const clienteCod = item.cliente?.consecutivo || '';
-    const isPago = item.status_parcela_atual === 'PAGO';
+  const renderCliente = ({ item: grupo }: { item: ClienteGrupo }) => {
+    const isExpanded = expandido === grupo.clienteId;
 
     return (
-      <View style={dStyles.pagItem}>
+      <TouchableOpacity
+        style={dStyles.pagItem}
+        onPress={() => setExpandido(isExpanded ? null : grupo.clienteId)}
+        activeOpacity={0.7}
+      >
+        {/* Header do cliente */}
         <View style={dStyles.pagItemTop}>
           <View style={{ flex: 1 }}>
-            <Text style={dStyles.pagClienteNome}>{clienteNome}</Text>
-            {clienteCod ? <Text style={dStyles.pagClienteCod}>#{clienteCod}</Text> : null}
+            <Text style={dStyles.pagClienteNome}>{grupo.clienteNome}</Text>
+            {grupo.clienteCod ? <Text style={dStyles.pagClienteCod}>#{grupo.clienteCod}</Text> : null}
           </View>
-          <View style={[dStyles.pagBadge, { backgroundColor: isPago ? '#D1FAE5' : '#FEF3C7' }]}>
-            <Text style={[dStyles.pagBadgeText, { color: isPago ? '#059669' : '#D97706' }]}>
-              {item.status_parcela_atual}
-            </Text>
-          </View>
-        </View>
-        <View style={dStyles.pagItemBottom}>
-          <View style={dStyles.pagDetail}>
-            <Text style={dStyles.pagDetailLabel}>{t.parcela}</Text>
-            <Text style={dStyles.pagDetailValue}>{item.numero_parcela}/{item.emprestimo?.numero_parcelas || '?'}</Text>
-          </View>
-          <View style={dStyles.pagDetail}>
-            <Text style={dStyles.pagDetailLabel}>{t.valor}</Text>
-            <Text style={[dStyles.pagDetailValue, { color: '#059669', fontWeight: '700' }]}>{fmt(parseFloat(item.valor_pago_total || 0))}</Text>
-          </View>
-          <View style={dStyles.pagDetail}>
-            <Text style={dStyles.pagDetailLabel}>{lang === 'es' ? 'Forma' : 'Forma'}</Text>
-            <Text style={dStyles.pagDetailValue}>{item.forma_pagamento === 'DINHEIRO' ? '💵' : '📲'} {item.forma_pagamento}</Text>
-          </View>
-          <View style={dStyles.pagDetail}>
-            <Text style={dStyles.pagDetailLabel}>{t.hora}</Text>
-            <Text style={dStyles.pagDetailValue}>{fmtHora(item.created_at)}</Text>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={[dStyles.pagDetailValue, { color: '#059669', fontWeight: '700', fontSize: 15 }]}>{fmt(grupo.totalPago)}</Text>
+            <Text style={{ fontSize: 10, color: '#9CA3AF' }}>{grupo.parcelas.length} {lang === 'es' ? 'cuota(s)' : 'parcela(s)'}</Text>
           </View>
         </View>
-        {(item.valor_credito_usado > 0 || item.valor_credito_gerado > 0) && (
-          <View style={dStyles.pagCredito}>
-            {item.valor_credito_usado > 0 && <Text style={dStyles.pagCreditoText}>{t.creditoUsado}: {fmt(item.valor_credito_usado)}</Text>}
-            {item.valor_credito_gerado > 0 && <Text style={dStyles.pagCreditoText}>{t.creditoGerado}: {fmt(item.valor_credito_gerado)}</Text>}
+
+        {/* Parcelas (expandido) */}
+        {isExpanded && (
+          <View style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6', paddingTop: 8 }}>
+            {grupo.parcelas.map((p) => (
+              <View key={p.id} style={{ paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#F9FAFB' }}>
+                <View style={dStyles.pagItemBottom}>
+                  <View style={dStyles.pagDetail}>
+                    <Text style={dStyles.pagDetailLabel}>{t.parcela}</Text>
+                    <Text style={dStyles.pagDetailValue}>{p.numero_parcela}/{p.emprestimo?.numero_parcelas || '?'}</Text>
+                  </View>
+                  <View style={dStyles.pagDetail}>
+                    <Text style={dStyles.pagDetailLabel}>{t.valor}</Text>
+                    <Text style={[dStyles.pagDetailValue, { color: '#059669', fontWeight: '700' }]}>{fmt(parseFloat(p.valor_pago_total || 0))}</Text>
+                  </View>
+                  <View style={dStyles.pagDetail}>
+                    <Text style={dStyles.pagDetailLabel}>Forma</Text>
+                    <Text style={dStyles.pagDetailValue}>{p.forma_pagamento === 'DINHEIRO' ? '💵' : '📲'} {p.forma_pagamento}</Text>
+                  </View>
+                  <View style={dStyles.pagDetail}>
+                    <Text style={dStyles.pagDetailLabel}>{t.hora}</Text>
+                    <Text style={dStyles.pagDetailValue}>{fmtHora(p.created_at)}</Text>
+                  </View>
+                </View>
+                {(p.valor_credito_usado > 0 || p.valor_credito_gerado > 0) && (
+                  <View style={dStyles.pagCredito}>
+                    {p.valor_credito_usado > 0 && <Text style={dStyles.pagCreditoText}>{t.creditoUsado}: {fmt(p.valor_credito_usado)}</Text>}
+                    {p.valor_credito_gerado > 0 && <Text style={dStyles.pagCreditoText}>{t.creditoGerado}: {fmt(p.valor_credito_gerado)}</Text>}
+                  </View>
+                )}
+              </View>
+            ))}
           </View>
         )}
-      </View>
+
+        {/* Indicador expand */}
+        {grupo.parcelas.length > 0 && (
+          <Text style={{ textAlign: 'center', fontSize: 10, color: '#9CA3AF', marginTop: 4 }}>
+            {isExpanded ? '▲' : '▼'} {isExpanded ? (lang === 'es' ? 'ocultar' : 'ocultar') : (lang === 'es' ? 'ver cuotas' : 'ver parcelas')}
+          </Text>
+        )}
+      </TouchableOpacity>
     );
   };
 
@@ -623,16 +662,16 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
 
         {loading ? (
           <ActivityIndicator size="large" color="#EF4444" style={{ marginTop: 40 }} />
-        ) : registros.length === 0 ? (
+        ) : clientesAgrupados.length === 0 ? (
           <View style={dStyles.emptyState}>
             <Text style={dStyles.emptyIcon}>💳</Text>
             <Text style={dStyles.emptyText}>{t.semPagamentos}</Text>
           </View>
         ) : (
           <FlatList
-            data={registros}
-            keyExtractor={(item) => item.id}
-            renderItem={renderItem}
+            data={clientesAgrupados}
+            keyExtractor={(item) => item.clienteId}
+            renderItem={renderCliente}
             contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 40 }}
             showsVerticalScrollIndicator={false}
           />

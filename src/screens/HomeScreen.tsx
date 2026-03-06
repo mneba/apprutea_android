@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -54,7 +55,7 @@ const textos = {
     clientesRenovados: 'Clientes Renovados:', clientesRenegociados: 'Clientes Renegociados:',
     clientesCancelados: 'Clientes Cancelados:', totalClientes: 'Total de Clientes:',
     controlesFinanceiros: 'Controles Financeiros', caixa: 'Caixa', inicial: 'Inicial:',
-    pagamentos: 'Pagamentos', pagos: 'Pagos:', naoPagos: 'Não Pagos:', efetividade: 'Efetividade:',
+    pagamentos: 'Pagamentos', pagos: 'Clientes Pagos:', naoPagos: 'Não Pagos:', efetividade: 'Efetividade:',
     outrasOperacoes: 'Outras Operações', vendas: 'Vendas', qtdEmprestimos: 'Qtd:',
     receitas: 'Receitas', despesas: 'Despesas', microSeguro: 'Micro Seguro',
     encerrarDia: 'Encerrar Dia', iniciarDia: 'Iniciar Dia',
@@ -82,7 +83,7 @@ const textos = {
     clientesRenovados: 'Clientes Renovados:', clientesRenegociados: 'Clientes Renegociados:',
     clientesCancelados: 'Clientes Cancelados:', totalClientes: 'Total de Clientes:',
     controlesFinanceiros: 'Controles Financieros', caixa: 'Caja', inicial: 'Inicial:',
-    pagamentos: 'Pagos', pagos: 'Pagados:', naoPagos: 'No Pagados:', efetividade: 'Efectividad:',
+    pagamentos: 'Pagos', pagos: 'Clientes Pagados:', naoPagos: 'No Pagados:', efetividade: 'Efectividad:',
     outrasOperacoes: 'Otras Operaciones', vendas: 'Ventas', qtdEmprestimos: 'Cant:',
     receitas: 'Ingresos', despesas: 'Egresos', microSeguro: 'Micro Seguro',
     encerrarDia: 'Cerrar Día', iniciarDia: 'Iniciar Día',
@@ -175,7 +176,7 @@ export default function HomeScreen({ navigation }: any) {
     finally { setLoading(false); setRefreshing(false); }
   }, [rotaId, modoVisualizacao]);
 
-  useEffect(() => { carregarDados(); }, [carregarDados]);
+  useFocusEffect(useCallback(() => { carregarDados(); }, [carregarDados]));
   
   const onRefresh = () => { setRefreshing(true); carregarDados(); };
 
@@ -340,8 +341,10 @@ export default function HomeScreen({ navigation }: any) {
   
   const calcularEfetividade = () => {
     if (!liquidacao) return '0%';
-    const total = (liquidacao.pagamentos_pagos||0)+(liquidacao.pagamentos_nao_pagos||0);
-    return total === 0 ? '0%' : ((liquidacao.pagamentos_pagos/total)*100).toFixed(0)+'%';
+    const pagos = (liquidacao as any).clientes_pagos || 0;
+    const naoPagos = (liquidacao as any).clientes_nao_pagos || 0;
+    const total = pagos + naoPagos;
+    return total === 0 ? '0%' : ((pagos/total)*100).toFixed(0)+'%';
   };
   
   const temLiquidacaoAberta = () => obterLiquidacaoAberta(todasLiquidacoes) !== null;
@@ -637,11 +640,11 @@ export default function HomeScreen({ navigation }: any) {
             <View style={styles.pagamentosRow}>
               <View style={styles.pagamentoItem}>
                 <Text style={styles.pagamentoLabel}>{t.pagos}</Text>
-                <Text style={styles.pagamentoValue}>{liquidacao?.pagamentos_pagos || 0}</Text>
+                <Text style={styles.pagamentoValue}>{(liquidacao as any)?.clientes_pagos || 0}</Text>
               </View>
               <View style={styles.pagamentoItem}>
                 <Text style={styles.pagamentoLabel}>{t.naoPagos}</Text>
-                <Text style={styles.pagamentoValue}>{liquidacao?.pagamentos_nao_pagos || 0}</Text>
+                <Text style={styles.pagamentoValue}>{(liquidacao as any)?.clientes_nao_pagos || 0}</Text>
               </View>
               <View style={styles.pagamentoItem}>
                 <Text style={styles.pagamentoLabel}>{t.efetividade}</Text>

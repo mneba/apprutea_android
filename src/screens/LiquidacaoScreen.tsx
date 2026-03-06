@@ -1,4 +1,5 @@
 import NetInfo from '@react-native-community/netinfo';
+import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -58,7 +59,7 @@ const textos = {
     caixa: 'Caixa',
     inicial: 'Inicial:',
     pagamentos: 'Pagamentos',
-    pagos: 'Pagos',
+    pagos: 'Clientes pagos',
     naoPagos: 'Não pagos:',
     efetividade: 'Efetividade:',
     outrasOperacoes: 'Outras Operações',
@@ -112,7 +113,7 @@ const textos = {
     caixa: 'Caja',
     inicial: 'Inicial:',
     pagamentos: 'Pagos',
-    pagos: 'Pagados',
+    pagos: 'Clientes pagados',
     naoPagos: 'No pagados:',
     efetividade: 'Efectividad:',
     outrasOperacoes: 'Otras Operaciones',
@@ -241,9 +242,9 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const ehMesAtualOuFuturo = anoAtual > hoje.getFullYear() ||
     (anoAtual === hoje.getFullYear() && mesAtual >= hoje.getMonth());
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     carregarLiquidacoes();
-  }, []);
+  }, []));
 
   // Listener de conectividade
   useEffect(() => {
@@ -524,9 +525,11 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
   const calcularEfetividade = () => {
     if (!liquidacao) return 0;
-    const total = (liquidacao.pagamentos_pagos || 0) + (liquidacao.pagamentos_nao_pagos || 0);
+    const pagos = (liquidacao as any).clientes_pagos || 0;
+    const naoPagos = (liquidacao as any).clientes_nao_pagos || 0;
+    const total = pagos + naoPagos;
     if (total === 0) return 0;
-    return Math.round(((liquidacao.pagamentos_pagos || 0) / total) * 100);
+    return Math.round((pagos / total) * 100);
   };
 
   const calcularTotalClientes = () => {
@@ -969,8 +972,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
               <View style={styles.financeiroContent}>
                 <View>
                   <Text style={styles.financeiroLabel}>{t.pagamentos}</Text>
-                  <Text style={styles.financeiroValor}>{liquidacao.pagamentos_pagos || 0} {t.pagos}</Text>
-                  <Text style={styles.financeiroDetalhe}>{t.naoPagos} {liquidacao.pagamentos_nao_pagos || 0} | {t.efetividade} {calcularEfetividade()}%</Text>
+                  <Text style={styles.financeiroValor}>{(liquidacao as any).clientes_pagos || 0} {t.pagos}</Text>
+                  <Text style={styles.financeiroDetalhe}>{t.naoPagos} {(liquidacao as any).clientes_nao_pagos || 0} | {t.efetividade} {calcularEfetividade()}%</Text>
                 </View>
                 <View style={styles.indicadorVermelho} />
               </View>
@@ -986,8 +989,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
               </TouchableOpacity>
               <TouchableOpacity style={[styles.operacaoCard, styles.operacaoReceitas]} onPress={() => setModalReceitasVisible(true)} activeOpacity={0.7}>
                 <Text style={styles.opLabelAzul}>{t.receitas}</Text>
-                <Text style={styles.opValorAzul}>{formatarMoedaCompacta(liquidacao.valor_recebido_dia)}</Text>
-                <Text style={styles.opDetalheAzul}>{liquidacao.pagamentos_pagos || 0} pag.</Text>
+                <Text style={styles.opValorAzul}>{formatarMoedaCompacta((liquidacao as any).total_receitas_dia || liquidacao.valor_recebido_dia)}</Text>
+                <Text style={styles.opDetalheAzul}>{(liquidacao as any).qtd_receitas_dia || liquidacao.pagamentos_pagos || 0} lanç.</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.operacaoCard, styles.operacaoDespesas]} onPress={() => setModalDespesasVisible(true)} activeOpacity={0.7}>
                 <Text style={styles.opLabelVermelho}>{t.despesas}</Text>
@@ -1216,8 +1219,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
             visible={modalPagamentosVisible}
             onClose={() => setModalPagamentosVisible(false)}
             liquidacaoId={liquidacao.id}
-            totalPagos={liquidacao.pagamentos_pagos || 0}
-            totalNaoPagos={liquidacao.pagamentos_nao_pagos || 0}
+            totalPagos={(liquidacao as any).clientes_pagos || 0}
+            totalNaoPagos={(liquidacao as any).clientes_nao_pagos || 0}
           />
           <ModalFinanceiro
             visible={modalVendasVisible}
@@ -1232,8 +1235,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
             onClose={() => setModalReceitasVisible(false)}
             liquidacaoId={liquidacao.id}
             tipo="RECEITAS"
-            totalValor={liquidacao.valor_recebido_dia || 0}
-            totalQtd={liquidacao.pagamentos_pagos || 0}
+            totalValor={(liquidacao as any).total_receitas_dia || liquidacao.valor_recebido_dia || 0}
+            totalQtd={(liquidacao as any).qtd_receitas_dia || liquidacao.pagamentos_pagos || 0}
           />
           <ModalFinanceiro
             visible={modalDespesasVisible}
