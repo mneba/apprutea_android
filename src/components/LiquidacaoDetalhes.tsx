@@ -487,7 +487,6 @@ interface PagamentosProps {
   liquidacaoId: string;
   totalPagos: number;
   totalNaoPagos: number;
-  valorRecebido: number;
   lang?: Lang;
 }
 
@@ -499,7 +498,7 @@ interface ClienteGrupo {
   parcelas: any[];
 }
 
-export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, totalNaoPagos, valorRecebido, lang = 'pt-BR' }: PagamentosProps) {
+export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, totalNaoPagos, lang = 'pt-BR' }: PagamentosProps) {
   const t = i18n[lang];
   const [registros, setRegistros] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -638,11 +637,6 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
           <View style={dStyles.pagResumoItem}>
             <Text style={[dStyles.pagResumoValor, { color: '#DC2626' }]}>{totalNaoPagos}</Text>
             <Text style={dStyles.pagResumoLabel}>{t.naoPagos}</Text>
-          </View>
-          <View style={dStyles.pagResumoDivider} />
-          <View style={dStyles.pagResumoItem}>
-            <Text style={dStyles.pagResumoValor}>{fmt(valorRecebido)}</Text>
-            <Text style={dStyles.pagResumoLabel}>{t.recebido}</Text>
           </View>
         </View>
 
