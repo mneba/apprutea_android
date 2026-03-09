@@ -262,7 +262,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
         setTotalParcelasPagas(pagTotal);
       } catch { }
     })();
-  }, [liquidacao?.id]);
+  }, [liquidacao?.id, liquidacao?.valor_recebido_dia, (liquidacao as any)?.clientes_pagos]);
   
   // Dados do modo visualização (dias sem liquidação)
   const [dadosVisualizacao, setDadosVisualizacao] = useState<{
