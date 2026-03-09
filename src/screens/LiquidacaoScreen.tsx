@@ -62,6 +62,7 @@ const textos = {
     pagos: 'Clientes pagos',
     naoPagos: 'Não pagos:',
     efetividade: 'Efetividade:',
+    recebido: 'Recebido:',
     outrasOperacoes: 'Outras Operações',
     vendas: 'Vendas',
     receitas: 'Receitas',
@@ -116,6 +117,7 @@ const textos = {
     pagos: 'Clientes pagados',
     naoPagos: 'No pagados:',
     efetividade: 'Efectividad:',
+    recebido: 'Recaudado:',
     outrasOperacoes: 'Otras Operaciones',
     vendas: 'Ventas',
     receitas: 'Ingresos',
@@ -177,6 +179,10 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const [contaRota, setContaRota] = useState<ContaRota | null>(null);
   const [salvando, setSalvando] = useState(false);
   
+  // Totais calculados do financeiro (mais confiáveis que campos da liquidação)
+  const [receitasFinanceiras, setReceitasFinanceiras] = useState({ total: 0, qtd: 0 });
+  const [totalParcelasPagas, setTotalParcelasPagas] = useState(0);
+  
   // Estados do Calendário
   const [mostrarCalendario, setMostrarCalendario] = useState(false);
   const [modoVisualizacao, setModoVisualizacaoLocal] = useState(false);
@@ -221,6 +227,42 @@ export default function LiquidacaoScreen({ navigation }: any) {
       } catch { }
     })();
   }, [liquidacao?.id, vendedor?.rota_id, vendedor?.id]);
+
+  // Buscar totais de receitas financeiras (sem cobranças) e total parcelas pagas
+  useEffect(() => {
+    if (!liquidacao?.id) { 
+      setReceitasFinanceiras({ total: 0, qtd: 0 }); 
+      setTotalParcelasPagas(0); 
+      return; 
+    }
+    (async () => {
+      try {
+        // Receitas financeiras (RECEBER, excluindo cobranças e microseguros)
+        const { data: recData } = await supabase
+          .from('financeiro')
+          .select('valor')
+          .eq('liquidacao_id', liquidacao.id)
+          .eq('tipo', 'RECEBER')
+          .eq('status', 'PAGO')
+          .not('categoria', 'in', '("COBRANCA_PARCELAS","COBRANCA_CUOTAS","VENDA_MICROSEGURO","MICROSEGURO")');
+        
+        const recTotal = (recData || []).reduce((s: number, r: any) => s + parseFloat(r.valor || 0), 0);
+        setReceitasFinanceiras({ total: recTotal, qtd: (recData || []).length });
+
+        // Total recebido de parcelas pagas
+        const { data: pagData } = await supabase
+          .from('financeiro')
+          .select('valor')
+          .eq('liquidacao_id', liquidacao.id)
+          .eq('tipo', 'RECEBER')
+          .eq('status', 'PAGO')
+          .in('categoria', ['COBRANCA_PARCELAS', 'COBRANCA_CUOTAS']);
+        
+        const pagTotal = (pagData || []).reduce((s: number, r: any) => s + parseFloat(r.valor || 0), 0);
+        setTotalParcelasPagas(pagTotal);
+      } catch { }
+    })();
+  }, [liquidacao?.id]);
   
   // Dados do modo visualização (dias sem liquidação)
   const [dadosVisualizacao, setDadosVisualizacao] = useState<{
@@ -507,14 +549,13 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
   // ==================== FORMATADORES ====================
   const formatarMoeda = (valor: number | null) => {
-    if (valor === null || valor === undefined) return 'R$ 0,00';
-    return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    if (valor === null || valor === undefined) return '$ 0,00';
+    return `$ ${(valor).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
   const formatarMoedaCompacta = (valor: number | null) => {
-    if (valor === null || valor === undefined) return 'R$0';
-    if (valor >= 1000) return `R$${(valor / 1000).toFixed(1)}k`;
-    return `R$${valor.toFixed(0)}`;
+    if (valor === null || valor === undefined) return '$ 0';
+    return `$ ${valor.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
   };
 
   const formatarData = (data: string | Date | null) => {
@@ -914,8 +955,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
             {/* Card Meta/Atual/Progresso */}
             {(() => {
               const meta = liquidacao.valor_esperado_dia || 0;
-              // Usar total_receitas_dia (atualizado em tempo real pelo trigger) ou valor_recebido_dia (preenchido no fechamento)
-              const recebido = (liquidacao as any).total_receitas_dia || liquidacao.valor_recebido_dia || 0;
+              // Recebido = cobranças de parcelas (valor_recebido_dia)
+              const recebido = liquidacao.valor_recebido_dia || 0;
               const percentual = meta > 0 ? Math.round((recebido / meta) * 100) : 0;
               const corProgresso = percentual >= 100 ? '#10B981' : percentual >= 70 ? '#3B82F6' : percentual >= 40 ? '#F59E0B' : '#EF4444';
               return (
@@ -974,6 +1015,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
                   <Text style={styles.financeiroLabel}>{t.pagamentos}</Text>
                   <Text style={styles.financeiroValor}>{(liquidacao as any).clientes_pagos || 0} {t.pagos}</Text>
                   <Text style={styles.financeiroDetalhe}>{t.naoPagos} {(liquidacao as any).clientes_nao_pagos || 0} | {t.efetividade} {calcularEfetividade()}%</Text>
+                  <Text style={[styles.financeiroDetalhe, { color: '#059669', fontWeight: '600', marginTop: 2 }]}>{t.recebido || 'Recebido:'} {formatarMoeda(totalParcelasPagas)}</Text>
                 </View>
                 <View style={styles.indicadorVermelho} />
               </View>
@@ -989,8 +1031,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
               </TouchableOpacity>
               <TouchableOpacity style={[styles.operacaoCard, styles.operacaoReceitas]} onPress={() => setModalReceitasVisible(true)} activeOpacity={0.7}>
                 <Text style={styles.opLabelAzul}>{t.receitas}</Text>
-                <Text style={styles.opValorAzul}>{formatarMoedaCompacta((liquidacao as any).total_receitas_dia || liquidacao.valor_recebido_dia)}</Text>
-                <Text style={styles.opDetalheAzul}>{(liquidacao as any).qtd_receitas_dia || liquidacao.pagamentos_pagos || 0} lanç.</Text>
+                <Text style={styles.opValorAzul}>{formatarMoedaCompacta(receitasFinanceiras.total)}</Text>
+                <Text style={styles.opDetalheAzul}>{receitasFinanceiras.qtd} lanç.</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.operacaoCard, styles.operacaoDespesas]} onPress={() => setModalDespesasVisible(true)} activeOpacity={0.7}>
                 <Text style={styles.opLabelVermelho}>{t.despesas}</Text>
@@ -1235,8 +1277,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
             onClose={() => setModalReceitasVisible(false)}
             liquidacaoId={liquidacao.id}
             tipo="RECEITAS"
-            totalValor={(liquidacao as any).total_receitas_dia || liquidacao.valor_recebido_dia || 0}
-            totalQtd={(liquidacao as any).qtd_receitas_dia || liquidacao.pagamentos_pagos || 0}
+            totalValor={receitasFinanceiras.total}
+            totalQtd={receitasFinanceiras.qtd}
           />
           <ModalFinanceiro
             visible={modalDespesasVisible}

@@ -327,7 +327,7 @@ export default function HomeScreen({ navigation }: any) {
 
   // ==================== FORMATADORES ====================
   const formatarMoeda = (v: number | null | undefined) => 
-    (v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    `$ ${(v ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   
   const formatarData = (d: string | Date) => 
     (typeof d === 'string' ? new Date(d) : d).toLocaleDateString('pt-BR');

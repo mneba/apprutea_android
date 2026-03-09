@@ -52,10 +52,11 @@ const i18n: Record<Lang, Record<string, string>> = {
     caixaInicial: 'CAIXA INICIAL', saidas: '(-) SAÍDAS',
     cobrancas: '(+) COBRANÇAS', caixaFinal: 'CAIXA FINAL',
     movimentacoes: 'MOVIMENTAÇÕES', nenhuma: 'Nenhuma movimentação',
-    totalCobrancas: 'TOTAL COBRANÇAS',
+    totalCobrancas: 'TOTAL COBRANÇAS', totalMicroseguros: 'TOTAL MICROSEGUROS', totalOutrasReceitas: 'TOTAL OUTRAS RECEITAS',
     totalSaidas: 'TOTAL SAÍDAS', saldoFinal: 'SALDO FINAL',
     fimExtrato: '*** FIM DO EXTRATO ***', compartilhar: 'Compartilhar PDF',
     detalheEntradas: 'DETALHES ENTRADAS', detalheSaidas: 'DETALHES SAÍDAS',
+    cobrancasParcelas: 'COBRANÇAS', microsegurosVendas: 'MICROSEGUROS', outrasReceitas: 'OUTRAS RECEITAS',
     resumo: 'RESUMO',
     pagamentos: 'Pagamentos', pagos: 'Clientes pagos', naoPagos: 'Não Pagos',
     recebido: 'Recebido', dinheiro: 'Dinheiro', transferencia: 'Transf/PIX',
@@ -74,10 +75,11 @@ const i18n: Record<Lang, Record<string, string>> = {
     caixaInicial: 'CAJA INICIAL', saidas: '(-) SALIDAS',
     cobrancas: '(+) COBROS', caixaFinal: 'CAJA FINAL',
     movimentacoes: 'MOVIMIENTOS', nenhuma: 'Ningún movimiento',
-    totalCobrancas: 'TOTAL COBROS',
+    totalCobrancas: 'TOTAL COBROS', totalMicroseguros: 'TOTAL MICROSEGUROS', totalOutrasReceitas: 'TOTAL OTROS INGRESOS',
     totalSaidas: 'TOTAL SALIDAS', saldoFinal: 'SALDO FINAL',
     fimExtrato: '*** FIN DEL EXTRACTO ***', compartilhar: 'Compartir PDF',
     detalheEntradas: 'DETALLE ENTRADAS', detalheSaidas: 'DETALLE SALIDAS',
+    cobrancasParcelas: 'COBROS', microsegurosVendas: 'MICROSEGUROS', outrasReceitas: 'OTROS INGRESOS',
     resumo: 'RESUMEN',
     pagamentos: 'Pagos', pagos: 'Clientes pagados', naoPagos: 'No Pagados',
     recebido: 'Recibido', dinheiro: 'Efectivo', transferencia: 'Transf/PIX',
@@ -179,6 +181,15 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const totalPagamentos = pagamentos.reduce((s, p) => s + parseFloat(p.valor_pago_total || 0), 0);
   const registrosEntradas = registros.filter(r => r.tipo === 'RECEBER');
   const registrosSaidas = registros.filter(r => r.tipo === 'PAGAR');
+
+  // Separar entradas em 3 grupos
+  const entradasCobrancas = registrosEntradas.filter(r => ['COBRANCA_PARCELAS', 'COBRANCA_CUOTAS'].includes(r.categoria));
+  const entradasMicroseguro = registrosEntradas.filter(r => ['VENDA_MICROSEGURO', 'MICROSEGURO'].includes(r.categoria));
+  const entradasOutras = registrosEntradas.filter(r => !['COBRANCA_PARCELAS', 'COBRANCA_CUOTAS', 'VENDA_MICROSEGURO', 'MICROSEGURO'].includes(r.categoria));
+  const totalCobrancas = entradasCobrancas.reduce((s, r) => s + parseFloat(r.valor), 0);
+  const totalMicroseguros = entradasMicroseguro.reduce((s, r) => s + parseFloat(r.valor), 0);
+  const totalOutrasReceitas = entradasOutras.reduce((s, r) => s + parseFloat(r.valor), 0);
+
   const dataHoje = new Date().toLocaleDateString('pt-BR');
   const horaAgora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
@@ -241,17 +252,46 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
 
   <div class="secao">${t.detalheEntradas} (${registrosEntradas.length})</div>
   <hr class="sep">
-  ${registrosEntradas.length === 0 ? `<div class="c cinza">${t.nenhumaEntrada}</div>` :
-    registrosEntradas.map((item, idx) => {
-      const sub = item.cliente_nome || item.descricao || '';
-      return `<div class="mov">
-        <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${formatarCategoria(item.categoria)}</span><span class="mov-val verde">+${fmt(parseFloat(item.valor))}</span></div>
-        ${sub ? `<div class="mov-sub">${sub}</div>` : ''}
-        <div class="mov-meta"><span>${fmtHora(item.created_at)}</span>${item.forma_pagamento ? `<span>${item.forma_pagamento}</span>` : ''}</div>
-      </div>`;
-    }).join('')}
+  ${registrosEntradas.length === 0 ? `<div class="c cinza">${t.nenhumaEntrada}</div>` : `
+    ${entradasCobrancas.length > 0 ? `
+      <div class="c cinza" style="font-size:10px">── ${t.cobrancasParcelas} (${entradasCobrancas.length}) ──</div>
+      ${entradasCobrancas.map((item, idx) => {
+        const sub = item.cliente_nome || item.descricao || '';
+        return `<div class="mov">
+          <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${formatarCategoria(item.categoria)}</span><span class="mov-val verde">+${fmt(parseFloat(item.valor))}</span></div>
+          ${sub ? `<div class="mov-sub">${sub}</div>` : ''}
+          <div class="mov-meta"><span>${fmtHora(item.created_at)}</span>${item.forma_pagamento ? `<span>${item.forma_pagamento}</span>` : ''}</div>
+        </div>`;
+      }).join('')}
+      <div class="row"><span class="verde" style="font-size:10px">${t.totalCobrancas}</span><span class="r verde" style="font-size:10px">${fmt(totalCobrancas)}</span></div>
+    ` : ''}
+    ${entradasMicroseguro.length > 0 ? `
+      <div class="c cinza" style="font-size:10px">── ${t.microsegurosVendas} (${entradasMicroseguro.length}) ──</div>
+      ${entradasMicroseguro.map((item, idx) => {
+        const sub = item.cliente_nome || item.descricao || '';
+        return `<div class="mov">
+          <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${formatarCategoria(item.categoria)}</span><span class="mov-val verde">+${fmt(parseFloat(item.valor))}</span></div>
+          ${sub ? `<div class="mov-sub">${sub}</div>` : ''}
+          <div class="mov-meta"><span>${fmtHora(item.created_at)}</span></div>
+        </div>`;
+      }).join('')}
+      <div class="row"><span class="verde" style="font-size:10px">${t.totalMicroseguros}</span><span class="r verde" style="font-size:10px">${fmt(totalMicroseguros)}</span></div>
+    ` : ''}
+    ${entradasOutras.length > 0 ? `
+      <div class="c cinza" style="font-size:10px">── ${t.outrasReceitas} (${entradasOutras.length}) ──</div>
+      ${entradasOutras.map((item, idx) => {
+        const sub = item.cliente_nome || item.descricao || '';
+        return `<div class="mov">
+          <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${formatarCategoria(item.categoria)}</span><span class="mov-val verde">+${fmt(parseFloat(item.valor))}</span></div>
+          ${sub ? `<div class="mov-sub">${sub}</div>` : ''}
+          <div class="mov-meta"><span>${fmtHora(item.created_at)}</span>${item.forma_pagamento ? `<span>${item.forma_pagamento}</span>` : ''}</div>
+        </div>`;
+      }).join('')}
+      <div class="row"><span class="verde" style="font-size:10px">${t.totalOutrasReceitas}</span><span class="r verde" style="font-size:10px">${fmt(totalOutrasReceitas)}</span></div>
+    ` : ''}
+  `}
   <hr class="sep">
-  <div class="row"><span class="verde b">${t.totalCobrancas}</span><span class="r verde b">${fmt(totalEntradas)}</span></div>
+  <div class="row"><span class="verde b">TOTAL ENTRADAS</span><span class="r verde b">${fmt(totalEntradas)}</span></div>
 
   <div class="secao">${t.detalheSaidas} (${registrosSaidas.length})</div>
   <hr class="sep">
@@ -354,32 +394,98 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                 <Text style={[cupom.centro, { marginTop: 14 }]}>{t.detalheEntradas} ({registrosEntradas.length})</Text>
                 <Text style={cupom.div1}>{DIV}</Text>
 
-                {/* Receitas financeiras (inclui cobranças, microseguro, etc) */}
                 {registrosEntradas.length === 0 ? (
                   <Text style={cupom.centro}>{t.nenhumaEntrada}</Text>
                 ) : (
-                  registrosEntradas.map((item, idx) => (
-                    <View key={item.id}>
-                      <View style={cupom.itemRow}>
-                        <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
-                        <Text style={cupom.itemCat} numberOfLines={1}>{formatarCategoria(item.categoria)}</Text>
-                        <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(parseFloat(item.valor))}</Text>
-                      </View>
-                      {(item.cliente_nome || item.descricao) && (
-                        <Text style={cupom.itemSub} numberOfLines={1}>   {item.cliente_nome || item.descricao}</Text>
-                      )}
-                      <View style={cupom.itemMeta}>
-                        <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
-                        {item.forma_pagamento && <Text style={cupom.itemHora}>{item.forma_pagamento}</Text>}
-                      </View>
-                      {idx < registrosEntradas.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
-                    </View>
-                  ))
+                  <>
+                    {/* ── COBRANÇAS DE PARCELAS ── */}
+                    {entradasCobrancas.length > 0 && (
+                      <>
+                        <Text style={[cupom.centro, { fontSize: 10, marginTop: 6, color: '#6B7280' }]}>── {t.cobrancasParcelas} ({entradasCobrancas.length}) ──</Text>
+                        {entradasCobrancas.map((item, idx) => (
+                          <View key={item.id}>
+                            <View style={cupom.itemRow}>
+                              <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
+                              <Text style={cupom.itemCat} numberOfLines={1}>{formatarCategoria(item.categoria)}</Text>
+                              <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(parseFloat(item.valor))}</Text>
+                            </View>
+                            {(item.cliente_nome || item.descricao) && (
+                              <Text style={cupom.itemSub} numberOfLines={1}>   {item.cliente_nome || item.descricao}</Text>
+                            )}
+                            <View style={cupom.itemMeta}>
+                              <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
+                              {item.forma_pagamento && <Text style={cupom.itemHora}>{item.forma_pagamento}</Text>}
+                            </View>
+                            {idx < entradasCobrancas.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
+                          </View>
+                        ))}
+                        <View style={cupom.linha}>
+                          <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{t.totalCobrancas}</Text>
+                          <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{fmt(totalCobrancas)}</Text>
+                        </View>
+                      </>
+                    )}
+
+                    {/* ── MICROSEGUROS ── */}
+                    {entradasMicroseguro.length > 0 && (
+                      <>
+                        <Text style={[cupom.centro, { fontSize: 10, marginTop: 6, color: '#6B7280' }]}>── {t.microsegurosVendas} ({entradasMicroseguro.length}) ──</Text>
+                        {entradasMicroseguro.map((item, idx) => (
+                          <View key={item.id}>
+                            <View style={cupom.itemRow}>
+                              <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
+                              <Text style={cupom.itemCat} numberOfLines={1}>{formatarCategoria(item.categoria)}</Text>
+                              <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(parseFloat(item.valor))}</Text>
+                            </View>
+                            {(item.cliente_nome || item.descricao) && (
+                              <Text style={cupom.itemSub} numberOfLines={1}>   {item.cliente_nome || item.descricao}</Text>
+                            )}
+                            <View style={cupom.itemMeta}>
+                              <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
+                            </View>
+                            {idx < entradasMicroseguro.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
+                          </View>
+                        ))}
+                        <View style={cupom.linha}>
+                          <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{t.totalMicroseguros}</Text>
+                          <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{fmt(totalMicroseguros)}</Text>
+                        </View>
+                      </>
+                    )}
+
+                    {/* ── OUTRAS RECEITAS ── */}
+                    {entradasOutras.length > 0 && (
+                      <>
+                        <Text style={[cupom.centro, { fontSize: 10, marginTop: 6, color: '#6B7280' }]}>── {t.outrasReceitas} ({entradasOutras.length}) ──</Text>
+                        {entradasOutras.map((item, idx) => (
+                          <View key={item.id}>
+                            <View style={cupom.itemRow}>
+                              <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
+                              <Text style={cupom.itemCat} numberOfLines={1}>{formatarCategoria(item.categoria)}</Text>
+                              <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(parseFloat(item.valor))}</Text>
+                            </View>
+                            {(item.cliente_nome || item.descricao) && (
+                              <Text style={cupom.itemSub} numberOfLines={1}>   {item.cliente_nome || item.descricao}</Text>
+                            )}
+                            <View style={cupom.itemMeta}>
+                              <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
+                              {item.forma_pagamento && <Text style={cupom.itemHora}>{item.forma_pagamento}</Text>}
+                            </View>
+                            {idx < entradasOutras.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
+                          </View>
+                        ))}
+                        <View style={cupom.linha}>
+                          <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{t.totalOutrasReceitas}</Text>
+                          <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{fmt(totalOutrasReceitas)}</Text>
+                        </View>
+                      </>
+                    )}
+                  </>
                 )}
 
                 <Text style={cupom.div1}>{DIV}</Text>
                 <View style={cupom.linha}>
-                  <Text style={cupom.txtVerde}>{t.totalCobrancas}</Text>
+                  <Text style={cupom.txtVerde}>TOTAL ENTRADAS</Text>
                   <Text style={cupom.txtVerde}>{fmt(totalEntradas)}</Text>
                 </View>
 
@@ -721,7 +827,9 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
         // Vendas = empréstimos (PAGAR com categoria EMPRESTIMO)
         query = query.eq('categoria', 'EMPRESTIMO');
       } else if (tipo === 'RECEITAS') {
-        query = query.eq('tipo', 'RECEBER');
+        // Receitas financeiras (excluindo cobranças e microseguros)
+        query = query.eq('tipo', 'RECEBER')
+          .not('categoria', 'in', '("COBRANCA_PARCELAS","COBRANCA_CUOTAS","VENDA_MICROSEGURO","MICROSEGURO")');
       } else if (tipo === 'DESPESAS') {
         query = query.eq('tipo', 'PAGAR').neq('categoria', 'EMPRESTIMO');
       }
@@ -753,6 +861,10 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
     </View>
   );
 
+  // Calcular total e qtd dos registros reais (mais confiável que props da liquidação)
+  const totalReal = registros.reduce((s, r) => s + parseFloat(r.valor || 0), 0);
+  const qtdReal = registros.length;
+
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View style={dStyles.container}>
@@ -762,10 +874,10 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
         <View style={[dStyles.finResumo, { borderLeftColor: config.cor }]}>
           <View>
             <Text style={dStyles.finResumoLabel}>{t.total}</Text>
-            <Text style={[dStyles.finResumoValor, { color: config.cor }]}>{fmt(totalValor)}</Text>
+            <Text style={[dStyles.finResumoValor, { color: config.cor }]}>{fmt(loading ? totalValor : totalReal)}</Text>
           </View>
           <View style={dStyles.finResumoBadge}>
-            <Text style={dStyles.finResumoBadgeText}>{totalQtd} {tipo === 'VENDAS' ? (lang === 'es' ? 'prést.' : 'emp.') : t.lancamentos}</Text>
+            <Text style={dStyles.finResumoBadgeText}>{loading ? totalQtd : qtdReal} {tipo === 'VENDAS' ? (lang === 'es' ? 'prést.' : 'emp.') : t.lancamentos}</Text>
           </View>
         </View>
 
@@ -876,12 +988,12 @@ export function ModalMicroseguro({ visible, onClose, liquidacaoId, totalValor, t
         {/* Resumo */}
         <View style={dStyles.microResumo}>
           <View style={dStyles.microResumoItem}>
-            <Text style={dStyles.microResumoValor}>{fmt(totalValor)}</Text>
+            <Text style={dStyles.microResumoValor}>{fmt(loading ? totalValor : vendas.reduce((s, v) => s + parseFloat(v.valor || 0), 0))}</Text>
             <Text style={dStyles.microResumoLabel}>{t.totalVendido}</Text>
           </View>
           <View style={dStyles.microResumoDivider} />
           <View style={dStyles.microResumoItem}>
-            <Text style={dStyles.microResumoValor}>{totalQtd}</Text>
+            <Text style={dStyles.microResumoValor}>{loading ? totalQtd : vendas.length}</Text>
             <Text style={dStyles.microResumoLabel}>{t.contratos}</Text>
           </View>
         </View>
@@ -912,8 +1024,10 @@ export function ModalMicroseguro({ visible, onClose, liquidacaoId, totalValor, t
 // =====================================================
 function formatarCategoria(cat: string): string {
   const map: Record<string, string> = {
-    COBRANCA_CUOTAS: 'Cobrança de Parcela',
+    COBRANCA_CUOTAS: 'Cobrança Parcelas',
+    COBRANCA_PARCELAS: 'Cobrança Parcelas',
     EMPRESTIMO: 'Empréstimo',
+    VENDA_MICROSEGURO: 'Venda Microseguro',
     MICROSEGURO: 'Microseguro',
     PRESTAMO: 'Empréstimo',
     APORTE: 'Aporte de Capital',
