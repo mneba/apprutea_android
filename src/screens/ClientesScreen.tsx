@@ -91,6 +91,7 @@ interface ParcelaModal {
   credito_gerado?: number;
   saldo_excedente?: number;
   liquidacao_id?: string | null;
+  data_liquidacao?: string | null;
   observacoes?: string | null;
 }
 
@@ -125,7 +126,7 @@ const textos = {
     modoVisualizacao: 'Modo Visualização',
     modoVisualizacaoDesc: 'Visualizando dados de',
     modoVisualizacaoSair: 'Sair',
-    estornar: 'Estornar', venc: 'Venc:', em: 'Em:', fechar: 'Fechar',
+    estornar: 'Estornar', venc: 'Venc:', em: 'Pago em:', liq: 'Liquidação:', fechar: 'Fechar',
     quitarTudo: 'QUITAR TUDO', confirmar: 'Confirmar', cancelar: 'Cancelar',
     atencaoQuitacao: '⚠️ Quitação de Empréstimo',
     confirmarQuitar: 'Sim, Quitar',
@@ -198,7 +199,7 @@ const textos = {
     modoVisualizacao: 'Modo Visualización',
     modoVisualizacaoDesc: 'Visualizando datos de',
     modoVisualizacaoSair: 'Salir',
-    estornar: 'Reversar', venc: 'Venc:', em: 'En:', fechar: 'Cerrar',
+    estornar: 'Reversar', venc: 'Venc:', em: 'Pagado:', liq: 'Liquidación:', fechar: 'Cerrar',
     quitarTudo: 'LIQUIDAR TODO', confirmar: 'Confirmar', cancelar: 'Cancelar',
     atencaoQuitacao: '⚠️ Liquidación de Préstamo',
     confirmarQuitar: 'Sí, Liquidar',
@@ -837,6 +838,23 @@ export default function ClientesScreen({ navigation, route }: any) {
         }); 
       });
       
+      // Buscar datas das liquidações referenciadas
+      const liqIds = [...new Set([
+        ...parcelas.filter((p: any) => p.liquidacao_id).map((p: any) => p.liquidacao_id),
+        ...(pagamentos || []).filter((p: any) => p.liquidacao_id).map((p: any) => p.liquidacao_id)
+      ])].filter(Boolean);
+      
+      const liqDataMap = new Map<string, string>();
+      if (liqIds.length > 0) {
+        const { data: liqDatas } = await supabase
+          .from('liquidacoes_diarias')
+          .select('id, data_abertura')
+          .in('id', liqIds);
+        (liqDatas || []).forEach((l: any) => {
+          liqDataMap.set(l.id, l.data_abertura);
+        });
+      }
+      
       // Crédito disponível = soma dos saldo_excedente reais das parcelas (não do histórico de geração)
       const creditoTotal = (parcelas || []).reduce((sum: number, p: any) => sum + (p.saldo_excedente || 0), 0);
       setCreditoDisponivel(creditoTotal);
@@ -846,6 +864,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         const vSaldo = p.valor_saldo || 0;
         const creditoGerado = pag?.creditoGerado || 0;
         const liqPag = pag?.liquidacaoId || p.liquidacao_id || null;
+        const dataLiquidacao = liqPag ? (liqDataMap.get(liqPag) || null) : null;
         return { 
           parcela_id: p.id, 
           numero_parcela: p.numero_parcela, 
@@ -859,6 +878,7 @@ export default function ClientesScreen({ navigation, route }: any) {
           credito_gerado: creditoGerado,
           saldo_excedente: p.saldo_excedente || 0,
           liquidacao_id: liqPag,
+          data_liquidacao: dataLiquidacao,
           observacoes: p.observacoes || null
         }; 
       }));
@@ -1194,8 +1214,16 @@ export default function ClientesScreen({ navigation, route }: any) {
                 <Text style={[S.mParcelaStatusTx, { color: statusColor }]}>{statusText}</Text>
               </View>
             </View>
-            {/* Linha 2: Vencimento */}
-            <Text style={S.mParcelaVenc}>{t.venc} {fmtData(p.data_vencimento)}</Text>
+            {/* Linha 2: Datas */}
+            <View style={{ marginTop: 3 }}>
+              <Text style={S.mParcelaVenc}>📅 {t.venc} {fmtData(p.data_vencimento)}</Text>
+              {p.data_pagamento && (
+                <Text style={[S.mParcelaDataPg, { marginTop: 1 }]}>💰 {t.em} {fmtData(p.data_pagamento)}</Text>
+              )}
+              {p.data_liquidacao && (
+                <Text style={[S.mParcelaDataPg, { marginTop: 1, color: '#6366F1' }]}>📋 {t.liq} {fmtData(p.data_liquidacao)}</Text>
+              )}
+            </View>
             
             {/* PAGO: valor pago + original + crédito + indicador quitação */}
             {isPago && (
@@ -1226,9 +1254,6 @@ export default function ClientesScreen({ navigation, route }: any) {
                 {(p.saldo_excedente || 0) > 0 && (p.credito_gerado || 0) === 0 && !isAutoQuitacao && (
                   <Text style={S.mParcelaCredito}>{t.credito} {fmt(p.saldo_excedente || 0)}</Text>
                 )}
-                {p.data_pagamento && (
-                  <Text style={S.mParcelaDataPg}>{t.em} {fmtData(p.data_pagamento)}</Text>
-                )}
               </View>
             )}
             
@@ -1237,9 +1262,6 @@ export default function ClientesScreen({ navigation, route }: any) {
               <View style={{ marginTop: 2 }}>
                 <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
                 <Text style={S.mParcelaRestante}>{lang === 'es' ? 'Restante:' : 'Restante:'} {fmt(valorSaldo)}</Text>
-                {p.data_pagamento && (
-                  <Text style={S.mParcelaDataPg}>{t.em} {fmtData(p.data_pagamento)}</Text>
-                )}
               </View>
             )}
             
