@@ -251,7 +251,18 @@ const FREQ: Record<Language, Record<string, string>> = {
 };
 const getIni = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase() || '').join('');
 const fmt = (v: number) => '$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtData = (d: string) => { if (!d) return ''; const [y, m, day] = d.split('-'); return `${day}/${m}/${y}`; };
+const fmtData = (d: string | null | undefined) => { 
+  if (!d) return ''; 
+  // Se é só data (YYYY-MM-DD), formata direto
+  if (d.length === 10 && d.includes('-')) {
+    const [y, m, day] = d.split('-'); 
+    return `${day}/${m}/${y}`; 
+  }
+  // Se é timestamp, converte para data local
+  const dt = new Date(d);
+  if (isNaN(dt.getTime())) return '';
+  return dt.toLocaleDateString('pt-BR');
+};
 const fmtTel = (t: string) => t.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
 // Cor da borda por nível de atraso:
 // Verde: 0 parcelas de atraso (em dia)
