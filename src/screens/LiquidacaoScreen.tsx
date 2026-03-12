@@ -157,7 +157,9 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const [todasLiquidacoes, setTodasLiquidacoes] = useState<LiquidacaoDiaria[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [language, setLanguage] = useState<Language>('pt-BR');
+  // idioma vem do contexto global (AuthContext via LiquidacaoContext) — persiste no AsyncStorage
+  const language = liqCtx.language;
+  const setLanguage = liqCtx.setLanguage;
   const [fechando, setFechando] = useState(false);
   const [fechandoEtapa, setFechandoEtapa] = useState<'confirmar' | 'processando' | 'gerando'>('confirmar');
   const [modalIniciarVisible, setModalIniciarVisible] = useState(false);
@@ -313,11 +315,14 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
       if (!error && data) {
         setTodasLiquidacoes(data);
-        // Encontrar liquidação aberta
-        const aberta = data.find(l => l.status === 'ABERTO' || l.status === 'ABERTA');
+        // Encontrar liquidação ativa: ABERTO, ABERTA ou REABERTO
+        const aberta = data.find(l => {
+          const s = l.status?.toUpperCase();
+          return s === 'ABERTO' || s === 'ABERTA' || s === 'REABERTO' || s === 'REABERTA';
+        });
         setLiquidacao(aberta || null);
         
-        // Se não tem liquidação aberta, mostrar calendário
+        // Se não tem liquidação ativa, mostrar calendário
         if (!aberta && !modoVisualizacao) {
           setMostrarCalendario(true);
         }
@@ -377,8 +382,13 @@ export default function LiquidacaoScreen({ navigation }: any) {
       const ehHoje = data.getTime() === hoje.getTime();
       const ehFuturo = data > hoje;
       const liq = todasLiquidacoes.find(l => {
-        const dataLiq = new Date(l.data_abertura);
-        dataLiq.setHours(0, 0, 0, 0);
+        // Usa data_liquidacao (DATE puro, sem timezone) como fonte primária.
+        // Fallback para data_abertura pegando só YYYY-MM-DD (sem conversão UTC).
+        const rawStr = l.data_liquidacao
+          ? String(l.data_liquidacao).substring(0, 10)
+          : String(l.data_abertura).substring(0, 10);
+        const [y, m, d] = rawStr.split('-').map(Number);
+        const dataLiq = new Date(y, m - 1, d); // construtor local, sem UTC
         return dataLiq.getTime() === data.getTime();
       }) || null;
       dias.push({ data, diaNumero: dia, mesAtual: true, ehHoje, ehFuturo, liquidacao: liq });
@@ -600,10 +610,26 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
       if (error) throw error;
 
+      const resultado = Array.isArray(data) ? data[0] : data;
+      if (resultado && resultado.sucesso === false) {
+        // Já existe liquidação para hoje (fechada) — recarregar e mostrar ela
+        if (resultado.mensagem?.includes('já existe') || resultado.mensagem?.includes('ya existe')) {
+          setModalIniciarVisible(false);
+          await carregarLiquidacoes();
+          Alert.alert(
+            'Dia já registrado',
+            'Já existe uma liquidação para hoje. Se foi fechada por engano, peça ao supervisor para reabri-la pelo sistema web.',
+            [{ text: 'OK' }]
+          );
+          return;
+        }
+        throw new Error(resultado.mensagem || 'Falha ao abrir liquidação');
+      }
+
       setModalIniciarVisible(false);
       setMostrarCalendario(false);
       setModoVisualizacao(false);
-      carregarLiquidacoes();
+      await carregarLiquidacoes();
       Alert.alert('Sucesso', 'Dia iniciado com sucesso!');
     } catch (error: any) {
       Alert.alert('Erro', error.message || 'Não foi possível iniciar o dia');

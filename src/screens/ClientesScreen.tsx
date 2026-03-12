@@ -169,6 +169,18 @@ const textos = {
     quitarPrimeiro: 'É necessário quitar as parcelas mais antigas primeiro.',
     saldoAnteriorParcelas: 'parcela(s)',
     incluirAtraso: 'Incluir atraso',
+    quitacaoAntecipada: 'Quitação antecipada',
+    quitadoPorCredito: 'Quitado por crédito',
+    restante: 'Restante:',
+    toqueDetalhes: 'Toque para ver detalhes',
+    legendaTitulo: 'Significado das Cores',
+    legendaSubtitulo: 'Borda esquerda de cada card',
+    legendaEntendido: 'Entendido',
+    legPagoLabel: 'Pago / Em dia', legPagoDesc: 'Sem parcelas vencidas',
+    legPendenteLabel: 'Pendente', legPendenteDesc: 'Ainda não é dia de cobrança',
+    legLeveLabel: 'Atraso leve (1–3)', legLeveDesc: '1 a 3 parcelas vencidas',
+    legModeradoLabel: 'Atraso moderado (4–7)', legModeradoDesc: '4 a 7 parcelas vencidas',
+    legCriticoLabel: 'Atraso crítico (8+)', legCriticoDesc: '8 ou mais parcelas vencidas',
   },  'es': {
     titulo: 'Mis Clientes', hoje: 'Hoy', clientes: 'clientes',
     liquidacao: 'Liquidación', todosList: 'Todos', buscar: 'Buscar...',
@@ -242,6 +254,18 @@ const textos = {
     quitarPrimeiro: 'Es necesario pagar las cuotas más antiguas primero.',
     saldoAnteriorParcelas: 'cuota(s)',
     incluirAtraso: 'Incluir atraso',
+    quitacaoAntecipada: 'Liquidación anticipada',
+    quitadoPorCredito: 'Liquidado por crédito',
+    restante: 'Restante:',
+    toqueDetalhes: 'Toque para ver detalles',
+    legendaTitulo: 'Significado de los Colores',
+    legendaSubtitulo: 'Borde izquierdo de cada tarjeta',
+    legendaEntendido: 'Entendido',
+    legPagoLabel: 'Pago / Al día', legPagoDesc: 'Sin parcelas vencidas',
+    legPendenteLabel: 'Pendiente', legPendenteDesc: 'Aún no es día de cobro',
+    legLeveLabel: 'Atraso leve (1–3)', legLeveDesc: '1 a 3 cuotas vencidas',
+    legModeradoLabel: 'Atraso moderado (4–7)', legModeradoDesc: '4 a 7 cuotas vencidas',
+    legCriticoLabel: 'Atraso crítico (8+)', legCriticoDesc: '8 o más cuotas vencidas',
   },
 };
 
@@ -294,7 +318,15 @@ export default function ClientesScreen({ navigation, route }: any) {
   const { vendedor } = useAuth();
   const liqCtx = useLiquidacaoContext();
   const rotaId = route?.params?.rotaId || vendedor?.rota_id;
-  const dataLiq = liqCtx.dataVisualizacao || route?.params?.dataLiquidacao || (liqCtx.liquidacaoAtual?.data_abertura ? liqCtx.liquidacaoAtual.data_abertura.split('T')[0] : new Date().toISOString().split('T')[0]);
+  // data_liquidacao = campo DATE puro sem timezone (adicionado na migration 09)
+  // Fallback: data_abertura.substring(0,10) sem conversão UTC
+  // Último fallback: data local do dispositivo
+  const _liqAtual = liqCtx.liquidacaoAtual as any;
+  const dataLiq = liqCtx.dataVisualizacao
+    || route?.params?.dataLiquidacao
+    || _liqAtual?.data_liquidacao?.substring(0, 10)
+    || (_liqAtual?.data_abertura ? _liqAtual.data_abertura.substring(0, 10) : null)
+    || (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`; })();
   const liqId = liqCtx.liquidacaoIdVisualizacao || route?.params?.liquidacaoId || (liqCtx.temLiquidacaoAberta ? liqCtx.liquidacaoAtual?.id : null);
   const isViz = liqCtx.modoVisualizacao || route?.params?.isVisualizacao || false;
 
@@ -312,6 +344,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   const lang = liqCtx.language || 'pt-BR';
   // Se não há liquidação aberta, força tab "todos"
   const [tab, setTab] = useState<TabAtiva>(!liqId ? 'todos' : 'liquidacao');
+  const [modalLegendaVisible, setModalLegendaVisible] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busca, setBusca] = useState('');
@@ -859,10 +892,12 @@ export default function ClientesScreen({ navigation, route }: any) {
       if (liqIds.length > 0) {
         const { data: liqDatas } = await supabase
           .from('liquidacoes_diarias')
-          .select('id, data_abertura')
+          .select('id, data_abertura, data_liquidacao')
           .in('id', liqIds);
         (liqDatas || []).forEach((l: any) => {
-          liqDataMap.set(l.id, l.data_abertura);
+          // Prefere data_liquidacao (DATE puro), fallback para data_abertura.substring(0,10)
+          const dl = l.data_liquidacao?.substring(0, 10) || l.data_abertura?.substring(0, 10);
+          liqDataMap.set(l.id, dl);
         });
       }
       
@@ -1242,13 +1277,13 @@ export default function ClientesScreen({ navigation, route }: any) {
                 {/* Badge quitação antecipada (parcela que originou) */}
                 {isQuitacaoOrigem && (
                   <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF3C7', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, marginBottom: 4, alignSelf: 'flex-start' }}>
-                    <Text style={{ fontSize: 11, color: '#D97706', fontWeight: '700' }}>⚡ {lang === 'es' ? 'Liquidación anticipada' : 'Quitação antecipada'}</Text>
+                    <Text style={{ fontSize: 11, color: '#D97706', fontWeight: '700' }}>⚡ {t.quitacaoAntecipada}</Text>
                   </View>
                 )}
                 {/* Badge auto-quitação */}
                 {isAutoQuitacao && (
                   <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#DBEAFE', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, marginBottom: 4, alignSelf: 'flex-start' }}>
-                    <Text style={{ fontSize: 11, color: '#2563EB', fontWeight: '600' }}>🔄 {lang === 'es' ? 'Liquidado por crédito' : 'Quitado por crédito'}</Text>
+                    <Text style={{ fontSize: 11, color: '#2563EB', fontWeight: '600' }}>🔄 {t.quitadoPorCredito}</Text>
                   </View>
                 )}
                 {valorPago !== p.valor_parcela ? (
@@ -1272,7 +1307,7 @@ export default function ClientesScreen({ navigation, route }: any) {
             {temPagamentoParcial && (
               <View style={{ marginTop: 2 }}>
                 <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
-                <Text style={S.mParcelaRestante}>{lang === 'es' ? 'Restante:' : 'Restante:'} {fmt(valorSaldo)}</Text>
+                <Text style={S.mParcelaRestante}>{t.restante} {fmt(valorSaldo)}</Text>
               </View>
             )}
             
@@ -1393,7 +1428,7 @@ export default function ClientesScreen({ navigation, route }: any) {
               setDetalhesCliente({ id: c.cliente_id, nome: c.nome, telefone: c.telefone_celular, endereco: c.endereco, codigo_cliente: c.codigo_cliente });
               setModalDetalhesVisible(true);
             }}>
-              <Text style={S.linkDetalhesTx}>{lang === 'es' ? 'Toque para ver detalles' : 'Toque para ver detalhes'} ▽</Text>
+              <Text style={S.linkDetalhesTx}>{t.toqueDetalhes} ▽</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -1509,7 +1544,7 @@ export default function ClientesScreen({ navigation, route }: any) {
               setDetalhesCliente({ id: c.id, nome: c.nome, telefone: c.telefone_celular, codigo_cliente: c.codigo_cliente });
               setModalDetalhesVisible(true);
             }}>
-              <Text style={S.linkDetalhesTx}>{lang === 'es' ? 'Toque para ver detalles' : 'Toque para ver detalhes'} ▽</Text>
+              <Text style={S.linkDetalhesTx}>{t.toqueDetalhes} ▽</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -1520,7 +1555,50 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   return (
     <View style={S.c}>
-      <View style={S.hd}><View><Text style={S.hdT}>{t.titulo}</Text><Text style={S.hdS}>{isViz ? fmtData(dataLiq) : t.hoje} - {tab === 'liquidacao' ? filtered.length : todosList.length} {t.clientes}</Text></View><View style={S.hdR}><View style={S.hdDot} /><Text style={S.hdI}>🔔</Text><Text style={S.hdI}>⚙️</Text></View></View>
+      {/* Modal Legenda de Cores */}
+      <Modal visible={modalLegendaVisible} transparent animationType="fade" onRequestClose={() => setModalLegendaVisible(false)}>
+        <TouchableOpacity style={S.legendaOverlay} activeOpacity={1} onPress={() => setModalLegendaVisible(false)}>
+          <View style={S.legendaModal} onStartShouldSetResponder={() => true}>
+            <Text style={S.legendaTitle}>{t.legendaTitulo}</Text>
+            <Text style={S.legendaSubtitle}>{t.legendaSubtitulo}</Text>
+
+            {[
+              { color: '#10B981', label: t.legPagoLabel, desc: t.legPagoDesc },
+              { color: '#D1D5DB', label: t.legPendenteLabel, desc: t.legPendenteDesc },
+              { color: '#F59E0B', label: t.legLeveLabel, desc: t.legLeveDesc },
+              { color: '#F97316', label: t.legModeradoLabel, desc: t.legModeradoDesc },
+              { color: '#EF4444', label: t.legCriticoLabel, desc: t.legCriticoDesc },
+            ].map((item) => (
+              <View key={item.color} style={S.legendaRow}>
+                <View style={[S.legendaSwatch, { backgroundColor: item.color }]} />
+                <View style={S.legendaTexts}>
+                  <Text style={S.legendaLabel}>{item.label}</Text>
+                  <Text style={S.legendaDesc}>{item.desc}</Text>
+                </View>
+              </View>
+            ))}
+
+            <TouchableOpacity style={S.legendaClose} onPress={() => setModalLegendaVisible(false)}>
+              <Text style={S.legendaCloseText}>{t.legendaEntendido}</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      <View style={S.hd}>
+        <View>
+          <Text style={S.hdT}>{t.titulo}</Text>
+          <Text style={S.hdS}>{isViz ? fmtData(dataLiq) : t.hoje} - {tab === 'liquidacao' ? filtered.length : todosList.length} {t.clientes}</Text>
+        </View>
+        <View style={S.hdR}>
+          <TouchableOpacity style={S.hdHelp} onPress={() => setModalLegendaVisible(true)}>
+            <Text style={S.hdHelpText}>?</Text>
+          </TouchableOpacity>
+          <View style={S.hdDot} />
+          <Text style={S.hdI}>🔔</Text>
+          <Text style={S.hdI}>⚙️</Text>
+        </View>
+      </View>
       {isViz && (<View style={S.vizBanner}><View style={S.vizBannerContent}><Text style={S.vizBannerIcon}>⚠️</Text><View style={S.vizBannerTexts}><Text style={S.vizBannerTitle}>{t.modoVisualizacao}</Text><Text style={S.vizBannerDesc}>{t.modoVisualizacaoDesc} {fmtData(dataLiq)}</Text></View></View></View>)}
       
       {/* Banner de liquidação fechada quando não há liqId */}
@@ -2019,6 +2097,19 @@ const S = StyleSheet.create({
   lW: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EEF2FF' },
   lT: { marginTop: 12, color: '#6B7280', fontSize: 14 },
   hd: { backgroundColor: '#3B82F6', paddingTop: 48, paddingBottom: 14, paddingHorizontal: 16, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  hdHelp: { width: 26, height: 26, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.25)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' },
+  hdHelpText: { color: '#fff', fontSize: 14, fontWeight: '700', lineHeight: 18 },
+  legendaOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  legendaModal: { backgroundColor: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 340 },
+  legendaTitle: { fontSize: 17, fontWeight: '700', color: '#1F2937', marginBottom: 4 },
+  legendaSubtitle: { fontSize: 12, color: '#6B7280', marginBottom: 20 },
+  legendaRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 14, gap: 12 },
+  legendaSwatch: { width: 6, height: 44, borderRadius: 3 },
+  legendaTexts: { flex: 1 },
+  legendaLabel: { fontSize: 14, fontWeight: '600', color: '#1F2937' },
+  legendaDesc: { fontSize: 12, color: '#6B7280', marginTop: 1 },
+  legendaClose: { marginTop: 8, backgroundColor: '#3B82F6', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  legendaCloseText: { color: '#fff', fontWeight: '600', fontSize: 15 },
   hdT: { color: '#fff', fontSize: 18, fontWeight: '700' }, hdS: { color: 'rgba(255,255,255,0.75)', fontSize: 12, marginTop: 1 },
   hdR: { flexDirection: 'row', alignItems: 'center', gap: 10 }, hdDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#10B981' }, hdI: { fontSize: 18 },
   vizBanner: { backgroundColor: '#FEF3C7', paddingVertical: 10, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#FDE68A' },

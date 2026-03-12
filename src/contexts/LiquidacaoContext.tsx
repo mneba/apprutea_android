@@ -45,7 +45,8 @@ const LiquidacaoContext = createContext<LiquidacaoContextType>({
 });
 
 export function LiquidacaoProvider({ children }: { children: ReactNode }) {
-  const { vendedor } = useAuth();
+  // idioma vem do AuthContext — única fonte de verdade, persiste no AsyncStorage
+  const { vendedor, idioma, setIdioma } = useAuth();
 
   // Liquidação atual
   const [liquidacaoAtual, setLiquidacaoAtual] = useState<LiquidacaoDiaria | null>(null);
@@ -55,9 +56,6 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
   const [modoVisualizacao, setModoVisualizacao] = useState(false);
   const [dataVisualizacao, setDataVisualizacao] = useState<string | null>(null);
   const [liquidacaoIdVisualizacao, setLiquidacaoIdVisualizacao] = useState<string | null>(null);
-
-  // Idioma global
-  const [language, setLanguage] = useState<Language>('pt-BR');
 
   // Computed
   const temLiquidacaoAberta = !!(
@@ -112,8 +110,9 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
       liquidacaoIdVisualizacao,
       setLiquidacaoIdVisualizacao,
 
-      language,
-      setLanguage,
+      // Bridge com AuthContext — persiste no AsyncStorage e propaga para todas as telas
+      language: idioma,
+      setLanguage: setIdioma,
     }}>
       {children}
     </LiquidacaoContext.Provider>
