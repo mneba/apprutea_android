@@ -69,6 +69,9 @@ const i18n: Record<Lang, Record<string, string>> = {
     semMicroseguro: 'Nenhuma venda de microseguro', emprestimo: 'Empréstimo',
     vendedor: 'Vendedor', cliente: 'Cliente', valor: 'Valor', hora: 'Hora',
     fechar: 'Fechar', nenhumaEntrada: 'Nenhuma entrada', nenhunaSaida: 'Nenhuma saída',
+    cuotas: 'parcela(s)', verParcelas: 'ver parcelas', ocultar: 'ocultar',
+    vendasTitulo: 'Vendas / Empréstimos', receitasTitulo: 'Receitas', despesasTitulo: 'Despesas',
+    empAbrev: 'emp.',
   },
   'es': {
     extratoDia: 'EXTRACTO DEL DÍA', extratoLiq: 'EXTRACTO LIQUIDACIÓN DIARIA',
@@ -92,6 +95,9 @@ const i18n: Record<Lang, Record<string, string>> = {
     semMicroseguro: 'Ninguna venta de microseguro', emprestimo: 'Préstamo',
     vendedor: 'Vendedor', cliente: 'Cliente', valor: 'Valor', hora: 'Hora',
     fechar: 'Cerrar', nenhumaEntrada: 'Ninguna entrada', nenhunaSaida: 'Ninguna salida',
+    cuotas: 'cuota(s)', verParcelas: 'ver cuotas', ocultar: 'ocultar',
+    vendasTitulo: 'Ventas / Préstamos', receitasTitulo: 'Ingresos', despesasTitulo: 'Egresos',
+    empAbrev: 'prést.',
   },
 };
 
@@ -406,12 +412,10 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                           <View key={item.id}>
                             <View style={cupom.itemRow}>
                               <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
+                              <Text style={cupom.itemSub} numberOfLines={1}>{item.cliente_nome || item.descricao || formatarCategoria(item.categoria)}</Text>
                               <Text style={cupom.itemCat} numberOfLines={1}>{formatarCategoria(item.categoria)}</Text>
                               <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(parseFloat(item.valor))}</Text>
                             </View>
-                            {(item.cliente_nome || item.descricao) && (
-                              <Text style={cupom.itemSub} numberOfLines={1}>   {item.cliente_nome || item.descricao}</Text>
-                            )}
                             <View style={cupom.itemMeta}>
                               <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
                               {item.forma_pagamento && <Text style={cupom.itemHora}>{item.forma_pagamento}</Text>}
@@ -434,12 +438,10 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                           <View key={item.id}>
                             <View style={cupom.itemRow}>
                               <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
+                              <Text style={cupom.itemSub} numberOfLines={1}>{item.cliente_nome || item.descricao || formatarCategoria(item.categoria)}</Text>
                               <Text style={cupom.itemCat} numberOfLines={1}>{formatarCategoria(item.categoria)}</Text>
                               <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(parseFloat(item.valor))}</Text>
                             </View>
-                            {(item.cliente_nome || item.descricao) && (
-                              <Text style={cupom.itemSub} numberOfLines={1}>   {item.cliente_nome || item.descricao}</Text>
-                            )}
                             <View style={cupom.itemMeta}>
                               <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
                             </View>
@@ -461,12 +463,10 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                           <View key={item.id}>
                             <View style={cupom.itemRow}>
                               <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
+                              <Text style={cupom.itemSub} numberOfLines={1}>{item.cliente_nome || item.descricao || formatarCategoria(item.categoria)}</Text>
                               <Text style={cupom.itemCat} numberOfLines={1}>{formatarCategoria(item.categoria)}</Text>
                               <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(parseFloat(item.valor))}</Text>
                             </View>
-                            {(item.cliente_nome || item.descricao) && (
-                              <Text style={cupom.itemSub} numberOfLines={1}>   {item.cliente_nome || item.descricao}</Text>
-                            )}
                             <View style={cupom.itemMeta}>
                               <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
                               {item.forma_pagamento && <Text style={cupom.itemHora}>{item.forma_pagamento}</Text>}
@@ -500,12 +500,10 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                     <View key={item.id}>
                       <View style={cupom.itemRow}>
                         <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
+                        <Text style={cupom.itemSub} numberOfLines={1}>{item.cliente_nome || item.descricao || formatarCategoria(item.categoria)}</Text>
                         <Text style={cupom.itemCat} numberOfLines={1}>{formatarCategoria(item.categoria)}</Text>
                         <Text style={[cupom.itemVal, { color: '#DC2626' }]}>-{fmt(parseFloat(item.valor))}</Text>
                       </View>
-                      {(item.cliente_nome || item.descricao) && (
-                        <Text style={cupom.itemSub} numberOfLines={1}>   {item.cliente_nome || item.descricao}</Text>
-                      )}
                       <View style={cupom.itemMeta}>
                         <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
                         {item.forma_pagamento && <Text style={cupom.itemHora}>{item.forma_pagamento}</Text>}
@@ -574,9 +572,9 @@ const cupom = StyleSheet.create({
   divPonto: { textAlign: 'center', fontSize: 8, color: '#E5E7EB', fontFamily: MONO, marginVertical: 1 },
   itemRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
   itemIdx: { fontSize: 10, color: '#9CA3AF', width: 20, fontFamily: MONO },
-  itemCat: { flex: 1, fontSize: 11, color: '#1F2937', fontFamily: MONO, fontWeight: '600' },
+  itemCat: { fontSize: 10, color: '#6B7280', fontFamily: MONO },
   itemVal: { fontSize: 11, fontWeight: '700', fontFamily: MONO },
-  itemSub: { fontSize: 10, color: '#6B7280', fontFamily: MONO },
+  itemSub: { flex: 1, fontSize: 11, color: '#1F2937', fontFamily: MONO, fontWeight: '600' },
   itemMeta: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 1 },
   itemHora: { fontSize: 9, color: '#9CA3AF', fontFamily: MONO },
   shareBar: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#E8E4DF' },
@@ -680,7 +678,7 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={[dStyles.pagDetailValue, { color: '#059669', fontWeight: '700', fontSize: 15 }]}>{fmt(grupo.totalPago)}</Text>
-            <Text style={{ fontSize: 10, color: '#9CA3AF' }}>{grupo.parcelas.length} {lang === 'es' ? 'cuota(s)' : 'parcela(s)'}</Text>
+            <Text style={{ fontSize: 10, color: '#9CA3AF' }}>{grupo.parcelas.length} {t.cuotas}</Text>
           </View>
         </View>
 
@@ -721,7 +719,7 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
         {/* Indicador expand */}
         {grupo.parcelas.length > 0 && (
           <Text style={{ textAlign: 'center', fontSize: 10, color: '#9CA3AF', marginTop: 4 }}>
-            {isExpanded ? '▲' : '▼'} {isExpanded ? (lang === 'es' ? 'ocultar' : 'ocultar') : (lang === 'es' ? 'ver cuotas' : 'ver parcelas')}
+            {isExpanded ? '▲' : '▼'} {isExpanded ? t.ocultar : t.verParcelas}
           </Text>
         )}
       </TouchableOpacity>
@@ -797,9 +795,9 @@ interface FinanceiroProps {
 }
 
 const getConfigFinanceiro = (lang: Lang): Record<TipoFinanceiro, { titulo: string; icone: string; cor: string; filtro: any }> => ({
-  VENDAS: { titulo: lang === 'es' ? 'Ventas / Préstamos' : 'Vendas / Empréstimos', icone: '💼', cor: '#10B981', filtro: { tipo: 'PAGAR', categoria: 'EMPRESTIMO' } },
-  RECEITAS: { titulo: lang === 'es' ? 'Ingresos' : 'Receitas', icone: '📥', cor: '#3B82F6', filtro: { tipo: 'RECEBER' } },
-  DESPESAS: { titulo: lang === 'es' ? 'Egresos' : 'Despesas', icone: '📤', cor: '#EF4444', filtro: { tipo: 'PAGAR' } },
+  VENDAS: { titulo: i18n[lang].vendasTitulo, icone: '💼', cor: '#10B981', filtro: { tipo: 'PAGAR', categoria: 'EMPRESTIMO' } },
+  RECEITAS: { titulo: i18n[lang].receitasTitulo, icone: '📥', cor: '#3B82F6', filtro: { tipo: 'RECEBER' } },
+  DESPESAS: { titulo: i18n[lang].despesasTitulo, icone: '📤', cor: '#EF4444', filtro: { tipo: 'PAGAR' } },
 });
 
 export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalValor, totalQtd, lang = 'pt-BR' }: FinanceiroProps) {
@@ -877,7 +875,7 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
             <Text style={[dStyles.finResumoValor, { color: config.cor }]}>{fmt(loading ? totalValor : totalReal)}</Text>
           </View>
           <View style={dStyles.finResumoBadge}>
-            <Text style={dStyles.finResumoBadgeText}>{loading ? totalQtd : qtdReal} {tipo === 'VENDAS' ? (lang === 'es' ? 'prést.' : 'emp.') : t.lancamentos}</Text>
+            <Text style={dStyles.finResumoBadgeText}>{loading ? totalQtd : qtdReal} {tipo === 'VENDAS' ? t.empAbrev : t.lancamentos}</Text>
           </View>
         </View>
 

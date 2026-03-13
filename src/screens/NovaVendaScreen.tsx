@@ -298,6 +298,137 @@ const calStyles = StyleSheet.create({
   },
 });
 
+
+// ============================================================
+// TRADUÇÕES
+// ============================================================
+type Lang = 'pt-BR' | 'es';
+const textos = {
+  'pt-BR': {
+    // Header
+    tituloRenegociacao: 'RENEGOCIAÇÃO', tituloRenovacao: 'RENOVAÇÃO', tituloNovaVenda: 'NOVA VENDA',
+    // Seções
+    secCliente: 'CLIENTE', secEmprestimo: 'EMPRÉSTIMO', secMicroseguro: 'MICROSEGURO',
+    secCalculo: 'CÁLCULO AUTOMÁTICO', secResumo: 'RESUMO DA VENDA',
+    // Labels cliente
+    documento: 'Documento', telefoneFixo: 'Telefone fixo', email: 'Email',
+    endResidencial: 'Endereço Residencial', endComercial: 'Endereço Comercial',
+    segmento: 'Segmento', fotoCliente: 'Foto do cliente', observacoes: 'Observações',
+    cliqueFoto: 'Clique para adicionar foto',
+    // Placeholders
+    phNomeCliente: 'Nome do cliente', phDoc: '123.456.789-00',
+    phTelefone: 'Apenas números', phEmail: 'email@exemplo.com',
+    phEndRes: 'Rua, número, bairro', phEndCom: 'Rua, número, loja',
+    phObs: 'Anotações sobre o cliente', phObsEmp: 'Anotações',
+    phJuros: 'Ex: 18.5',
+    // Empréstimo
+    voltar: 'Voltar',
+    iniciarProxMes: 'Iniciar cobrança no próximo mês',
+    // Cálculo
+    valorTotal: 'Valor total:', valorParcela: 'Valor parcela:', totalJuros: 'Total de juros:',
+    // Microseguro
+    opcional: '(opcional)', valorMicroseguro: 'Valor do microseguro',
+    // Resumo
+    lblCliente: 'Cliente:', lblSegmento: 'Segmento:', lblEmprestimo: 'Empréstimo:',
+    lblTotal: '= Total:', lblParcelas: 'Parcelas:', lblFrequencia: 'Frequência:',
+    lblVencimento: '1º Vencimento:', lblMicroseguro: 'Microseguro:',
+    totalReceber: '💵 TOTAL A RECEBER:',
+    // Confirmação
+    processando: 'Processando...',
+    vendaRegistrada: 'Venda Registrada!',
+    secClienteConf: '👤 Cliente', nome: 'Nome:', codigo: 'Código:',
+    secEmprestimoConf: '💰 Empréstimo', valorTotalConf: 'Valor Total:',
+    valorParcelaConf: 'Valor Parcela:', microseguroConf: 'Microseguro:',
+    vencimento: 'Vencimento', valor: 'Valor',
+    fechar: '✓ Fechar',
+    // Modais auxiliares
+    selecionePais: 'Selecione o país',
+    selecioneSegmento: 'Selecione o segmento',
+    buscarSegmento: 'Buscar segmento...',
+    carregandoSegmentos: 'Carregando segmentos...',
+    nenhumSegmento: 'Nenhum segmento encontrado',
+    diaSemana: 'Dia da semana', dataPrimVenc: 'Data do 1º vencimento',
+    selecione: 'Selecione',
+    // Dias da semana
+    domingo: 'Domingo', segunda: 'Segunda-feira', terca: 'Terça-feira',
+    quarta: 'Quarta-feira', quinta: 'Quinta-feira', sexta: 'Sexta-feira', sabado: 'Sábado',
+    // Frequências
+    freqDiario: 'Diário', freqSemanal: 'Semanal', freqQuinzenal: 'Quinzenal', freqMensal: 'Mensal',
+    // Alerts
+    permissaoNecessaria: 'Permissão necessária',
+    permissaoCameraMsg: 'Precisamos de acesso à câmera para tirar a foto.',
+    permissaoGaleriaMsg: 'Precisamos de acesso à galeria.',
+    erro: 'Erro', erroFoto: 'Não foi possível capturar a foto.',
+    fotoCliente2: 'Foto do cliente', fotoMsg: 'Como deseja adicionar a foto?',
+    camera: 'Câmera', galeria: 'Galeria', removerFoto: 'Remover foto',
+    dadosIncompletos: 'Dados incompletos', dadosIncompletosMsg: 'Preencha todos os campos obrigatórios marcados com *.',
+    campoObrigatorio: 'Campo obrigatório',
+    selecioneDiaSemana: 'Selecione o dia da semana para cobrança.',
+    informeDiaMes: 'Informe o dia do mês para cobrança.',
+    selecionePeloMenosDia: 'Selecione pelo menos um dia de cobrança.',
+    erroAutenticacao: 'Erro de autenticação', sessaoExpirada: 'Sessão expirada. Faça login novamente.',
+    liquidacaoNaoEncontrada: 'Liquidação não encontrada',
+    liquidacaoNaoEncontradaMsg: 'Nenhuma liquidação aberta encontrada. Abra uma liquidação antes de registrar vendas.',
+    cancelarVenda: 'Cancelar venda?', cancelarMsg: 'Os dados preenchidos serão perdidos.',
+    simCancelar: 'Sim, cancelar', nao: 'Não',
+  },
+  'es': {
+    tituloRenegociacao: 'RENEGOCIACIÓN', tituloRenovacao: 'RENOVACIÓN', tituloNovaVenda: 'NUEVA VENTA',
+    secCliente: 'CLIENTE', secEmprestimo: 'PRÉSTAMO', secMicroseguro: 'MICROSEGURO',
+    secCalculo: 'CÁLCULO AUTOMÁTICO', secResumo: 'RESUMEN DE VENTA',
+    documento: 'Documento', telefoneFixo: 'Teléfono fijo', email: 'Email',
+    endResidencial: 'Dirección Residencial', endComercial: 'Dirección Comercial',
+    segmento: 'Segmento', fotoCliente: 'Foto del cliente', observacoes: 'Observaciones',
+    cliqueFoto: 'Toque para agregar foto',
+    phNomeCliente: 'Nombre del cliente', phDoc: '123.456.789-00',
+    phTelefone: 'Solo números', phEmail: 'email@ejemplo.com',
+    phEndRes: 'Calle, número, barrio', phEndCom: 'Calle, número, local',
+    phObs: 'Notas sobre el cliente', phObsEmp: 'Notas',
+    phJuros: 'Ej: 18.5',
+    voltar: 'Volver',
+    iniciarProxMes: 'Iniciar cobro el próximo mes',
+    valorTotal: 'Valor total:', valorParcela: 'Valor cuota:', totalJuros: 'Total intereses:',
+    opcional: '(opcional)', valorMicroseguro: 'Valor del microseguro',
+    lblCliente: 'Cliente:', lblSegmento: 'Segmento:', lblEmprestimo: 'Préstamo:',
+    lblTotal: '= Total:', lblParcelas: 'Cuotas:', lblFrequencia: 'Frecuencia:',
+    lblVencimento: '1º Vencimiento:', lblMicroseguro: 'Microseguro:',
+    totalReceber: '💵 TOTAL A RECIBIR:',
+    processando: 'Procesando...',
+    vendaRegistrada: '¡Venta Registrada!',
+    secClienteConf: '👤 Cliente', nome: 'Nombre:', codigo: 'Código:',
+    secEmprestimoConf: '💰 Préstamo', valorTotalConf: 'Valor Total:',
+    valorParcelaConf: 'Valor Cuota:', microseguroConf: 'Microseguro:',
+    vencimento: 'Vencimiento', valor: 'Valor',
+    fechar: '✓ Cerrar',
+    selecionePais: 'Seleccione el país',
+    selecioneSegmento: 'Seleccione el segmento',
+    buscarSegmento: 'Buscar segmento...',
+    carregandoSegmentos: 'Cargando segmentos...',
+    nenhumSegmento: 'Ningún segmento encontrado',
+    diaSemana: 'Día de la semana', dataPrimVenc: 'Fecha del 1º vencimiento',
+    selecione: 'Seleccione',
+    domingo: 'Domingo', segunda: 'Lunes', terca: 'Martes',
+    quarta: 'Miércoles', quinta: 'Jueves', sexta: 'Viernes', sabado: 'Sábado',
+    freqDiario: 'Diario', freqSemanal: 'Semanal', freqQuinzenal: 'Quincenal', freqMensal: 'Mensual',
+    permissaoNecessaria: 'Permiso necesario',
+    permissaoCameraMsg: 'Necesitamos acceso a la cámara para tomar la foto.',
+    permissaoGaleriaMsg: 'Necesitamos acceso a la galería.',
+    erro: 'Error', erroFoto: 'No fue posible capturar la foto.',
+    fotoCliente2: 'Foto del cliente', fotoMsg: '¿Cómo desea agregar la foto?',
+    camera: 'Cámara', galeria: 'Galería', removerFoto: 'Quitar foto',
+    dadosIncompletos: 'Datos incompletos', dadosIncompletosMsg: 'Complete todos los campos obligatorios marcados con *.',
+    campoObrigatorio: 'Campo obligatorio',
+    selecioneDiaSemana: 'Seleccione el día de la semana para cobro.',
+    informeDiaMes: 'Informe el día del mes para cobro.',
+    selecionePeloMenosDia: 'Seleccione al menos un día de cobro.',
+    erroAutenticacao: 'Error de autenticación', sessaoExpirada: 'Sesión expirada. Inicie sesión nuevamente.',
+    liquidacaoNaoEncontrada: 'Liquidación no encontrada',
+    liquidacaoNaoEncontradaMsg: 'Ninguna liquidación abierta. Abra una liquidación antes de registrar ventas.',
+    cancelarVenda: '¿Cancelar venta?', cancelarMsg: 'Los datos ingresados se perderán.',
+    simCancelar: 'Sí, cancelar', nao: 'No',
+  },
+};
+
 // ============================================================
 // COMPONENTE PRINCIPAL
 // ============================================================
@@ -305,6 +436,8 @@ const calStyles = StyleSheet.create({
 export default function NovaVendaScreen({ navigation, route }: any) {
   const { vendedor } = useAuth();
   const liqCtx = useLiquidacaoContext();
+  const lang = liqCtx.language;
+  const t = textos[lang];
   const clienteExistente = route?.params?.clienteExistente || null;
   const renegociacao = route?.params?.renegociacao || null;
   const isRenegociacao = !!renegociacao;
@@ -334,7 +467,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   // ESTADOS - EMPRÉSTIMO
   // -----------------------------------------------------------
   const [valorEmprestimo, setValorEmprestimo] = useState('');
-  const [numeroParcelas, setNumeroParcelas] = useState('12');
+  const [numeroParcelas, setNumeroParcelas] = useState('');
   const [taxaJuros, setTaxaJuros] = useState('');
   const [taxaJurosPersonalizada, setTaxaJurosPersonalizada] = useState(false);
   const [taxasPermitidas, setTaxasPermitidas] = useState<number[]>([5, 10, 15, 20, 25]);
@@ -408,21 +541,33 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     loadTaxasPermitidas();
   }, []);
 
+  const [taxasLivre, setTaxasLivre] = useState(false); // true = qualquer taxa permitida
+
   const loadTaxasPermitidas = async () => {
     if (!vendedor?.id) return;
     try {
       const { data, error } = await supabase
-        .from('restricoes_vendedor')
-        .select('taxas_juros_permitidas')
-        .eq('vendedor_id', vendedor.id)
-        .maybeSingle();
+        .rpc('fn_listar_taxas_juros', { p_vendedor_id: vendedor.id });
 
-      if (!error && data?.taxas_juros_permitidas && data.taxas_juros_permitidas.length > 0) {
-        setTaxasPermitidas(data.taxas_juros_permitidas);
+      if (!error && data) {
+        // Se algum registro tem is_livre=true OU lista vazia → qualquer taxa é permitida
+        const livre = data.length === 0 || data.some((r: any) => r.is_livre === true);
+        if (livre) {
+          setTaxasLivre(true);
+          // Mantém botões padrão só como atalho visual, mas não bloqueia taxa personalizada
+          setTaxasPermitidas([5, 10, 15, 20, 25]);
+        } else {
+          setTaxasLivre(false);
+          const taxas = data.map((r: any) => Number(r.taxa)).filter((t: number) => t > 0);
+          if (taxas.length > 0) setTaxasPermitidas(taxas);
+        }
+      } else {
+        // Erro na RPC → assume livre (não bloqueia o vendedor)
+        setTaxasLivre(true);
       }
-      // Se não encontrou, mantém o padrão [5, 10, 15, 20, 25]
     } catch (err) {
       console.error('Erro ao carregar taxas:', err);
+      setTaxasLivre(true);
     }
   };
 
@@ -506,17 +651,17 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   // HELPERS DIAS DA SEMANA
   // -----------------------------------------------------------
   const DIAS_SEMANA = [
-    { value: '0', label: 'Domingo' },
-    { value: '1', label: 'Segunda-feira' },
-    { value: '2', label: 'Terça-feira' },
-    { value: '3', label: 'Quarta-feira' },
-    { value: '4', label: 'Quinta-feira' },
-    { value: '5', label: 'Sexta-feira' },
-    { value: '6', label: 'Sábado' },
+    { value: '0', label: t.domingo },
+    { value: '1', label: t.segunda },
+    { value: '2', label: t.terca },
+    { value: '3', label: t.quarta },
+    { value: '4', label: t.quinta },
+    { value: '5', label: t.sexta },
+    { value: '6', label: t.sabado },
   ];
 
   const getDiaSemanaLabel = () => {
-    return DIAS_SEMANA.find(d => d.value === diaSemanaPagamento)?.label || 'Selecione';
+    return DIAS_SEMANA.find(d => d.value === diaSemanaPagamento)?.label || t.selecione;
   };
 
   // Flexível - toggle dia
@@ -565,7 +710,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permissão necessária', 'Precisamos de acesso à câmera para tirar a foto.');
+        Alert.alert(t.permissaoNecessaria, t.permissaoCameraMsg);
         return;
       }
 
@@ -586,7 +731,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
       }
     } catch (err) {
       console.error('Erro ao capturar foto:', err);
-      Alert.alert('Erro', 'Não foi possível capturar a foto.');
+      Alert.alert(t.erro, t.erroFoto);
     }
   };
 
@@ -594,7 +739,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     try {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permissão necessária', 'Precisamos de acesso à galeria.');
+        Alert.alert(t.permissaoNecessaria, t.permissaoGaleriaMsg);
         return;
       }
 
@@ -619,10 +764,10 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   };
 
   const handlePhotoOptions = () => {
-    Alert.alert('Foto do cliente', 'Como deseja adicionar a foto?', [
-      { text: 'Câmera', onPress: handlePickPhoto },
-      { text: 'Galeria', onPress: handlePickFromGallery },
-      ...(fotoCliente ? [{ text: 'Remover foto', style: 'destructive' as const, onPress: () => setFotoCliente(null) }] : []),
+    Alert.alert(t.fotoCliente2, t.fotoMsg, [
+      { text: t.camera, onPress: handlePickPhoto },
+      { text: t.galeria, onPress: handlePickFromGallery },
+      ...(fotoCliente ? [{ text: t.removerFoto, style: 'destructive' as const, onPress: () => setFotoCliente(null) }] : []),
       { text: 'Cancelar', style: 'cancel' as const },
     ]);
   };
@@ -687,20 +832,20 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   const handleSubmit = async () => {
     // ETAPA 1 - Validação local
     if (!isValido()) {
-      Alert.alert('Dados incompletos', 'Preencha todos os campos obrigatórios marcados com *.');
+      Alert.alert(t.dadosIncompletos, t.dadosIncompletosMsg);
       return;
     }
 
     if (frequencia === 'SEMANAL' && !diaSemanaPagamento) {
-      Alert.alert('Campo obrigatório', 'Selecione o dia da semana para cobrança.');
+      Alert.alert(t.campoObrigatorio, t.selecioneDiaSemana);
       return;
     }
     if (frequencia === 'MENSAL' && !diaMesPagamento) {
-      Alert.alert('Campo obrigatório', 'Informe o dia do mês para cobrança.');
+      Alert.alert(t.campoObrigatorio, t.informeDiaMes);
       return;
     }
     if (frequencia === 'FLEXIVEL' && diasMesFlexivel.length === 0) {
-      Alert.alert('Campo obrigatório', 'Selecione pelo menos um dia de cobrança.');
+      Alert.alert(t.campoObrigatorio, t.selecionePeloMenosDia);
       return;
     }
 
@@ -711,7 +856,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     let rotaId = vendedor?.rota_id || null;
 
     if (!userId) {
-      Alert.alert('Erro de autenticação', 'Sessão expirada. Faça login novamente.');
+      Alert.alert(t.erroAutenticacao, t.sessaoExpirada);
       return;
     }
 
@@ -998,9 +1143,9 @@ export default function NovaVendaScreen({ navigation, route }: any) {
       if (Platform.OS === 'web') {
         if (window.confirm('Os dados preenchidos serão perdidos. Cancelar?')) navigation.goBack();
       } else {
-        Alert.alert('Cancelar venda?', 'Os dados preenchidos serão perdidos.', [
-          { text: 'Não', style: 'cancel' },
-          { text: 'Sim, cancelar', style: 'destructive', onPress: () => navigation.goBack() },
+        Alert.alert(t.cancelarVenda, t.cancelarMsg, [
+          { text: t.nao, style: 'cancel' },
+          { text: t.simCancelar, style: 'destructive', onPress: () => navigation.goBack() },
         ]);
       }
     } else {
@@ -1015,7 +1160,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>{isRenegociacao ? 'RENEGOCIAÇÃO' : clienteExistente ? 'RENOVAÇÃO' : 'NOVA VENDA'}</Text>
+        <Text style={styles.headerTitle}>{isRenegociacao ? t.tituloRenegociacao : clienteExistente ? t.tituloRenovacao : t.tituloNovaVenda}</Text>
         <TouchableOpacity style={styles.headerCloseBtn} onPress={handleClose} activeOpacity={0.7}>
           <Text style={styles.headerCloseBtnText}>✕</Text>
         </TouchableOpacity>
@@ -1042,7 +1187,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
             >
               <View style={styles.sectionTitleRow}>
                 <Text style={styles.sectionIcon}>👤</Text>
-                <Text style={styles.sectionTitle}>CLIENTE</Text>
+                <Text style={styles.sectionTitle}>{t.secCliente}</Text>
               </View>
               <Text style={styles.sectionChevron}>{clienteExpanded ? '▲' : '▼'}</Text>
             </TouchableOpacity>
@@ -1058,7 +1203,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                     style={styles.input}
                     value={nome}
                     onChangeText={setNome}
-                    placeholder="Nome do cliente"
+                    placeholder={t.phNomeCliente}
                     placeholderTextColor="#9CA3AF"
                     autoCapitalize="words"
                   />
@@ -1066,12 +1211,12 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
                 {/* Documento */}
                 <View style={styles.fieldGroup}>
-                  <Text style={styles.fieldLabel}>Documento</Text>
+                  <Text style={styles.fieldLabel}>{t.documento}</Text>
                   <TextInput
                     style={styles.input}
                     value={documento}
                     onChangeText={setDocumento}
-                    placeholder="123.456.789-00"
+                    placeholder={t.phDoc}
                     placeholderTextColor="#9CA3AF"
                   />
                 </View>
@@ -1094,7 +1239,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                       style={[styles.input, { flex: 1 }]}
                       value={telefoneCelular}
                       onChangeText={(text) => setTelefoneCelular(text.replace(/[^\d]/g, ''))}
-                      placeholder="Apenas números"
+                      placeholder={t.phTelefone}
                       placeholderTextColor="#9CA3AF"
                       keyboardType="phone-pad"
                     />
@@ -1103,7 +1248,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
                 {/* Telefone fixo (DDI + número) */}
                 <View style={styles.fieldGroup}>
-                  <Text style={styles.fieldLabel}>Telefone fixo</Text>
+                  <Text style={styles.fieldLabel}>{t.telefoneFixo}</Text>
                   <View style={styles.rowFields}>
                     <TouchableOpacity
                       style={styles.ddiSelector}
@@ -1117,7 +1262,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                       style={[styles.input, { flex: 1 }]}
                       value={telefoneFixo}
                       onChangeText={(text) => setTelefoneFixo(text.replace(/[^\d]/g, ''))}
-                      placeholder="Apenas números"
+                      placeholder={t.phTelefone}
                       placeholderTextColor="#9CA3AF"
                       keyboardType="phone-pad"
                     />
@@ -1126,12 +1271,12 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
                 {/* Email */}
                 <View style={styles.fieldGroup}>
-                  <Text style={styles.fieldLabel}>Email</Text>
+                  <Text style={styles.fieldLabel}>{t.email}</Text>
                   <TextInput
                     style={styles.input}
                     value={email}
                     onChangeText={setEmail}
-                    placeholder="email@exemplo.com"
+                    placeholder={t.phEmail}
                     placeholderTextColor="#9CA3AF"
                     keyboardType="email-address"
                     autoCapitalize="none"
@@ -1140,31 +1285,31 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
                 {/* Endereço Residencial */}
                 <View style={styles.fieldGroup}>
-                  <Text style={styles.fieldLabel}>Endereço Residencial</Text>
+                  <Text style={styles.fieldLabel}>{t.endResidencial}</Text>
                   <TextInput
                     style={styles.input}
                     value={endereco}
                     onChangeText={setEndereco}
-                    placeholder="Rua, número, bairro"
+                    placeholder={t.phEndRes}
                     placeholderTextColor="#9CA3AF"
                   />
                 </View>
 
                 {/* Endereço Comercial */}
                 <View style={styles.fieldGroup}>
-                  <Text style={styles.fieldLabel}>Endereço Comercial</Text>
+                  <Text style={styles.fieldLabel}>{t.endComercial}</Text>
                   <TextInput
                     style={styles.input}
                     value={enderecoComercial}
                     onChangeText={setEnderecoComercial}
-                    placeholder="Rua, número, loja"
+                    placeholder={t.phEndCom}
                     placeholderTextColor="#9CA3AF"
                   />
                 </View>
 
                 {/* Segmento */}
                 <View style={styles.fieldGroup}>
-                  <Text style={styles.fieldLabel}>Segmento</Text>
+                  <Text style={styles.fieldLabel}>{t.segmento}</Text>
                   <TouchableOpacity
                     style={styles.selectField}
                     onPress={() => setShowSegmentoModal(true)}
@@ -1179,7 +1324,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
                 {/* Foto do cliente */}
                 <View style={styles.fieldGroup}>
-                  <Text style={styles.fieldLabel}>Foto do cliente</Text>
+                  <Text style={styles.fieldLabel}>{t.fotoCliente}</Text>
                   <TouchableOpacity
                     style={styles.photoContainer}
                     onPress={handlePhotoOptions}
@@ -1199,7 +1344,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                     ) : (
                       <View style={styles.photoPlaceholder}>
                         <Text style={styles.photoPlaceholderIcon}>📷</Text>
-                        <Text style={styles.photoPlaceholderText}>Clique para adicionar foto</Text>
+                        <Text style={styles.photoPlaceholderText}>{t.cliqueFoto}</Text>
                       </View>
                     )}
                   </TouchableOpacity>
@@ -1207,12 +1352,12 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
                 {/* Observações */}
                 <View style={styles.fieldGroup}>
-                  <Text style={styles.fieldLabel}>Observações</Text>
+                  <Text style={styles.fieldLabel}>{t.observacoes}</Text>
                   <TextInput
                     style={[styles.input, styles.textArea]}
                     value={observacoesCliente}
                     onChangeText={setObservacoesCliente}
-                    placeholder="Anotações sobre o cliente"
+                    placeholder={t.phObs}
                     placeholderTextColor="#9CA3AF"
                     multiline
                     numberOfLines={2}
@@ -1234,7 +1379,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
             >
               <View style={styles.sectionTitleRow}>
                 <Text style={styles.sectionIcon}>💰</Text>
-                <Text style={styles.sectionTitle}>EMPRÉSTIMO</Text>
+                <Text style={styles.sectionTitle}>{t.secEmprestimo}</Text>
               </View>
               <Text style={styles.sectionChevron}>{emprestimoExpanded ? '▲' : '▼'}</Text>
             </TouchableOpacity>
@@ -1267,7 +1412,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                         const num = text.replace(/[^\d]/g, '');
                         setNumeroParcelas(num);
                       }}
-                      placeholder="12"
+                      placeholder="20"
                       placeholderTextColor="#9CA3AF"
                       keyboardType="numeric"
                       maxLength={3}
@@ -1320,7 +1465,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                         style={[styles.input, { flex: 1 }]}
                         value={taxaJuros}
                         onChangeText={(text) => setTaxaJuros(text.replace(/[^\d.,]/g, ''))}
-                        placeholder="Ex: 18.5"
+                        placeholder={t.phJuros}
                         placeholderTextColor="#9CA3AF"
                         keyboardType="decimal-pad"
                         autoFocus
@@ -1330,7 +1475,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                         onPress={() => { setTaxaJurosPersonalizada(false); setTaxaJuros(''); }}
                         activeOpacity={0.7}
                       >
-                        <Text style={styles.taxaCancelBtnText}>Voltar</Text>
+                        <Text style={styles.taxaCancelBtnText}>{t.voltar}</Text>
                       </TouchableOpacity>
                     </View>
                   )}
@@ -1458,7 +1603,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                         <View style={[styles.checkbox, iniciarProximoMes && styles.checkboxActive]}>
                           {iniciarProximoMes && <Text style={styles.checkboxCheck}>✓</Text>}
                         </View>
-                        <Text style={styles.checkboxLabel}>Iniciar cobrança no próximo mês</Text>
+                        <Text style={styles.checkboxLabel}>{t.iniciarProxMes}</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -1483,12 +1628,12 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
                 {/* Observações */}
                 <View style={styles.fieldGroup}>
-                  <Text style={styles.fieldLabel}>Observações</Text>
+                  <Text style={styles.fieldLabel}>{t.observacoes}</Text>
                   <TextInput
                     style={[styles.input, styles.textArea]}
                     value={observacoesEmprestimo}
                     onChangeText={setObservacoesEmprestimo}
-                    placeholder="Anotações"
+                    placeholder={t.phObsEmp}
                     placeholderTextColor="#9CA3AF"
                     multiline
                     numberOfLines={2}
@@ -1499,17 +1644,17 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                 {/* Cálculo automático */}
                 {valorPrincipal > 0 && taxaNum > 0 && (
                   <View style={styles.calculoBox}>
-                    <Text style={styles.calculoTitle}>CÁLCULO AUTOMÁTICO</Text>
+                    <Text style={styles.calculoTitle}>{t.secCalculo}</Text>
                     <View style={styles.calculoRow}>
-                      <Text style={styles.calculoLabel}>Valor total:</Text>
+                      <Text style={styles.calculoLabel}>{t.valorTotal}</Text>
                       <Text style={styles.calculoValue}>$ {fmt(valorTotal)}</Text>
                     </View>
                     <View style={styles.calculoRow}>
-                      <Text style={styles.calculoLabel}>Valor parcela:</Text>
+                      <Text style={styles.calculoLabel}>{t.valorParcela}</Text>
                       <Text style={styles.calculoValue}>$ {fmt(valorParcela)}</Text>
                     </View>
                     <View style={styles.calculoRow}>
-                      <Text style={styles.calculoLabel}>Total de juros:</Text>
+                      <Text style={styles.calculoLabel}>{t.totalJuros}</Text>
                       <Text style={[styles.calculoValue, { color: '#EF4444' }]}>$ {fmt(totalJuros)}</Text>
                     </View>
                     <View style={[styles.calculoRow, { borderTopWidth: 1, borderTopColor: '#E5E7EB', paddingTop: 8, marginTop: 4 }]}>
@@ -1537,8 +1682,8 @@ export default function NovaVendaScreen({ navigation, route }: any) {
             >
               <View style={styles.sectionTitleRow}>
                 <Text style={styles.sectionIcon}>🔵</Text>
-                <Text style={styles.sectionTitle}>MICROSEGURO</Text>
-                <Text style={styles.sectionSubtitle}>(opcional)</Text>
+                <Text style={styles.sectionTitle}>{t.secMicroseguro}</Text>
+                <Text style={styles.sectionSubtitle}>{t.opcional}</Text>
               </View>
               <Text style={styles.sectionChevron}>{microseguroExpanded ? '▲' : '▼'}</Text>
             </TouchableOpacity>
@@ -1546,7 +1691,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
             {microseguroExpanded && (
               <View style={styles.sectionBody}>
                 <View style={styles.fieldGroup}>
-                  <Text style={styles.fieldLabel}>Valor do microseguro</Text>
+                  <Text style={styles.fieldLabel}>{t.valorMicroseguro}</Text>
                   <TextInput
                     style={styles.input}
                     value={valorMicroseguro ? `$ ${valorMicroseguro}` : ''}
@@ -1572,19 +1717,19 @@ export default function NovaVendaScreen({ navigation, route }: any) {
             <View style={styles.sectionHeader}>
               <View style={styles.sectionTitleRow}>
                 <Text style={styles.sectionIcon}>📋</Text>
-                <Text style={styles.sectionTitle}>RESUMO DA VENDA</Text>
+                <Text style={styles.sectionTitle}>{t.secResumo}</Text>
               </View>
             </View>
             <View style={styles.sectionBody}>
               {/* Bloco 1 - Cliente */}
               <View style={styles.resumoBloco}>
                 <View style={styles.resumoRow}>
-                  <Text style={styles.resumoLabel}>Cliente:</Text>
+                  <Text style={styles.resumoLabel}>{t.lblCliente}</Text>
                   <Text style={styles.resumoValue}>{nome || '—'}</Text>
                 </View>
                 {segmentoNome ? (
                   <View style={styles.resumoRow}>
-                    <Text style={styles.resumoLabel}>Segmento:</Text>
+                    <Text style={styles.resumoLabel}>{t.lblSegmento}</Text>
                     <Text style={styles.resumoValue}>{segmentoNome}</Text>
                   </View>
                 ) : null}
@@ -1593,7 +1738,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
               {/* Bloco 2 - Valores */}
               <View style={styles.resumoBloco}>
                 <View style={styles.resumoRow}>
-                  <Text style={styles.resumoLabel}>Empréstimo:</Text>
+                  <Text style={styles.resumoLabel}>{t.lblEmprestimo}</Text>
                   <Text style={styles.resumoValue}>$ {fmt(valorPrincipal)}</Text>
                 </View>
                 {totalJuros > 0 && (
@@ -1603,7 +1748,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                   </View>
                 )}
                 <View style={styles.resumoRow}>
-                  <Text style={[styles.resumoLabel, { fontWeight: '700' }]}>= Total:</Text>
+                  <Text style={[styles.resumoLabel, { fontWeight: '700' }]}>{t.lblTotal}</Text>
                   <Text style={[styles.resumoValue, { fontWeight: '700' }]}>$ {fmt(valorTotal)}</Text>
                 </View>
               </View>
@@ -1611,17 +1756,17 @@ export default function NovaVendaScreen({ navigation, route }: any) {
               {/* Bloco 3 - Detalhes parcelas */}
               <View style={styles.resumoBloco}>
                 <View style={styles.resumoRow}>
-                  <Text style={styles.resumoLabelSmall}>Parcelas:</Text>
+                  <Text style={styles.resumoLabelSmall}>{t.lblParcelas}</Text>
                   <Text style={styles.resumoValueSmall}>{parcelasNum}x de $ {fmt(valorParcela)}</Text>
                 </View>
                 <View style={styles.resumoRow}>
-                  <Text style={styles.resumoLabelSmall}>Frequência:</Text>
+                  <Text style={styles.resumoLabelSmall}>{t.lblFrequencia}</Text>
                   <Text style={styles.resumoValueSmall}>
                     {{ DIARIO: 'Diário', SEMANAL: 'Semanal', QUINZENAL: 'Quinzenal', MENSAL: 'Mensal', FLEXIVEL: 'Flexível' }[frequencia] || frequencia}
                   </Text>
                 </View>
                 <View style={styles.resumoRow}>
-                  <Text style={styles.resumoLabelSmall}>1º Vencimento:</Text>
+                  <Text style={styles.resumoLabelSmall}>{t.lblVencimento}</Text>
                   <Text style={styles.resumoValueSmall}>{formatarData(dataPrimeiroVencimento)}</Text>
                 </View>
               </View>
@@ -1630,7 +1775,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
               {microValor > 0 && (
                 <View style={styles.resumoBloco}>
                   <View style={styles.resumoRow}>
-                    <Text style={styles.resumoLabel}>Microseguro:</Text>
+                    <Text style={styles.resumoLabel}>{t.lblMicroseguro}</Text>
                     <Text style={styles.resumoValue}>$ {fmt(microValor)}</Text>
                   </View>
                 </View>
@@ -1638,7 +1783,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
               {/* Total a receber */}
               <View style={styles.resumoTotal}>
-                <Text style={styles.resumoTotalLabel}>💵 TOTAL A RECEBER:</Text>
+                <Text style={styles.resumoTotalLabel}>{t.totalReceber}</Text>
                 <Text style={styles.resumoTotalValue}>$ {fmt(valorTotal + microValor)}</Text>
               </View>
               {isRenegociacao && renegociacao?.saldo_devedor > 0 && (
@@ -1669,7 +1814,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
           {submitting ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <ActivityIndicator color="#fff" size="small" />
-              <Text style={styles.confirmButtonText}>Processando...</Text>
+              <Text style={styles.confirmButtonText}>{t.processando}</Text>
             </View>
           ) : (
             <Text style={[
@@ -1692,19 +1837,19 @@ export default function NovaVendaScreen({ navigation, route }: any) {
               {/* Header sucesso */}
               <View style={styles.resultadoHeader}>
                 <Text style={styles.resultadoHeaderIcon}>✅</Text>
-                <Text style={styles.resultadoHeaderTitle}>Venda Registrada!</Text>
+                <Text style={styles.resultadoHeaderTitle}>{t.vendaRegistrada}</Text>
                 <Text style={styles.resultadoHeaderMsg}>{resultado?.mensagem}</Text>
               </View>
 
               {/* Bloco 1 - Cliente */}
               <View style={[styles.resultadoBloco, { backgroundColor: '#EFF6FF' }]}>
-                <Text style={styles.resultadoBlocoTitle}>👤 Cliente</Text>
+                <Text style={styles.resultadoBlocoTitle}>{t.secClienteConf}</Text>
                 <View style={styles.resultadoRow}>
-                  <Text style={styles.resultadoLabel}>Nome:</Text>
+                  <Text style={styles.resultadoLabel}>{t.nome}</Text>
                   <Text style={styles.resultadoValue}>{resultado?.cliente_nome}</Text>
                 </View>
                 <View style={styles.resultadoRow}>
-                  <Text style={styles.resultadoLabel}>Código:</Text>
+                  <Text style={styles.resultadoLabel}>{t.codigo}</Text>
                   <Text style={[styles.resultadoValue, { fontWeight: '700', color: '#2563EB' }]}>
                     #{resultado?.cliente_codigo}
                   </Text>
@@ -1713,18 +1858,18 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
               {/* Bloco 2 - Empréstimo */}
               <View style={[styles.resultadoBloco, { backgroundColor: '#F0FDF4' }]}>
-                <Text style={styles.resultadoBlocoTitle}>💰 Empréstimo</Text>
+                <Text style={styles.resultadoBlocoTitle}>{t.secEmprestimoConf}</Text>
                 <View style={styles.resultadoRow}>
-                  <Text style={styles.resultadoLabel}>Valor Total:</Text>
+                  <Text style={styles.resultadoLabel}>{t.valorTotalConf}</Text>
                   <Text style={styles.resultadoValue}>$ {fmt(resultado?.valor_total || 0)}</Text>
                 </View>
                 <View style={styles.resultadoRow}>
-                  <Text style={styles.resultadoLabel}>Valor Parcela:</Text>
+                  <Text style={styles.resultadoLabel}>{t.valorParcelaConf}</Text>
                   <Text style={styles.resultadoValue}>$ {fmt(resultado?.valor_parcela || 0)}</Text>
                 </View>
                 {resultado?.microseguro_valor ? (
                   <View style={styles.resultadoRow}>
-                    <Text style={styles.resultadoLabel}>Microseguro:</Text>
+                    <Text style={styles.resultadoLabel}>{t.lblMicroseguro}</Text>
                     <Text style={styles.resultadoValue}>$ {fmt(resultado.microseguro_valor)}</Text>
                   </View>
                 ) : null}
@@ -1739,8 +1884,8 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                   {/* Header da tabela */}
                   <View style={styles.parcelaHeaderRow}>
                     <Text style={[styles.parcelaHeaderText, { width: 30 }]}>#</Text>
-                    <Text style={[styles.parcelaHeaderText, { flex: 1 }]}>Vencimento</Text>
-                    <Text style={[styles.parcelaHeaderText, { width: 100, textAlign: 'right' }]}>Valor</Text>
+                    <Text style={[styles.parcelaHeaderText, { flex: 1 }]}>{t.vencimento}</Text>
+                    <Text style={[styles.parcelaHeaderText, { width: 100, textAlign: 'right' }]}>{t.valor}</Text>
                   </View>
                   {resultado.parcelas.map((p: any) => (
                     <View key={p.numero} style={styles.parcelaRow}>
@@ -1763,7 +1908,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
               onPress={handleFecharResultado}
               activeOpacity={0.8}
             >
-              <Text style={styles.resultadoCloseBtnText}>✓ Fechar</Text>
+              <Text style={styles.resultadoCloseBtnText}>{t.fechar}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1776,7 +1921,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         <Pressable style={styles.pickerOverlay} onPress={() => setShowDdiModal(false)}>
           <View style={styles.pickerCard} onStartShouldSetResponder={() => true}>
             <View style={styles.pickerHeader}>
-              <Text style={styles.pickerTitle}>Selecione o país</Text>
+              <Text style={styles.pickerTitle}>{t.selecionePais}</Text>
               <TouchableOpacity onPress={() => setShowDdiModal(false)}>
                 <Text style={styles.pickerCloseText}>✕</Text>
               </TouchableOpacity>
@@ -1827,7 +1972,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         <Pressable style={styles.pickerOverlay} onPress={() => { setShowSegmentoModal(false); setSegmentoBusca(''); }}>
           <View style={styles.pickerCard} onStartShouldSetResponder={() => true}>
             <View style={styles.pickerHeader}>
-              <Text style={styles.pickerTitle}>Selecione o segmento</Text>
+              <Text style={styles.pickerTitle}>{t.selecioneSegmento}</Text>
               <TouchableOpacity onPress={() => { setShowSegmentoModal(false); setSegmentoBusca(''); }}>
                 <Text style={styles.pickerCloseText}>✕</Text>
               </TouchableOpacity>
@@ -1840,7 +1985,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                 style={styles.pickerSearchInput}
                 value={segmentoBusca}
                 onChangeText={setSegmentoBusca}
-                placeholder="Buscar segmento..."
+                placeholder={t.buscarSegmento}
                 placeholderTextColor="#9CA3AF"
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -1855,7 +2000,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
             {segmentosLoading ? (
               <View style={styles.pickerLoading}>
                 <ActivityIndicator color="#2563EB" />
-                <Text style={styles.pickerLoadingText}>Carregando segmentos...</Text>
+                <Text style={styles.pickerLoadingText}>{t.carregandoSegmentos}</Text>
               </View>
             ) : (
               <ScrollView style={styles.pickerList} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -1918,7 +2063,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                   return g.itens.filter(s => s.nome_pt.toLowerCase().includes(busca) || g.grupo.toLowerCase().includes(busca)).length === 0;
                 }) && (
                   <View style={styles.pickerLoading}>
-                    <Text style={styles.pickerLoadingText}>Nenhum segmento encontrado</Text>
+                    <Text style={styles.pickerLoadingText}>{t.nenhumSegmento}</Text>
                   </View>
                 )}
               </ScrollView>
@@ -1933,7 +2078,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         <Pressable style={styles.pickerOverlay} onPress={() => setShowDiaSemanaModal(false)}>
           <View style={styles.pickerCard} onStartShouldSetResponder={() => true}>
             <View style={styles.pickerHeader}>
-              <Text style={styles.pickerTitle}>Dia da semana</Text>
+              <Text style={styles.pickerTitle}>{t.diaSemana}</Text>
               <TouchableOpacity onPress={() => setShowDiaSemanaModal(false)}>
                 <Text style={styles.pickerCloseText}>✕</Text>
               </TouchableOpacity>
@@ -1969,7 +2114,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         <Pressable style={styles.pickerOverlay} onPress={() => setShowDatePicker(false)}>
           <View style={[styles.pickerCard, { maxHeight: '80%' }]} onStartShouldSetResponder={() => true}>
             <View style={styles.pickerHeader}>
-              <Text style={styles.pickerTitle}>Data do 1º vencimento</Text>
+              <Text style={styles.pickerTitle}>{t.dataPrimVenc}</Text>
               <TouchableOpacity onPress={() => setShowDatePicker(false)}>
                 <Text style={styles.pickerCloseText}>✕</Text>
               </TouchableOpacity>

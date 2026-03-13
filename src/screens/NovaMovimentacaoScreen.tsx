@@ -1,7 +1,9 @@
+import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Modal,
   Platform,
   Pressable,
@@ -27,6 +29,72 @@ interface Categoria {
   tipo_movimento: string; // "RECEBER" | "PAGAR" | "AMBOS"
 }
 
+
+// ============================================================
+// TRADUÇÕES
+// ============================================================
+type Lang = 'pt-BR' | 'es';
+const textos = {
+  'pt-BR': {
+    titulo: 'NOVA MOVIMENTAÇÃO', tituloHeader: 'MOVIMENTAÇÃO',
+    registrada: 'Movimentação Registrada!',
+    fechar: '✓ Fechar',
+    tipo: 'Tipo:', categoria: 'Categoria:', valor: 'Valor:', descricao: 'Descrição',
+    entrada: 'ENTRADA', saida: 'SAÍDA',
+    resumoEntrada: '✅ Entrada', resumoSaida: '✅ Saída',
+    selecionarCategoria: 'Selecione uma categoria...',
+    buscarCategoria: 'Buscar categoria...',
+    semCategoria: 'Nenhuma categoria encontrada',
+    carregandoCategorias: 'Carregando categorias...',
+    registrando: 'Registrando...', registrar: 'REGISTRAR',
+    placeholderAporte: 'Ex: Aporte de capital',
+    placeholderGasolina: 'Ex: Gasolina do dia',
+    valorInvalido: 'Valor inválido', valorInvalidoMsg: 'Insira um valor válido para a movimentação.',
+    erroSessao: 'Erro de sessão', erroSessaoMsg: 'Dados de sessão inválidos. Faça login novamente.',
+    erro: 'Erro', rotaNaoEncontrada: 'Rota não encontrada para este vendedor.',
+    liquidacaoNaoEncontrada: 'Liquidação não encontrada',
+    liquidacaoNaoEncontradaMsg: 'Nenhuma liquidação aberta encontrada. Abra uma liquidação antes de registrar movimentações.',
+    erroInesperado: 'Erro inesperado ao registrar movimentação.',
+    cancelar: 'Cancelar?', cancelarMsg: 'Os dados preenchidos serão perdidos.',
+    simCancelar: 'Sim, cancelar', nao: 'Não',
+    foto: 'Foto (opcional)', adicionarFoto: 'Adicionar foto', trocarFoto: 'Trocar foto',
+    removerFoto: 'Remover', erroFoto: 'Não foi possível carregar a foto.',
+    permissaoCamera: 'Permissão necessária', permissaoCameraMsg: 'Precisamos de acesso à câmera.',
+    permissaoGaleria: 'Precisamos de acesso à galeria.',
+    fotoTitulo: 'Foto', fotoOpcao: 'Como deseja adicionar a foto?',
+    camera: 'Câmera', galeria: 'Galeria',
+  },
+  'es': {
+    titulo: 'NUEVO MOVIMIENTO', tituloHeader: 'MOVIMIENTO',
+    registrada: '¡Movimiento Registrado!',
+    fechar: '✓ Cerrar',
+    tipo: 'Tipo:', categoria: 'Categoría:', valor: 'Valor:', descricao: 'Descripción',
+    entrada: 'ENTRADA', saida: 'SALIDA',
+    resumoEntrada: '✅ Entrada', resumoSaida: '✅ Salida',
+    selecionarCategoria: 'Seleccione una categoría...',
+    buscarCategoria: 'Buscar categoría...',
+    semCategoria: 'Ninguna categoría encontrada',
+    carregandoCategorias: 'Cargando categorías...',
+    registrando: 'Registrando...', registrar: 'REGISTRAR',
+    placeholderAporte: 'Ej: Aporte de capital',
+    placeholderGasolina: 'Ej: Gasolina del día',
+    valorInvalido: 'Valor inválido', valorInvalidoMsg: 'Ingrese un valor válido para el movimiento.',
+    erroSessao: 'Error de sesión', erroSessaoMsg: 'Datos de sesión inválidos. Inicie sesión nuevamente.',
+    erro: 'Error', rotaNaoEncontrada: 'Ruta no encontrada para este vendedor.',
+    liquidacaoNaoEncontrada: 'Liquidación no encontrada',
+    liquidacaoNaoEncontradaMsg: 'Ninguna liquidación abierta. Abra una liquidación antes de registrar movimientos.',
+    erroInesperado: 'Error inesperado al registrar movimiento.',
+    cancelar: '¿Cancelar?', cancelarMsg: 'Los datos ingresados se perderán.',
+    simCancelar: 'Sí, cancelar', nao: 'No',
+    foto: 'Foto (opcional)', adicionarFoto: 'Agregar foto', trocarFoto: 'Cambiar foto',
+    removerFoto: 'Quitar', erroFoto: 'No fue posible cargar la foto.',
+    permissaoCamera: 'Permiso necesario', permissaoCameraMsg: 'Necesitamos acceso a la cámara.',
+    permissaoGaleria: 'Necesitamos acceso a la galería.',
+    fotoTitulo: 'Foto', fotoOpcao: '¿Cómo desea agregar la foto?',
+    camera: 'Cámara', galeria: 'Galería',
+  },
+};
+
 // ============================================================
 // COMPONENTE PRINCIPAL
 // ============================================================
@@ -34,14 +102,18 @@ interface Categoria {
 export default function NovaMovimentacaoScreen({ navigation }: any) {
   const { vendedor } = useAuth();
   const liqCtx = useLiquidacaoContext();
+  const lang = liqCtx.language;
+  const t = textos[lang];
 
   // -----------------------------------------------------------
   // ESTADOS
   // -----------------------------------------------------------
-  const [tipo, setTipo] = useState<'RECEBER' | 'PAGAR'>('RECEBER');
+  const [tipo, setTipo] = useState<'RECEBER' | 'PAGAR'>('PAGAR');
   const [categoria, setCategoria] = useState('');
   const [valor, setValor] = useState('');
   const [descricao, setDescricao] = useState('');
+  const [fotoUri, setFotoUri] = useState<string | null>(null);
+  const [fotoUploading, setFotoUploading] = useState(false);
 
   // Categorias
   const [todasCategorias, setTodasCategorias] = useState<Categoria[]>([]);
@@ -130,12 +202,74 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
     v.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
 
   // -----------------------------------------------------------
+  // FOTO
+  // -----------------------------------------------------------
+  const handleAdicionarFoto = () => {
+    Alert.alert(t.fotoTitulo, t.fotoOpcao, [
+      { text: t.camera, onPress: () => abrirCamera() },
+      { text: t.galeria, onPress: () => abrirGaleria() },
+      { text: t.nao, style: 'cancel' },
+    ]);
+  };
+
+  const abrirCamera = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(t.permissaoCamera, t.permissaoCameraMsg);
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.7,
+    });
+    if (!result.canceled && result.assets[0]) setFotoUri(result.assets[0].uri);
+  };
+
+  const abrirGaleria = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(t.permissaoCamera, t.permissaoGaleria);
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.7,
+    });
+    if (!result.canceled && result.assets[0]) setFotoUri(result.assets[0].uri);
+  };
+
+  const uploadFoto = async (liquidacaoId: string, vendedorId: string): Promise<string | null> => {
+    if (!fotoUri) return null;
+    setFotoUploading(true);
+    try {
+      const ext = fotoUri.split('.').pop()?.toLowerCase() || 'jpg';
+      const fileName = `movimentacoes/${vendedorId}/${liquidacaoId}_${Date.now()}.${ext}`;
+      const response = await fetch(fotoUri);
+      const blob = await response.blob();
+      const { error } = await supabase.storage.from('fotos').upload(fileName, blob, {
+        contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}`,
+        upsert: false,
+      });
+      if (error) throw error;
+      const { data: urlData } = supabase.storage.from('fotos').getPublicUrl(fileName);
+      return urlData.publicUrl;
+    } catch (err) {
+      console.error('Erro upload foto:', err);
+      return null;
+    } finally {
+      setFotoUploading(false);
+    }
+  };
+
+  // -----------------------------------------------------------
   // SUBMIT
   // -----------------------------------------------------------
   const handleSubmit = async () => {
     // Etapa 1 - Validação
     if (valorNumerico <= 0) {
-      Alert.alert('Valor inválido', 'Insira um valor válido para a movimentação.');
+      Alert.alert(t.valorInvalido, t.valorInvalidoMsg);
       return;
     }
 
@@ -145,7 +279,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
     const empresaId = vendedor?.empresa_id || null;
 
     if (!vendedorId || !empresaId) {
-      Alert.alert('Erro de sessão', 'Dados de sessão inválidos. Faça login novamente.');
+      Alert.alert(t.erroSessao, t.erroSessaoMsg);
       return;
     }
 
@@ -160,11 +294,11 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
         if (rotaData) {
           rotaId = rotaData.id;
         } else {
-          Alert.alert('Erro', 'Rota não encontrada para este vendedor.');
+          Alert.alert(t.erro, t.rotaNaoEncontrada);
           return;
         }
       } catch (err) {
-        Alert.alert('Erro', 'Rota não encontrada para este vendedor.');
+        Alert.alert(t.erro, t.rotaNaoEncontrada);
         return;
       }
     }
@@ -203,6 +337,18 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
 
       if (error) throw error;
 
+      // Upload foto se houver
+      const financeiroId = Array.isArray(data) ? data[0]?.financeiro_id : data?.financeiro_id;
+      if (fotoUri && financeiroId) {
+        const fotoUrl = await uploadFoto(liqData.id, vendedorId);
+        if (fotoUrl) {
+          await supabase
+            .from('financeiro')
+            .update({ foto_url: fotoUrl })
+            .eq('id', financeiroId);
+        }
+      }
+
       // Sucesso
       setValorConfirmado(formatarValor(valorNumerico));
       setDescConfirmada(descricao.trim() || categoriaNome);
@@ -212,7 +358,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
       liqCtx.recarregarLiquidacao();
     } catch (err: any) {
       console.error('Erro ao registrar movimentação:', err);
-      Alert.alert('Erro', err?.message || 'Erro inesperado ao registrar movimentação.');
+      Alert.alert(t.erro, err?.message || t.erroInesperado);
     } finally {
       setEnviando(false);
     }
@@ -224,9 +370,9 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
   const handleClose = () => {
     const temDados = valor || descricao;
     if (temDados) {
-      Alert.alert('Cancelar?', 'Os dados preenchidos serão perdidos.', [
-        { text: 'Não', style: 'cancel' },
-        { text: 'Sim, cancelar', style: 'destructive', onPress: () => navigation.goBack() },
+      Alert.alert(t.cancelar, t.cancelarMsg, [
+        { text: t.nao, style: 'cancel' },
+        { text: t.simCancelar, style: 'destructive', onPress: () => navigation.goBack() },
       ]);
     } else {
       navigation.goBack();
@@ -240,16 +386,16 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>MOVIMENTAÇÃO</Text>
+          <Text style={styles.headerTitle}>{t.tituloHeader}</Text>
           <View style={{ width: 32 }} />
         </View>
         <View style={styles.sucessoContainer}>
           <View style={styles.sucessoCircle}>
             <Text style={styles.sucessoIcon}>✓</Text>
           </View>
-          <Text style={styles.sucessoTitle}>Movimentação Registrada!</Text>
+          <Text style={styles.sucessoTitle}>{t.registrada}</Text>
           <Text style={styles.sucessoSubtitle}>
-            {tipo === 'RECEBER' ? '✅ Entrada' : '✅ Saída'} de R$ {valorConfirmado}
+            {tipo === 'RECEBER' ? t.resumoEntrada : t.resumoSaida} de R$ {valorConfirmado}
           </Text>
           {descConfirmada ? (
             <Text style={styles.sucessoDesc}>{descConfirmada}</Text>
@@ -262,7 +408,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
             }}
             activeOpacity={0.8}
           >
-            <Text style={styles.sucessoCloseBtnText}>✓ Fechar</Text>
+            <Text style={styles.sucessoCloseBtnText}>{t.fechar}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -276,7 +422,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>NOVA MOVIMENTAÇÃO</Text>
+        <Text style={styles.headerTitle}>{t.titulo}</Text>
         <TouchableOpacity style={styles.headerCloseBtn} onPress={handleClose} activeOpacity={0.7}>
           <Text style={styles.headerCloseBtnText}>✕</Text>
         </TouchableOpacity>
@@ -312,7 +458,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
                     tipo === 'RECEBER' && styles.tipoBtnTextEntradaActive,
                   ]}
                 >
-                  ENTRADA
+                  {t.entrada}
                 </Text>
               </TouchableOpacity>
 
@@ -331,7 +477,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
                     tipo === 'PAGAR' && styles.tipoBtnTextSaidaActive,
                   ]}
                 >
-                  SAÍDA
+                  {t.saida}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -349,7 +495,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
             {categoriasLoading ? (
               <View style={styles.loadingRow}>
                 <ActivityIndicator color="#2563EB" size="small" />
-                <Text style={styles.loadingText}>Carregando categorias...</Text>
+                <Text style={styles.loadingText}>{t.carregandoCategorias}</Text>
               </View>
             ) : (
               <TouchableOpacity
@@ -358,7 +504,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
                 activeOpacity={0.7}
               >
                 <Text style={categoriaNome ? styles.selectFieldText : styles.selectFieldPlaceholder}>
-                  {categoriaNome || 'Selecione uma categoria...'}
+                  {categoriaNome || t.selecionarCategoria}
                 </Text>
                 <Text style={styles.selectFieldChevron}>▼</Text>
               </TouchableOpacity>
@@ -393,15 +539,15 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
         {/* ============================== */}
         <View style={styles.section}>
           <View style={styles.sectionBody}>
-            <Text style={styles.fieldLabel}>Descrição</Text>
+            <Text style={styles.fieldLabel}>{t.descricao}</Text>
             <TextInput
               style={[styles.input, styles.textArea]}
               value={descricao}
               onChangeText={setDescricao}
               placeholder={
                 tipo === 'RECEBER'
-                  ? 'Ex: Aporte de capital'
-                  : 'Ex: Gasolina do dia'
+                  ? t.placeholderAporte
+                  : t.placeholderGasolina
               }
               placeholderTextColor="#9CA3AF"
               multiline
@@ -412,24 +558,51 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
         </View>
 
         {/* ============================== */}
+        {/* FOTO                           */}
+        {/* ============================== */}
+        <View style={styles.section}>
+          <View style={styles.sectionBody}>
+            <Text style={styles.fieldLabel}>{t.foto}</Text>
+            {fotoUri ? (
+              <View style={styles.fotoContainer}>
+                <Image source={{ uri: fotoUri }} style={styles.fotoPreview} resizeMode="cover" />
+                <View style={styles.fotoBtns}>
+                  <TouchableOpacity style={styles.fotoBtnSecondary} onPress={handleAdicionarFoto} activeOpacity={0.7}>
+                    <Text style={styles.fotoBtnSecondaryText}>🔄 {t.trocarFoto}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.fotoBtnRemover} onPress={() => setFotoUri(null)} activeOpacity={0.7}>
+                    <Text style={styles.fotoBtnRemoverText}>✕ {t.removerFoto}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.fotoBtn} onPress={handleAdicionarFoto} activeOpacity={0.7}>
+                <Text style={styles.fotoBtnIcon}>📷</Text>
+                <Text style={styles.fotoBtnText}>{t.adicionarFoto}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+
+        {/* ============================== */}
         {/* RESUMO                         */}
         {/* ============================== */}
         {valorNumerico > 0 && (
           <View style={[styles.section, styles.resumoSection]}>
             <View style={styles.sectionBody}>
               <View style={styles.resumoRow}>
-                <Text style={styles.resumoLabel}>Tipo:</Text>
+                <Text style={styles.resumoLabel}>{t.tipo}</Text>
                 <Text style={styles.resumoValue}>
-                  {tipo === 'RECEBER' ? '✅ Entrada' : '✅ Saída'}
+                  {tipo === 'RECEBER' ? t.resumoEntrada : t.resumoSaida}
                 </Text>
               </View>
               <View style={styles.resumoRow}>
-                <Text style={styles.resumoLabel}>Categoria:</Text>
+                <Text style={styles.resumoLabel}>{t.categoria}</Text>
                 <Text style={styles.resumoValue}>{categoriaNome}</Text>
               </View>
               <View style={styles.resumoDivider} />
               <View style={styles.resumoRow}>
-                <Text style={styles.resumoLabelBold}>Valor:</Text>
+                <Text style={styles.resumoLabelBold}>{t.valor}</Text>
                 <Text style={styles.resumoValueBold}>R$ {formatarValor(valorNumerico)}</Text>
               </View>
             </View>
@@ -449,12 +622,12 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
           ]}
           onPress={handleSubmit}
           activeOpacity={0.8}
-          disabled={enviando || valorNumerico <= 0}
+          disabled={enviando || fotoUploading || valorNumerico <= 0}
         >
           {enviando ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <ActivityIndicator color="#fff" size="small" />
-              <Text style={styles.submitBtnText}>Registrando...</Text>
+              <Text style={styles.submitBtnText}>{t.registrando}</Text>
             </View>
           ) : (
             <Text
@@ -498,7 +671,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
                 style={styles.pickerSearchInput}
                 value={categoriaBusca}
                 onChangeText={setCategoriaBusca}
-                placeholder="Buscar categoria..."
+                {...{placeholder: t.buscarCategoria}}
                 placeholderTextColor="#9CA3AF"
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -551,7 +724,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
                 !categoriaBusca.trim() || c.nome_pt.toLowerCase().includes(categoriaBusca.toLowerCase().trim())
               ).length === 0 && (
                 <View style={styles.pickerEmpty}>
-                  <Text style={styles.pickerEmptyText}>Nenhuma categoria encontrada</Text>
+                  <Text style={styles.pickerEmptyText}>{t.semCategoria}</Text>
                 </View>
               )}
             </ScrollView>
@@ -900,4 +1073,25 @@ const styles = StyleSheet.create({
   pickerItemBadge: { fontSize: 14, color: '#9CA3AF' },
   pickerEmpty: { padding: 32, alignItems: 'center' },
   pickerEmptyText: { fontSize: 14, color: '#9CA3AF' },
+
+  fotoBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, borderWidth: 1.5, borderColor: '#D1D5DB', borderStyle: 'dashed',
+    borderRadius: 10, paddingVertical: 16, backgroundColor: '#F9FAFB',
+  },
+  fotoBtnIcon: { fontSize: 22 },
+  fotoBtnText: { fontSize: 14, color: '#6B7280', fontWeight: '500' },
+  fotoContainer: { gap: 8 },
+  fotoPreview: { width: '100%', height: 160, borderRadius: 10, backgroundColor: '#F3F4F6' },
+  fotoBtns: { flexDirection: 'row', gap: 8 },
+  fotoBtnSecondary: {
+    flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 8,
+    borderWidth: 1, borderColor: '#3B82F6', backgroundColor: '#EFF6FF',
+  },
+  fotoBtnSecondaryText: { fontSize: 13, color: '#3B82F6', fontWeight: '500' },
+  fotoBtnRemover: {
+    flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 8,
+    borderWidth: 1, borderColor: '#EF4444', backgroundColor: '#FEF2F2',
+  },
+  fotoBtnRemoverText: { fontSize: 13, color: '#EF4444', fontWeight: '500' },
 });

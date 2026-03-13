@@ -1270,6 +1270,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
           liquidacaoId={liqFechadaId}
           caixaInicial={liqFechadaCaixaInicial}
           caixaFinal={liqFechadaCaixaFinal}
+          lang={language}
         />
       )}
 
@@ -1282,6 +1283,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
             liquidacaoId={liquidacao.id}
             caixaInicial={liquidacao.caixa_inicial || 0}
             caixaFinal={liquidacao.caixa_final || liquidacao.caixa_inicial || 0}
+            lang={language}
           />
           <ModalPagamentos
             visible={modalPagamentosVisible}
@@ -1289,6 +1291,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
             liquidacaoId={liquidacao.id}
             totalPagos={(liquidacao as any).clientes_pagos || 0}
             totalNaoPagos={(liquidacao as any).clientes_nao_pagos || 0}
+            lang={language}
           />
           <ModalFinanceiro
             visible={modalVendasVisible}
@@ -1297,6 +1300,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
             tipo="VENDAS"
             totalValor={liquidacao.total_emprestado_dia || 0}
             totalQtd={liquidacao.qtd_emprestimos_dia || 0}
+            lang={language}
           />
           <ModalFinanceiro
             visible={modalReceitasVisible}
@@ -1305,6 +1309,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
             tipo="RECEITAS"
             totalValor={receitasFinanceiras.total}
             totalQtd={receitasFinanceiras.qtd}
+            lang={language}
           />
           <ModalFinanceiro
             visible={modalDespesasVisible}
@@ -1313,6 +1318,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
             tipo="DESPESAS"
             totalValor={liquidacao.total_despesas_dia || 0}
             totalQtd={liquidacao.qtd_despesas_dia || 0}
+            lang={language}
           />
           <ModalMicroseguro
             visible={modalMicroseguroVisible}
@@ -1320,6 +1326,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
             liquidacaoId={liquidacao.id}
             totalValor={liquidacao.total_microseguro_dia || 0}
             totalQtd={liquidacao.qtd_microseguros_dia || 0}
+            lang={language}
           />
 
           <ModalNotasLista

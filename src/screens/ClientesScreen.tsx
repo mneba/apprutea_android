@@ -1445,7 +1445,18 @@ export default function ClientesScreen({ navigation, route }: any) {
     // Filtro por tipo de empréstimo
     if (filtroTipo !== 'todos') { r = r.filter(c => c.emprestimos.some(e => e.tipo_emprestimo === filtroTipo)); }
     // Filtro por status do empréstimo
-    if (filtroStatus !== 'todos') { r = r.filter(c => c.emprestimos.some(e => e.status === filtroStatus)); }
+    if (filtroStatus !== 'todos') {
+      r = r.filter(c => {
+        const temStatus = c.emprestimos.some(e => e.status === filtroStatus);
+        if (!temStatus) return false;
+        // QUITADO e RENEGOCIADO: só mostra se não houver empréstimo ATIVO ou VENCIDO mais recente
+        if (filtroStatus === 'QUITADO' || filtroStatus === 'RENEGOCIADO') {
+          const temAtivo = c.emprestimos.some(e => e.status === 'ATIVO' || e.status === 'VENCIDO');
+          if (temAtivo) return false;
+        }
+        return true;
+      });
+    }
     // Ordenação A-Z sempre
     r.sort((a, b) => a.nome.localeCompare(b.nome));
     return r;
