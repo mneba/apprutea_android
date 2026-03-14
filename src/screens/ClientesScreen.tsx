@@ -363,6 +363,10 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [expandedTodos, setExpandedTodos] = useState<string | null>(null);
   const [filtroTipo, setFiltroTipo] = useState<string>('todos');
   const [filtroStatus, setFiltroStatus] = useState<string>('todos');
+  const [ordemRotaMap, setOrdemRotaMap] = useState<Map<string, number>>(new Map());
+  const [modoReordenar, setModoReordenar] = useState(false);
+  const [listaReordenar, setListaReordenar] = useState<ClienteTodos[]>([]);
+  const [salvandoOrdem, setSalvandoOrdem] = useState(false);
   const [showFiltroTipo, setShowFiltroTipo] = useState(false);
   const [showFiltroStatus, setShowFiltroStatus] = useState(false);
   const [ocultarLiquidacao, setOcultarLiquidacao] = useState(false);
@@ -595,6 +599,60 @@ export default function ClientesScreen({ navigation, route }: any) {
     return () => { watchSub?.remove(); };
   }, [carregarGPS]);
 
+  // ─── REORDENAÇÃO DE CLIENTES ─────────────────────────────────────────────
+
+  const iniciarReordenar = useCallback(() => {
+    const lista = [...todosList].sort((a, b) => {
+      const oa = ordemRotaMap.get(a.id) ?? 9999;
+      const ob = ordemRotaMap.get(b.id) ?? 9999;
+      if (oa !== ob) return oa - ob;
+      return a.nome.localeCompare(b.nome);
+    });
+    setListaReordenar(lista);
+    setModoReordenar(true);
+  }, [todosList, ordemRotaMap]);
+
+  const cancelarReordenar = useCallback(() => {
+    setModoReordenar(false);
+    setListaReordenar([]);
+  }, []);
+
+  const moverItem = useCallback((fromIndex: number, toIndex: number) => {
+    setListaReordenar(prev => {
+      const lista = [...prev];
+      const [item] = lista.splice(fromIndex, 1);
+      lista.splice(toIndex, 0, item);
+      return lista;
+    });
+  }, []);
+
+  const salvarOrdem = useCallback(async () => {
+    if (!rotaId || listaReordenar.length === 0) return;
+    setSalvandoOrdem(true);
+    try {
+      const upserts = listaReordenar.map((c, i) => ({
+        rota_id: rotaId,
+        cliente_id: c.id,
+        ordem: i + 1,
+      }));
+      const { error } = await supabase
+        .from('ordem_rota_cliente')
+        .upsert(upserts, { onConflict: 'rota_id,cliente_id' });
+      if (error) throw error;
+      const m = new Map<string, number>();
+      listaReordenar.forEach((c, i) => m.set(c.id, i + 1));
+      setOrdemRotaMap(m);
+      setModoReordenar(false);
+      setListaReordenar([]);
+    } catch (e: any) {
+      Alert.alert('Erro', 'Não foi possível salvar a ordem: ' + (e.message || ''));
+    } finally {
+      setSalvandoOrdem(false);
+    }
+  }, [rotaId, listaReordenar]);
+
+  // ─────────────────────────────────────────────────────────────────────────
+
   const loadLiq = useCallback(async () => {
     if (!rotaId) {
       console.log('❌ loadLiq: rotaId não definido');
@@ -803,7 +861,23 @@ export default function ClientesScreen({ navigation, route }: any) {
         if (info.vencidas > 0) cli.tem_atraso = true;
         cli.emprestimos.push({ id: e.id, valor_principal: e.valor_principal, saldo_emprestimo: e.valor_saldo, valor_parcela: e.valor_parcela, numero_parcelas: e.numero_parcelas, numero_parcela_atual: info.maxParcela, status: e.status, frequencia_pagamento: e.frequencia_pagamento, tipo_emprestimo: (e as any).tipo_emprestimo || 'NOVO', total_parcelas_vencidas: info.vencidas, valor_total_vencido: info.totalVencido });
       }
-      setTodosList(Array.from(cliMap.values()));
+      const cliList = Array.from(cliMap.values());
+      setTodosList(cliList);
+
+      // Carregar ordem da rota
+      if (rotaId) {
+        const clienteIds = cliList.map(c => c.id);
+        const { data: ordens } = await supabase
+          .from('ordem_rota_cliente')
+          .select('cliente_id, ordem')
+          .eq('rota_id', rotaId)
+          .in('cliente_id', clienteIds);
+        if (ordens) {
+          const m = new Map<string, number>();
+          (ordens as any[]).forEach(o => m.set(o.cliente_id, Number(o.ordem)));
+          setOrdemRotaMap(m);
+        }
+      }
     } catch (e) { console.error('Erro loadTodos:', e); }
     finally { setLoadTodos(false); setRefreshing(false); }
   }, [rotaId, todosList.length]);
@@ -1445,20 +1519,14 @@ export default function ClientesScreen({ navigation, route }: any) {
     // Filtro por tipo de empréstimo
     if (filtroTipo !== 'todos') { r = r.filter(c => c.emprestimos.some(e => e.tipo_emprestimo === filtroTipo)); }
     // Filtro por status do empréstimo
-    if (filtroStatus !== 'todos') {
-      r = r.filter(c => {
-        const temStatus = c.emprestimos.some(e => e.status === filtroStatus);
-        if (!temStatus) return false;
-        // QUITADO e RENEGOCIADO: só mostra se não houver empréstimo ATIVO ou VENCIDO mais recente
-        if (filtroStatus === 'QUITADO' || filtroStatus === 'RENEGOCIADO') {
-          const temAtivo = c.emprestimos.some(e => e.status === 'ATIVO' || e.status === 'VENCIDO');
-          if (temAtivo) return false;
-        }
-        return true;
-      });
-    }
-    // Ordenação A-Z sempre
-    r.sort((a, b) => a.nome.localeCompare(b.nome));
+    if (filtroStatus !== 'todos') { r = r.filter(c => c.emprestimos.some(e => e.status === filtroStatus)); }
+    // Ordenação: por ordem da rota se disponível, senão A-Z
+    r.sort((a, b) => {
+      const oa = ordemRotaMap.get(a.id) ?? 9999;
+      const ob = ordemRotaMap.get(b.id) ?? 9999;
+      if (oa !== ob) return oa - ob;
+      return a.nome.localeCompare(b.nome);
+    });
     return r;
   }, [todosList, busca, filtroTipo, filtroStatus, ocultarLiquidacao, clientesLiqIds]);
 
@@ -1562,6 +1630,99 @@ export default function ClientesScreen({ navigation, route }: any) {
       </TouchableOpacity>);
   };
 
+
+  // ─── TELA DE REORDENAÇÃO ─────────────────────────────────────────────────
+  if (modoReordenar) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#F9FAFB' }}>
+        {/* Header */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 48, paddingBottom: 12, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' }}>
+          <TouchableOpacity onPress={cancelarReordenar} style={{ padding: 6 }}>
+            <Text style={{ fontSize: 14, color: '#6B7280' }}>Cancelar</Text>
+          </TouchableOpacity>
+          <View style={{ alignItems: 'center' }}>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: '#111827' }}>{lang === 'es' ? 'Ordenar Ruta' : 'Ordem da Rota'}</Text>
+            <Text style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>{lang === 'es' ? 'Use ↑↓ para reordenar' : 'Use ↑↓ para reordenar'}</Text>
+          </View>
+          <TouchableOpacity
+            onPress={salvarOrdem}
+            disabled={salvandoOrdem}
+            style={{ paddingHorizontal: 14, paddingVertical: 7, backgroundColor: salvandoOrdem ? '#93C5FD' : '#2563EB', borderRadius: 8 }}
+          >
+            <Text style={{ fontSize: 14, color: '#FFF', fontWeight: '600' }}>{salvandoOrdem ? '...' : (lang === 'es' ? 'Guardar' : 'Salvar')}</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Info banner */}
+        <View style={{ backgroundColor: '#EFF6FF', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#DBEAFE' }}>
+          <Text style={{ fontSize: 12, color: '#1D4ED8' }}>
+            {lang === 'es'
+              ? `${listaReordenar.length} clientes • Use los botones para mover`
+              : `${listaReordenar.length} clientes • Use os botões para mover`}
+          </Text>
+        </View>
+
+        {/* Lista reordenável */}
+        <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
+          {listaReordenar.map((cliente, index) => {
+            const temAtraso = cliente.tem_atraso;
+            const empAtivo = cliente.emprestimos.find((e: any) => e.status === 'ATIVO' || e.status === 'VENCIDO');
+            return (
+              <View
+                key={cliente.id}
+                style={{
+                  flexDirection: 'row', alignItems: 'center',
+                  backgroundColor: '#FFF', marginHorizontal: 12, marginTop: 8,
+                  borderRadius: 12, borderWidth: 1.5,
+                  borderColor: temAtraso ? '#FCA5A5' : '#E5E7EB',
+                  paddingVertical: 10, paddingHorizontal: 12,
+                  shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: 0.06, shadowRadius: 2, elevation: 2,
+                }}
+              >
+                {/* Número de ordem */}
+                <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#2563EB' }}>{index + 1}</Text>
+                </View>
+
+                {/* Info do cliente */}
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#111827' }} numberOfLines={1}>{cliente.nome}</Text>
+                  <Text style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>
+                    {cliente.codigo_cliente ? `#${cliente.codigo_cliente}` : ''}
+                    {empAtivo ? ` • ${empAtivo.status === 'VENCIDO' ? '⚠️ Vencido' : '✅ Ativo'}` : ''}
+                  </Text>
+                </View>
+
+                {/* Botões ↑↓ */}
+                <View style={{ gap: 4 }}>
+                  <TouchableOpacity
+                    onPress={() => index > 0 && moverItem(index, index - 1)}
+                    disabled={index === 0}
+                    style={{ width: 32, height: 28, borderRadius: 6, backgroundColor: index === 0 ? '#F3F4F6' : '#DBEAFE', alignItems: 'center', justifyContent: 'center' }}
+                    activeOpacity={0.6}
+                  >
+                    <Text style={{ fontSize: 16, color: index === 0 ? '#D1D5DB' : '#2563EB', fontWeight: '700' }}>↑</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => index < listaReordenar.length - 1 && moverItem(index, index + 1)}
+                    disabled={index === listaReordenar.length - 1}
+                    style={{ width: 32, height: 28, borderRadius: 6, backgroundColor: index === listaReordenar.length - 1 ? '#F3F4F6' : '#DBEAFE', alignItems: 'center', justifyContent: 'center' }}
+                    activeOpacity={0.6}
+                  >
+                    <Text style={{ fontSize: 16, color: index === listaReordenar.length - 1 ? '#D1D5DB' : '#2563EB', fontWeight: '700' }}>↓</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })}
+          <View style={{ height: 40 }} />
+        </ScrollView>
+      </View>
+    );
+  }
+
+
   if (loading) return (<View style={S.lW}><ActivityIndicator size="large" color="#3B82F6" /><Text style={S.lT}>{t.carregando}</Text></View>);
 
   return (
@@ -1664,6 +1825,14 @@ export default function ClientesScreen({ navigation, route }: any) {
           ].map(o => (<TouchableOpacity key={o.k} style={[S.tDDI, filtroStatus === o.k && S.tDDISel]} onPress={() => { setFiltroStatus(o.k); setShowFiltroStatus(false); }}><Text style={[S.tDDIT, filtroStatus === o.k && S.tDDITSel]}>{o.l}</Text></TouchableOpacity>))}</View>)}
         </View>
         <Text style={S.tCnt}>{todosFilt.length} {t.clientes}</Text>
+        <TouchableOpacity
+          style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, backgroundColor: '#F3F4F6', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', gap: 4 }}
+          onPress={iniciarReordenar}
+          activeOpacity={0.7}
+        >
+          <Text style={{ fontSize: 14 }}>⇅</Text>
+          <Text style={{ fontSize: 12, color: '#374151', fontWeight: '500' }}>{lang === 'es' ? 'Ordenar' : 'Ordenar'}</Text>
+        </TouchableOpacity>
       </View>)}
       {tab === 'todos' && liqId && (
         <View style={{ paddingHorizontal: 16, paddingBottom: 10 }}>
@@ -2101,6 +2270,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       />
     </View>
   );
+
 }
 
 const S = StyleSheet.create({
