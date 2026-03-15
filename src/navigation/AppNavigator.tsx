@@ -1,8 +1,10 @@
+import NetInfo from '@react-native-community/netinfo';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, useNavigationState } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import React, { useState } from 'react';
-import { ActivityIndicator, Alert, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Image, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { LiquidacaoProvider, useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 
@@ -129,12 +131,98 @@ function AcoesRapidasModal({ visible, onClose, navigation }: { visible: boolean;
   );
 }
 
+// ─── Header Compartilhado ────────────────────────────────────────────────────
+const TAB_TITLES: Record<string, { pt: string; es: string }> = {
+  Home:     { pt: 'Liquidação Diária', es: 'Liquidación Diaria' },
+  Clientes: { pt: 'Meus Clientes',     es: 'Mis Clientes'       },
+};
+
+function SharedHeader({ navigation }: { navigation: any }) {
+  const { vendedor, idioma } = useAuth();
+  const insets = useSafeAreaInsets();
+  const [isConnected, setIsConnected] = useState(true);
+
+  // Nome da aba ativa — SharedHeader está dentro do contexto das tabs
+  const activeRoute = useNavigationState(state => {
+    if (!state) return 'Home';
+    const idx = state.index ?? 0;
+    return state.routes?.[idx]?.name ?? 'Home';
+  });
+
+  const titles = TAB_TITLES[activeRoute] ?? TAB_TITLES['Home'];
+  const titulo = idioma === 'es' ? titles.es : titles.pt;
+
+  // Monitor de conexão
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener((state: any) => {
+      setIsConnected(state.isConnected ?? true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  return (
+    <View style={[sharedHeaderStyles.header, { paddingTop: insets.top + 14 }]}>
+      {/* Esquerda: título + rota */}
+      <View style={{ flex: 1, marginRight: 12 }}>
+        <Text style={sharedHeaderStyles.titulo} numberOfLines={1}>{titulo}</Text>
+        {(vendedor as any).rota_nome ? (
+          <Text style={sharedHeaderStyles.sub} numberOfLines={1}>
+            {(vendedor as any).rota_nome}
+          </Text>
+        ) : null}
+      </View>
+
+      {/* Direita: indicador, foto, engrenagem */}
+      <View style={sharedHeaderStyles.actions}>
+        <View style={[sharedHeaderStyles.dot, { backgroundColor: isConnected ? '#10B981' : '#EF4444' }]} />
+
+        <TouchableOpacity onPress={() => navigation.navigate('Perfil')} activeOpacity={0.8}>
+          {vendedor?.foto_url ? (
+            <Image source={{ uri: (vendedor as any).foto_url }} style={sharedHeaderStyles.avatar} />
+          ) : (
+            <View style={sharedHeaderStyles.avatarPlaceholder}>
+              <Text style={{ fontSize: 18 }}>👤</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => navigation.navigate('Configuracoes')} style={sharedHeaderStyles.gearBtn}>
+          <Text style={{ fontSize: 18 }}>⚙️</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+const sharedHeaderStyles = StyleSheet.create({
+  header: {
+    backgroundColor: '#3B82F6',
+    paddingBottom: 20,
+    paddingHorizontal: 16,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  titulo: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  sub:    { color: 'rgba(255,255,255,0.85)', fontSize: 13, fontWeight: '500', marginTop: 2 },
+  subRota: { color: 'rgba(255,255,255,0.65)', fontWeight: '400' },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  dot:    { width: 8, height: 8, borderRadius: 4 },
+  avatar:   { width: 36, height: 36, borderRadius: 18, borderWidth: 2, borderColor: 'rgba(255,255,255,0.6)' },
+  avatarPlaceholder: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.25)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.6)' },
+  gearBtn:  { padding: 4 },
+});
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Tab Navigator principal com modal
 function MainTabsContent({ navigation }: any) {
   const [modalVisible, setModalVisible] = useState(false);
 
   return (
     <>
+      <SharedHeader navigation={navigation} />
       <Tab.Navigator
         screenOptions={{
           headerShown: false,

@@ -5,7 +5,6 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
-  Image,
   Modal,
   RefreshControl,
   ScrollView,
@@ -151,15 +150,13 @@ const textos = {
 };
 
 export default function LiquidacaoScreen({ navigation }: any) {
-  const { vendedor } = useAuth();
+  const { vendedor, idioma } = useAuth();
   const liqCtx = useLiquidacaoContext();
   const [liquidacao, setLiquidacao] = useState<LiquidacaoDiaria | null>(null);
   const [todasLiquidacoes, setTodasLiquidacoes] = useState<LiquidacaoDiaria[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  // idioma vem do contexto global (AuthContext via LiquidacaoContext) — persiste no AsyncStorage
-  const language = liqCtx.language;
-  const setLanguage = liqCtx.setLanguage;
+  const language: Language = idioma || 'pt-BR';
   const [fechando, setFechando] = useState(false);
   const [fechandoEtapa, setFechandoEtapa] = useState<'confirmar' | 'processando' | 'gerando'>('confirmar');
   const [modalIniciarVisible, setModalIniciarVisible] = useState(false);
@@ -353,10 +350,6 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const onRefresh = () => {
     setRefreshing(true);
     carregarLiquidacoes();
-  };
-
-  const toggleLanguage = () => {
-    setLanguage(language === 'pt-BR' ? 'es' : 'pt-BR');
   };
 
   // ==================== CALENDÁRIO ====================
@@ -711,26 +704,6 @@ export default function LiquidacaoScreen({ navigation }: any) {
     
     return (
       <View style={styles.container}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>{t.titulo}</Text>
-          <View style={styles.headerActions}>
-            <View style={[styles.statusDot, { backgroundColor: isConnected ? '#10B981' : '#EF4444' }]} />
-            <TouchableOpacity onPress={toggleLanguage} style={styles.langButton}>
-              <Text style={styles.langText}>🌐 {language === 'pt-BR' ? 'PT' : 'ES'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.avatarButton} onPress={() => navigation.navigate('Perfil')}>
-              {vendedor?.foto_url ? (
-                <Image source={{ uri: vendedor.foto_url }} style={styles.avatarSmall} />
-              ) : (
-                <View style={styles.avatarSmallPlaceholder}>
-                  <Text style={styles.avatarSmallText}>👤</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-
         {/* Botão fixo: Fechar calendário e voltar à liquidação aberta */}
         {todasLiquidacoes.some(l => { const s = l.status?.toUpperCase(); return s === 'ABERTO' || s === 'ABERTA'; }) && (
           <TouchableOpacity style={styles.fecharCalendarioBtn} onPress={handleFecharCalendario}>
@@ -881,29 +854,6 @@ export default function LiquidacaoScreen({ navigation }: any) {
   // ==================== RENDER PRINCIPAL ====================
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>{t.titulo}</Text>
-        <View style={styles.headerActions}>
-          <View style={[styles.statusDot, { backgroundColor: isConnected ? '#10B981' : '#EF4444' }]} />
-          <TouchableOpacity onPress={toggleLanguage} style={styles.langButton}>
-            <Text style={styles.langText}>🌐 {language === 'pt-BR' ? 'PT' : 'ES'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.avatarButton} onPress={() => navigation.navigate('Perfil')}>
-            {vendedor?.foto_url ? (
-              <Image source={{ uri: vendedor.foto_url }} style={styles.avatarSmall} />
-            ) : (
-              <View style={styles.avatarSmallPlaceholder}>
-                <Text style={styles.avatarSmallText}>👤</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton} onPress={() => navigation.navigate('Configuracoes')}>
-            <Text style={styles.iconText}>⚙️</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
       {/* Banner Visualização */}
       {modoVisualizacao && (
         <View style={styles.bannerVisualizacao}>
@@ -1270,7 +1220,6 @@ export default function LiquidacaoScreen({ navigation }: any) {
           liquidacaoId={liqFechadaId}
           caixaInicial={liqFechadaCaixaInicial}
           caixaFinal={liqFechadaCaixaFinal}
-          lang={language}
         />
       )}
 
@@ -1283,7 +1232,6 @@ export default function LiquidacaoScreen({ navigation }: any) {
             liquidacaoId={liquidacao.id}
             caixaInicial={liquidacao.caixa_inicial || 0}
             caixaFinal={liquidacao.caixa_final || liquidacao.caixa_inicial || 0}
-            lang={language}
           />
           <ModalPagamentos
             visible={modalPagamentosVisible}
@@ -1291,7 +1239,6 @@ export default function LiquidacaoScreen({ navigation }: any) {
             liquidacaoId={liquidacao.id}
             totalPagos={(liquidacao as any).clientes_pagos || 0}
             totalNaoPagos={(liquidacao as any).clientes_nao_pagos || 0}
-            lang={language}
           />
           <ModalFinanceiro
             visible={modalVendasVisible}
@@ -1300,7 +1247,6 @@ export default function LiquidacaoScreen({ navigation }: any) {
             tipo="VENDAS"
             totalValor={liquidacao.total_emprestado_dia || 0}
             totalQtd={liquidacao.qtd_emprestimos_dia || 0}
-            lang={language}
           />
           <ModalFinanceiro
             visible={modalReceitasVisible}
@@ -1309,7 +1255,6 @@ export default function LiquidacaoScreen({ navigation }: any) {
             tipo="RECEITAS"
             totalValor={receitasFinanceiras.total}
             totalQtd={receitasFinanceiras.qtd}
-            lang={language}
           />
           <ModalFinanceiro
             visible={modalDespesasVisible}
@@ -1318,7 +1263,6 @@ export default function LiquidacaoScreen({ navigation }: any) {
             tipo="DESPESAS"
             totalValor={liquidacao.total_despesas_dia || 0}
             totalQtd={liquidacao.qtd_despesas_dia || 0}
-            lang={language}
           />
           <ModalMicroseguro
             visible={modalMicroseguroVisible}
@@ -1326,7 +1270,6 @@ export default function LiquidacaoScreen({ navigation }: any) {
             liquidacaoId={liquidacao.id}
             totalValor={liquidacao.total_microseguro_dia || 0}
             totalQtd={liquidacao.qtd_microseguros_dia || 0}
-            lang={language}
           />
 
           <ModalNotasLista

@@ -1,15 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
   ActivityIndicator,
   Alert,
   Image,
   Linking,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
 
@@ -70,7 +71,8 @@ const textos = {
 };
 
 export default function PerfilScreen({ navigation }: any) {
-  const { vendedor, signOut, idioma } = useAuth();
+  const { vendedor, signOut, idioma, setIdioma } = useAuth();
+  const insets = useSafeAreaInsets();
   const [vendedorCompleto, setVendedorCompleto] = useState<VendedorCompleto | null>(null);
   const [loading, setLoading] = useState(true);
   const language: Language = (idioma as Language) || 'pt-BR';
@@ -181,12 +183,18 @@ export default function PerfilScreen({ navigation }: any) {
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <Text style={styles.backIcon}>←</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t.titulo}</Text>
-        <View style={styles.headerSpacer} />
+        <TouchableOpacity
+          onPress={() => setIdioma(language === 'pt-BR' ? 'es' : 'pt-BR')}
+          style={styles.langButton}
+        >
+          <Text style={styles.langText}>🌐</Text>
+          <Text style={styles.langLabel}>{language === 'pt-BR' ? 'PT' : 'ES'}</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
@@ -306,7 +314,6 @@ const styles = StyleSheet.create({
   // Header
   header: {
     backgroundColor: '#3B82F6',
-    paddingTop: 50,
     paddingBottom: 20,
     paddingHorizontal: 16,
     borderBottomLeftRadius: 24,
@@ -333,6 +340,23 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     width: 40,
+  },
+  langButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 8,
+    gap: 4,
+  },
+  langText: {
+    fontSize: 16,
+  },
+  langLabel: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
   },
 
   // Content

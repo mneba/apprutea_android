@@ -363,51 +363,22 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [expandedTodos, setExpandedTodos] = useState<string | null>(null);
   const [filtroTipo, setFiltroTipo] = useState<string>('todos');
   const [filtroStatus, setFiltroStatus] = useState<string>('todos');
-  const [ordemRotaMap, setOrdemRotaMap] = useState<Map<string, number>>(new Map());
-  const [modoReordenar, setModoReordenar] = useState(false);
-  const [listaReordenar, setListaReordenar] = useState<ClienteTodos[]>([]);
-  const [salvandoOrdem, setSalvandoOrdem] = useState(false);
   const [showFiltroTipo, setShowFiltroTipo] = useState(false);
   const [showFiltroStatus, setShowFiltroStatus] = useState(false);
   const [ocultarLiquidacao, setOcultarLiquidacao] = useState(false);
 
-  // Refs para snap-to-top das FlatLists
+  // Reordenação de clientes
+  const [ordemRotaMap, setOrdemRotaMap] = useState<Map<string, number>>(new Map());
+  const [modoReordenar, setModoReordenar] = useState(false);
+  const [listaReordenar, setListaReordenar] = useState<ClienteTodos[]>([]);
+  const [salvandoOrdem, setSalvandoOrdem] = useState(false);
+  const [popupOrdem, setPopupOrdem] = useState<{ cliente: ClienteTodos; index: number } | null>(null);
+  const [popupNovaOrdem, setPopupNovaOrdem] = useState('');
+  const [buscaReordenar, setBuscaReordenar] = useState('');
+
+  // Refs das FlatLists para alphabet sidebar
   const flatListLiqRef = useRef<FlatList>(null);
   const flatListTodosRef = useRef<FlatList>(null);
-  const cardHeightsLiq = useRef<number[]>([]);
-  const cardHeightsTodos = useRef<number[]>([]);
-
-  const onCardLayout = useCallback((heights: React.MutableRefObject<number[]>, index: number, height: number) => {
-    heights.current[index] = height;
-  }, []);
-
-  const snapToNearestItem = useCallback((ref: React.RefObject<FlatList>, event: any, heights: React.MutableRefObject<number[]>) => {
-    if (!ref.current) return;
-    const scrollY = event.nativeEvent.contentOffset.y;
-    const contentHeight = event.nativeEvent.contentSize.height;
-    const viewHeight = event.nativeEvent.layoutMeasurement.height;
-    
-    // Não snapar no topo nem quando está perto do final (evita trava)
-    if (scrollY <= 5 || scrollY + viewHeight >= contentHeight - 50) return;
-    
-    // Encontrar o item mais próximo do topo
-    let accumulated = 0;
-    let targetOffset = 0;
-    for (let i = 0; i < heights.current.length; i++) {
-      const h = heights.current[i] || 92;
-      if (accumulated + h * 0.4 > scrollY) {
-        targetOffset = accumulated;
-        break;
-      }
-      accumulated += h;
-      targetOffset = accumulated;
-    }
-    
-    // Só snapar se a diferença for significativa (evita micro-ajustes irritantes)
-    if (Math.abs(targetOffset - scrollY) > 5 && Math.abs(targetOffset - scrollY) < 60) {
-      ref.current.scrollToOffset({ offset: targetOffset, animated: true });
-    }
-  }, []);
 
   // Alphabet sidebar
   const [activeLetterLiq, setActiveLetterLiq] = useState<string | null>(null);
@@ -427,7 +398,6 @@ export default function ClientesScreen({ navigation, route }: any) {
     letter: string, 
     ref: React.RefObject<FlatList>, 
     data: { nome: string }[],
-    heights: React.MutableRefObject<number[]>,
     setActive: (l: string | null) => void
   ) => {
     const normalLetter = letter.normalize('NFD').replace(/[\u0300-\u036f]/g, '').charAt(0).toUpperCase();
@@ -436,9 +406,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       return first >= normalLetter;
     });
     if (targetIndex >= 0 && ref.current) {
-      let offset = 0;
-      for (let i = 0; i < targetIndex; i++) offset += heights.current[i] || 92;
-      ref.current.scrollToOffset({ offset, animated: false });
+      ref.current.scrollToOffset({ offset: targetIndex * 92, animated: false });
     }
     setActive(letter);
     if (alphabetTimeoutRef.current) clearTimeout(alphabetTimeoutRef.current);
@@ -446,11 +414,10 @@ export default function ClientesScreen({ navigation, route }: any) {
   }, []);
 
   const AlphabetSidebar = useCallback(({ 
-    data, flatRef, heights, activeLetter, setActive 
+    data, flatRef, activeLetter, setActive 
   }: { 
     data: { nome: string }[]; 
     flatRef: React.RefObject<FlatList>; 
-    heights: React.MutableRefObject<number[]>;
     activeLetter: string | null;
     setActive: (l: string | null) => void;
   }) => {
@@ -473,11 +440,11 @@ export default function ClientesScreen({ navigation, route }: any) {
         onMoveShouldSetResponder={() => true}
         onResponderGrant={(e) => {
           const idx = Math.floor((e.nativeEvent.pageY - sidebarYRef.current) / letterHeightRef.current);
-          if (idx >= 0 && idx < letters.length) scrollToLetter(letters[idx], flatRef, data, heights, setActive);
+          if (idx >= 0 && idx < letters.length) scrollToLetter(letters[idx], flatRef, data, setActive);
         }}
         onResponderMove={(e) => {
           const idx = Math.floor((e.nativeEvent.pageY - sidebarYRef.current) / letterHeightRef.current);
-          if (idx >= 0 && idx < letters.length) scrollToLetter(letters[idx], flatRef, data, heights, setActive);
+          if (idx >= 0 && idx < letters.length) scrollToLetter(letters[idx], flatRef, data, setActive);
         }}
         onResponderRelease={() => {
           if (alphabetTimeoutRef.current) clearTimeout(alphabetTimeoutRef.current);
@@ -601,22 +568,6 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   // ─── REORDENAÇÃO DE CLIENTES ─────────────────────────────────────────────
 
-  const iniciarReordenar = useCallback(() => {
-    const lista = [...todosList].sort((a, b) => {
-      const oa = ordemRotaMap.get(a.id) ?? 9999;
-      const ob = ordemRotaMap.get(b.id) ?? 9999;
-      if (oa !== ob) return oa - ob;
-      return a.nome.localeCompare(b.nome);
-    });
-    setListaReordenar(lista);
-    setModoReordenar(true);
-  }, [todosList, ordemRotaMap]);
-
-  const cancelarReordenar = useCallback(() => {
-    setModoReordenar(false);
-    setListaReordenar([]);
-  }, []);
-
   const moverItem = useCallback((fromIndex: number, toIndex: number) => {
     setListaReordenar(prev => {
       const lista = [...prev];
@@ -624,6 +575,17 @@ export default function ClientesScreen({ navigation, route }: any) {
       lista.splice(toIndex, 0, item);
       return lista;
     });
+  }, []);
+
+  const moverParaPosicao = useCallback((fromIndex: number, novaPosicao: number) => {
+    const toIndex = Math.max(0, Math.min(novaPosicao - 1, listaReordenar.length - 1));
+    moverItem(fromIndex, toIndex);
+  }, [listaReordenar.length, moverItem]);
+
+  const cancelarReordenar = useCallback(() => {
+    setModoReordenar(false);
+    setListaReordenar([]);
+    setBuscaReordenar('');
   }, []);
 
   const salvarOrdem = useCallback(async () => {
@@ -644,6 +606,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       setOrdemRotaMap(m);
       setModoReordenar(false);
       setListaReordenar([]);
+      setBuscaReordenar('');
     } catch (e: any) {
       Alert.alert('Erro', 'Não foi possível salvar a ordem: ' + (e.message || ''));
     } finally {
@@ -826,6 +789,23 @@ export default function ClientesScreen({ navigation, route }: any) {
         setPagasSet(s);
         setClientesPagosNaLiq(cliPagos);
       } else { setPagMap(new Map()); setPagasSet(new Set()); setClientesPagosNaLiq(new Set()); }
+
+      // Carregar ordem da rota para aba Liquidação
+      if (rotaId) {
+        const clienteIds = [...new Set(allData.map(r => r.cliente_id))];
+        if (clienteIds.length > 0) {
+          const { data: ordens } = await supabase
+            .from('ordem_rota_cliente')
+            .select('cliente_id, ordem')
+            .eq('rota_id', rotaId)
+            .in('cliente_id', clienteIds);
+          if (ordens && ordens.length > 0) {
+            const m = new Map<string, number>();
+            (ordens as any[]).forEach(o => m.set(o.cliente_id, Number(o.ordem)));
+            setOrdemRotaMap(m);
+          }
+        }
+      }
     } catch (e) { console.error('Erro loadLiq:', e); }
     finally { setLoading(false); setRefreshing(false); }
   }, [rotaId, dataLiq, liqId]);
@@ -861,18 +841,17 @@ export default function ClientesScreen({ navigation, route }: any) {
         if (info.vencidas > 0) cli.tem_atraso = true;
         cli.emprestimos.push({ id: e.id, valor_principal: e.valor_principal, saldo_emprestimo: e.valor_saldo, valor_parcela: e.valor_parcela, numero_parcelas: e.numero_parcelas, numero_parcela_atual: info.maxParcela, status: e.status, frequencia_pagamento: e.frequencia_pagamento, tipo_emprestimo: (e as any).tipo_emprestimo || 'NOVO', total_parcelas_vencidas: info.vencidas, valor_total_vencido: info.totalVencido });
       }
-      const cliList = Array.from(cliMap.values());
-      setTodosList(cliList);
+      setTodosList(Array.from(cliMap.values()));
 
       // Carregar ordem da rota
       if (rotaId) {
-        const clienteIds = cliList.map(c => c.id);
+        const clienteIds = Array.from(cliMap.keys());
         const { data: ordens } = await supabase
           .from('ordem_rota_cliente')
           .select('cliente_id, ordem')
           .eq('rota_id', rotaId)
           .in('cliente_id', clienteIds);
-        if (ordens) {
+        if (ordens && ordens.length > 0) {
           const m = new Map<string, number>();
           (ordens as any[]).forEach(o => m.set(o.cliente_id, Number(o.ordem)));
           setOrdemRotaMap(m);
@@ -1287,9 +1266,16 @@ export default function ClientesScreen({ navigation, route }: any) {
     if (filtro === 'atrasados') r = r.filter(c => !isCliPago(c) && c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas));
     else if (filtro === 'pagas') r = r.filter(c => isCliPago(c));
     else r = r.filter(c => !isCliPago(c)); // 'todos' mostra apenas pendentes (não pagos)
-    r.sort(ord === 'rota' ? (a, b) => (a.emprestimos[0]?.ordem_visita_dia ?? 9999) - (b.emprestimos[0]?.ordem_visita_dia ?? 9999) : (a, b) => a.nome.localeCompare(b.nome));
+    r.sort(ord === 'rota'
+      ? (a, b) => {
+          const oa = ordemRotaMap.get(a.cliente_id) ?? 9999;
+          const ob = ordemRotaMap.get(b.cliente_id) ?? 9999;
+          if (oa !== ob) return oa - ob;
+          return a.nome.localeCompare(b.nome);
+        }
+      : (a, b) => a.nome.localeCompare(b.nome));
     return r;
-  }, [grouped, busca, filtro, ord, isCliPago]);
+  }, [grouped, busca, filtro, ord, isCliPago, ordemRotaMap]);
 
   const cntTotal = grouped.filter(c => !isCliPago(c)).length;
   const cntAtraso = grouped.filter(c => c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas)).length;
@@ -1425,13 +1411,6 @@ export default function ClientesScreen({ navigation, route }: any) {
     return (
       <TouchableOpacity key={c.cliente_id} activeOpacity={0.7} 
         onPress={() => setExpanded(p => p === c.cliente_id ? null : c.cliente_id)} 
-        onPressIn={() => {
-          longPressTimer.current = setTimeout(() => {
-            setDetalhesCliente({ id: c.cliente_id, nome: c.nome, telefone: c.telefone_celular, endereco: c.endereco, codigo_cliente: c.codigo_cliente });
-            setModalDetalhesVisible(true);
-          }, 1500);
-        }}
-        onPressOut={() => { if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; } }}
         style={[S.card, { borderLeftColor: bc, backgroundColor: bg }]}>
         {/* === LINHA 1: Avatar + Nome + Badges === */}
         <View style={S.cardRow}>
@@ -1528,7 +1507,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       return a.nome.localeCompare(b.nome);
     });
     return r;
-  }, [todosList, busca, filtroTipo, filtroStatus, ocultarLiquidacao, clientesLiqIds]);
+  }, [todosList, busca, filtroTipo, filtroStatus, ocultarLiquidacao, clientesLiqIds, ordemRotaMap]);
 
   const renderTodos = (c: ClienteTodos) => {
     const a = c.tem_atraso; 
@@ -1540,12 +1519,19 @@ export default function ClientesScreen({ navigation, route }: any) {
     const notasCli = notasCountMap.get(c.id) || 0;
     return (
       <TouchableOpacity key={c.id} activeOpacity={0.7} 
-        onPress={() => setExpandedTodos(p => p === c.id ? null : c.id)} 
+        onPress={() => { if (!modoReordenar) setExpandedTodos(p => p === c.id ? null : c.id); }} 
         onPressIn={() => {
           longPressTimer.current = setTimeout(() => {
-            setDetalhesCliente({ id: c.id, nome: c.nome, telefone: c.telefone_celular, codigo_cliente: c.codigo_cliente });
-            setModalDetalhesVisible(true);
-          }, 1500);
+            longPressTimer.current = null;
+            const lista = [...todosList].sort((a, b) => {
+              const oa = ordemRotaMap.get(a.id) ?? 9999;
+              const ob = ordemRotaMap.get(b.id) ?? 9999;
+              if (oa !== ob) return oa - ob;
+              return a.nome.localeCompare(b.nome);
+            });
+            setListaReordenar(lista);
+            setModoReordenar(true);
+          }, 600);
         }}
         onPressOut={() => { if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; } }}
         style={[S.card, { borderLeftColor: cor }]}>
@@ -1630,98 +1616,162 @@ export default function ClientesScreen({ navigation, route }: any) {
       </TouchableOpacity>);
   };
 
-
   // ─── TELA DE REORDENAÇÃO ─────────────────────────────────────────────────
   if (modoReordenar) {
+    const listaFiltrada = buscaReordenar.trim()
+      ? listaReordenar.filter(c => c.nome.toLowerCase().includes(buscaReordenar.toLowerCase().trim()))
+      : listaReordenar;
+    const estaBuscando = buscaReordenar.trim().length > 0;
+
     return (
       <View style={{ flex: 1, backgroundColor: '#F9FAFB' }}>
         {/* Header */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 48, paddingBottom: 12, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' }}>
-          <TouchableOpacity onPress={cancelarReordenar} style={{ padding: 6 }}>
-            <Text style={{ fontSize: 14, color: '#6B7280' }}>Cancelar</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' }}>
+          <TouchableOpacity onPress={cancelarReordenar} style={{ paddingVertical: 6, paddingHorizontal: 2, minWidth: 64 }}>
+            <Text style={{ fontSize: 14, color: '#6B7280' }}>{lang === 'es' ? 'Cancelar' : 'Cancelar'}</Text>
           </TouchableOpacity>
-          <View style={{ alignItems: 'center' }}>
-            <Text style={{ fontSize: 16, fontWeight: '700', color: '#111827' }}>{lang === 'es' ? 'Ordenar Ruta' : 'Ordem da Rota'}</Text>
-            <Text style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>{lang === 'es' ? 'Use ↑↓ para reordenar' : 'Use ↑↓ para reordenar'}</Text>
+          <View style={{ flex: 1, alignItems: 'center', paddingHorizontal: 8 }}>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: '#111827' }} numberOfLines={1}>{lang === 'es' ? 'Ordenar Ruta' : 'Ordem da Rota'}</Text>
+            <Text style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>{lang === 'es' ? 'Use ↑↓ para mover' : 'Use ↑↓ para mover'}</Text>
           </View>
-          <TouchableOpacity
-            onPress={salvarOrdem}
-            disabled={salvandoOrdem}
-            style={{ paddingHorizontal: 14, paddingVertical: 7, backgroundColor: salvandoOrdem ? '#93C5FD' : '#2563EB', borderRadius: 8 }}
-          >
+          <TouchableOpacity onPress={salvarOrdem} disabled={salvandoOrdem} style={{ paddingHorizontal: 14, paddingVertical: 7, backgroundColor: salvandoOrdem ? '#93C5FD' : '#2563EB', borderRadius: 8, minWidth: 64, alignItems: 'center' }}>
             <Text style={{ fontSize: 14, color: '#FFF', fontWeight: '600' }}>{salvandoOrdem ? '...' : (lang === 'es' ? 'Guardar' : 'Salvar')}</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Info banner */}
-        <View style={{ backgroundColor: '#EFF6FF', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#DBEAFE' }}>
-          <Text style={{ fontSize: 12, color: '#1D4ED8' }}>
-            {lang === 'es'
-              ? `${listaReordenar.length} clientes • Use los botones para mover`
-              : `${listaReordenar.length} clientes • Use os botões para mover`}
-          </Text>
+        {/* Barra de busca */}
+        <View style={{ paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', borderRadius: 10, paddingHorizontal: 12, height: 40, borderWidth: 1, borderColor: '#E5E7EB' }}>
+            <Text style={{ fontSize: 13, marginRight: 6, opacity: 0.5 }}>🔍</Text>
+            <TextInput
+              style={{ flex: 1, fontSize: 13, color: '#1F2937', padding: 0 }}
+              placeholder={lang === 'es' ? 'Buscar cliente...' : 'Buscar cliente...'}
+              placeholderTextColor="#9CA3AF"
+              value={buscaReordenar}
+              onChangeText={setBuscaReordenar}
+            />
+            {buscaReordenar.length > 0 && (
+              <TouchableOpacity onPress={() => setBuscaReordenar('')} style={{ padding: 4 }}>
+                <Text style={{ fontSize: 14, color: '#9CA3AF', fontWeight: '700' }}>✕</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          {estaBuscando ? (
+            <Text style={{ fontSize: 11, color: '#6B7280', marginTop: 6 }}>
+              {listaFiltrada.length} {lang === 'es' ? 'resultado(s) — toque para definir posición' : 'resultado(s) — toque para definir posição'}
+            </Text>
+          ) : (
+            <Text style={{ fontSize: 11, color: '#1D4ED8', marginTop: 6 }}>
+              {listaReordenar.length} {lang === 'es' ? 'clientes • Busque o use ↑↓' : 'clientes • Busque ou use ↑↓'}
+            </Text>
+          )}
         </View>
 
-        {/* Lista reordenável */}
         <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
-          {listaReordenar.map((cliente, index) => {
-            const temAtraso = cliente.tem_atraso;
+          {listaFiltrada.map((cliente) => {
+            const index = listaReordenar.findIndex(c => c.id === cliente.id);
             const empAtivo = cliente.emprestimos.find((e: any) => e.status === 'ATIVO' || e.status === 'VENCIDO');
             return (
-              <View
-                key={cliente.id}
-                style={{
-                  flexDirection: 'row', alignItems: 'center',
-                  backgroundColor: '#FFF', marginHorizontal: 12, marginTop: 8,
-                  borderRadius: 12, borderWidth: 1.5,
-                  borderColor: temAtraso ? '#FCA5A5' : '#E5E7EB',
-                  paddingVertical: 10, paddingHorizontal: 12,
-                  shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
-                  shadowOpacity: 0.06, shadowRadius: 2, elevation: 2,
-                }}
-              >
-                {/* Número de ordem */}
-                <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#2563EB' }}>{index + 1}</Text>
-                </View>
+              <View key={cliente.id} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', marginHorizontal: 12, marginTop: 8, borderRadius: 12, borderWidth: 1.5, borderColor: cliente.tem_atraso ? '#FCA5A5' : '#E5E7EB', paddingVertical: 10, paddingHorizontal: 12 }}>
+                {/* Badge posição — clicável */}
+                <TouchableOpacity
+                  onPress={() => { setPopupOrdem({ cliente, index }); setPopupNovaOrdem(String(index + 1)); }}
+                  style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#2563EB', alignItems: 'center', justifyContent: 'center', marginRight: 10 }}
+                  activeOpacity={0.75}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '800', color: '#FFF' }}>{index + 1}</Text>
+                </TouchableOpacity>
 
-                {/* Info do cliente */}
-                <View style={{ flex: 1 }}>
+                {/* Info — toque abre popup quando está buscando */}
+                <TouchableOpacity
+                  style={{ flex: 1 }}
+                  activeOpacity={estaBuscando ? 0.6 : 1}
+                  onPress={estaBuscando ? () => { setPopupOrdem({ cliente, index }); setPopupNovaOrdem(String(index + 1)); } : undefined}
+                >
                   <Text style={{ fontSize: 13, fontWeight: '600', color: '#111827' }} numberOfLines={1}>{cliente.nome}</Text>
-                  <Text style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>
+                  <Text style={{ fontSize: 11, color: estaBuscando ? '#2563EB' : '#6B7280', marginTop: 2 }}>
                     {cliente.codigo_cliente ? `#${cliente.codigo_cliente}` : ''}
                     {empAtivo ? ` • ${empAtivo.status === 'VENCIDO' ? '⚠️ Vencido' : '✅ Ativo'}` : ''}
+                    {estaBuscando ? (lang === 'es' ? ' · Toque para definir posición' : ' · Toque para definir posição') : ''}
                   </Text>
-                </View>
+                </TouchableOpacity>
 
-                {/* Botões ↑↓ */}
-                <View style={{ gap: 4 }}>
-                  <TouchableOpacity
-                    onPress={() => index > 0 && moverItem(index, index - 1)}
-                    disabled={index === 0}
-                    style={{ width: 32, height: 28, borderRadius: 6, backgroundColor: index === 0 ? '#F3F4F6' : '#DBEAFE', alignItems: 'center', justifyContent: 'center' }}
-                    activeOpacity={0.6}
-                  >
-                    <Text style={{ fontSize: 16, color: index === 0 ? '#D1D5DB' : '#2563EB', fontWeight: '700' }}>↑</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => index < listaReordenar.length - 1 && moverItem(index, index + 1)}
-                    disabled={index === listaReordenar.length - 1}
-                    style={{ width: 32, height: 28, borderRadius: 6, backgroundColor: index === listaReordenar.length - 1 ? '#F3F4F6' : '#DBEAFE', alignItems: 'center', justifyContent: 'center' }}
-                    activeOpacity={0.6}
-                  >
-                    <Text style={{ fontSize: 16, color: index === listaReordenar.length - 1 ? '#D1D5DB' : '#2563EB', fontWeight: '700' }}>↓</Text>
-                  </TouchableOpacity>
-                </View>
+                {/* Botões ↑↓ — ocultos durante busca */}
+                {!estaBuscando && (
+                  <View style={{ gap: 4 }}>
+                    <TouchableOpacity onPress={() => index > 0 && moverItem(index, index - 1)} disabled={index === 0} style={{ width: 32, height: 28, borderRadius: 6, backgroundColor: index === 0 ? '#F3F4F6' : '#DBEAFE', alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.6}>
+                      <Text style={{ fontSize: 16, color: index === 0 ? '#D1D5DB' : '#2563EB', fontWeight: '700' }}>↑</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => index < listaReordenar.length - 1 && moverItem(index, index + 1)} disabled={index === listaReordenar.length - 1} style={{ width: 32, height: 28, borderRadius: 6, backgroundColor: index === listaReordenar.length - 1 ? '#F3F4F6' : '#DBEAFE', alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.6}>
+                      <Text style={{ fontSize: 16, color: index === listaReordenar.length - 1 ? '#D1D5DB' : '#2563EB', fontWeight: '700' }}>↓</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
               </View>
             );
           })}
           <View style={{ height: 40 }} />
         </ScrollView>
+
+        {/* Popup posicionamento direto */}
+        <Modal visible={!!popupOrdem} transparent animationType="fade" onRequestClose={() => setPopupOrdem(null)}>
+          <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', alignItems: 'center', padding: 32 }} activeOpacity={1} onPress={() => setPopupOrdem(null)}>
+            <View style={{ width: '100%', backgroundColor: '#FFF', borderRadius: 16, overflow: 'hidden' }} onStartShouldSetResponder={() => true}>
+              <View style={{ backgroundColor: '#2563EB', paddingHorizontal: 20, paddingVertical: 16 }}>
+                <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', fontWeight: '500', marginBottom: 2 }}>
+                  {lang === 'es' ? 'POSICIÓN ACTUAL' : 'POSIÇÃO ATUAL'} #{popupOrdem ? popupOrdem.index + 1 : ''}
+                </Text>
+                <Text style={{ fontSize: 17, fontWeight: '800', color: '#FFF' }} numberOfLines={1}>{popupOrdem?.cliente.nome}</Text>
+              </View>
+              <View style={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8 }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#374151', marginBottom: 12 }}>
+                  {lang === 'es' ? 'Mover a la posición:' : 'Mover para a posição:'}
+                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+                  <TouchableOpacity onPress={() => setPopupNovaOrdem(p => String(Math.max(1, parseInt(p || '1') - 1)))} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#EFF6FF', borderWidth: 1.5, borderColor: '#BFDBFE', alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
+                    <Text style={{ fontSize: 22, color: '#2563EB', fontWeight: '700', lineHeight: 26 }}>−</Text>
+                  </TouchableOpacity>
+                  <TextInput
+                    style={{ width: 100, textAlign: 'center', fontSize: 32, fontWeight: '800', color: '#1F2937', borderBottomWidth: 2.5, borderBottomColor: '#2563EB', paddingVertical: 4 }}
+                    value={popupNovaOrdem}
+                    onChangeText={v => setPopupNovaOrdem(v.replace(/[^0-9]/g, ''))}
+                    keyboardType="number-pad"
+                    maxLength={3}
+                    selectTextOnFocus
+                    autoFocus
+                  />
+                  <TouchableOpacity onPress={() => setPopupNovaOrdem(p => String(Math.min(listaReordenar.length, parseInt(p || '1') + 1)))} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#EFF6FF', borderWidth: 1.5, borderColor: '#BFDBFE', alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
+                    <Text style={{ fontSize: 22, color: '#2563EB', fontWeight: '700', lineHeight: 26 }}>+</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={{ textAlign: 'center', fontSize: 11, color: '#9CA3AF', marginTop: 8 }}>1 – {listaReordenar.length}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingBottom: 20, paddingTop: 8 }}>
+                <TouchableOpacity onPress={() => setPopupOrdem(null)} style={{ flex: 1, paddingVertical: 13, borderRadius: 10, backgroundColor: '#F3F4F6', alignItems: 'center' }} activeOpacity={0.7}>
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: '#6B7280' }}>{lang === 'es' ? 'Cancelar' : 'Cancelar'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => {
+                    const nova = parseInt(popupNovaOrdem);
+                    if (!isNaN(nova) && nova >= 1 && nova <= listaReordenar.length && popupOrdem) {
+                      moverParaPosicao(popupOrdem.index, nova);
+                    }
+                    setPopupOrdem(null);
+                    setBuscaReordenar('');
+                  }}
+                  style={{ flex: 2, paddingVertical: 13, borderRadius: 10, backgroundColor: '#2563EB', alignItems: 'center' }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFF' }}>{lang === 'es' ? 'Mover' : 'Mover'} →</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableOpacity>
+        </Modal>
       </View>
     );
   }
-
+  // ─────────────────────────────────────────────────────────────────────────
 
   if (loading) return (<View style={S.lW}><ActivityIndicator size="large" color="#3B82F6" /><Text style={S.lT}>{t.carregando}</Text></View>);
 
@@ -1757,20 +1807,6 @@ export default function ClientesScreen({ navigation, route }: any) {
         </TouchableOpacity>
       </Modal>
 
-      <View style={S.hd}>
-        <View>
-          <Text style={S.hdT}>{t.titulo}</Text>
-          <Text style={S.hdS}>{isViz ? fmtData(dataLiq) : t.hoje} - {tab === 'liquidacao' ? filtered.length : todosList.length} {t.clientes}</Text>
-        </View>
-        <View style={S.hdR}>
-          <TouchableOpacity style={S.hdHelp} onPress={() => setModalLegendaVisible(true)}>
-            <Text style={S.hdHelpText}>?</Text>
-          </TouchableOpacity>
-          <View style={S.hdDot} />
-          <Text style={S.hdI}>🔔</Text>
-          <Text style={S.hdI}>⚙️</Text>
-        </View>
-      </View>
       {isViz && (<View style={S.vizBanner}><View style={S.vizBannerContent}><Text style={S.vizBannerIcon}>⚠️</Text><View style={S.vizBannerTexts}><Text style={S.vizBannerTitle}>{t.modoVisualizacao}</Text><Text style={S.vizBannerDesc}>{t.modoVisualizacaoDesc} {fmtData(dataLiq)}</Text></View></View></View>)}
       
       {/* Banner de liquidação fechada quando não há liqId */}
@@ -1804,7 +1840,7 @@ export default function ClientesScreen({ navigation, route }: any) {
           <Text style={[S.tbTx, tab === 'todos' && S.tbTxOn]}>{t.todosList} ({todosList.length > 0 ? todosList.length : todosCount ?? '...'})</Text>
         </TouchableOpacity>
       </View>
-      <View style={S.srR}><View style={S.srB}><Text style={S.srI}>🔍</Text><TextInput style={S.srIn} placeholder={t.buscar} placeholderTextColor="#9CA3AF" value={busca} onChangeText={setBusca} /></View>{tab === 'liquidacao' && <TouchableOpacity style={S.orB} onPress={() => setShowOrd(!showOrd)}><Text style={S.orI}>↕️</Text><Text style={S.orTx}>{ord === 'rota' ? t.ordemRota : t.ordemNome}</Text><Text style={S.orCh}>▼</Text></TouchableOpacity>}</View>
+      <View style={S.srR}><View style={S.srB}><Text style={S.srI}>🔍</Text><TextInput style={S.srIn} placeholder={t.buscar} placeholderTextColor="#9CA3AF" value={busca} onChangeText={setBusca} /></View>{tab === 'liquidacao' && <TouchableOpacity style={S.orB} onPress={() => setShowOrd(!showOrd)}><Text style={S.orI}>↕️</Text><Text style={S.orTx}>{ord === 'rota' ? t.ordemRota : t.ordemNome}</Text><Text style={S.orCh}>▼</Text></TouchableOpacity>}<TouchableOpacity style={S.hdHelp} onPress={() => setModalLegendaVisible(true)}><Text style={S.hdHelpText}>?</Text></TouchableOpacity></View>
       {showOrd && tab === 'liquidacao' && <View style={S.orDr}>{(['rota', 'nome'] as OrdenacaoLiquidacao[]).map(o => (<TouchableOpacity key={o} style={[S.orOp, ord === o && S.orOpOn]} onPress={() => { setOrd(o); setShowOrd(false); }}><Text style={[S.orOpTx, ord === o && S.orOpTxOn]}>{o === 'rota' ? t.ordemRota : t.ordemNome}</Text></TouchableOpacity>))}</View>}
       {tab === 'liquidacao' && (<View style={S.chs}><TouchableOpacity style={[S.ch, filtro === 'todos' && S.chOn]} onPress={() => setFiltro('todos')}><Text style={[S.chTx, filtro === 'todos' && S.chTxOn]}>{t.filtroTodos} {cntTotal}</Text></TouchableOpacity><TouchableOpacity style={[S.ch, filtro === 'atrasados' && S.chOn]} onPress={() => setFiltro('atrasados')}><Text style={[S.chTx, filtro === 'atrasados' && S.chTxOn]}>{t.filtroAtrasados} {cntAtraso}</Text></TouchableOpacity><TouchableOpacity style={[S.ch, filtro === 'pagas' && S.chPOn, filtro !== 'pagas' && S.chPOff]} onPress={() => setFiltro(filtro === 'pagas' ? 'todos' : 'pagas')}><Text style={[S.chTx, filtro === 'pagas' ? S.chPTxOn : S.chPTxOff]}>{t.filtroPagas} {cntPagas}</Text></TouchableOpacity><Text style={S.chCh}>▼</Text></View>)}
       {tab === 'todos' && (<View style={S.tF}>
@@ -1827,7 +1863,16 @@ export default function ClientesScreen({ navigation, route }: any) {
         <Text style={S.tCnt}>{todosFilt.length} {t.clientes}</Text>
         <TouchableOpacity
           style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, backgroundColor: '#F3F4F6', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', gap: 4 }}
-          onPress={iniciarReordenar}
+          onPress={() => {
+            const lista = [...todosList].sort((a, b) => {
+              const oa = ordemRotaMap.get(a.id) ?? 9999;
+              const ob = ordemRotaMap.get(b.id) ?? 9999;
+              if (oa !== ob) return oa - ob;
+              return a.nome.localeCompare(b.nome);
+            });
+            setListaReordenar(lista);
+            setModoReordenar(true);
+          }}
           activeOpacity={0.7}
         >
           <Text style={{ fontSize: 14 }}>⇅</Text>
@@ -1875,23 +1920,17 @@ export default function ClientesScreen({ navigation, route }: any) {
               ref={flatListLiqRef}
               data={filtered}
               keyExtractor={(item) => item.cliente_id}
-              renderItem={({ item, index }) => (
-                <View onLayout={(e) => onCardLayout(cardHeightsLiq, index, e.nativeEvent.layout.height)}>
-                  {renderCard(item)}
-                </View>
-              )}
+              renderItem={({ item }) => renderCard(item)}
               style={S.ls}
               contentContainerStyle={S.lsI}
               refreshControl={!isViz ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined}
               showsVerticalScrollIndicator={false}
               onScrollBeginDrag={() => { setShowFiltroTipo(false); setShowFiltroStatus(false); }}
-              decelerationRate={0.92}
-              onMomentumScrollEnd={(e) => snapToNearestItem(flatListLiqRef, e, cardHeightsLiq)}
               ListFooterComponent={<View style={{ height: 90 }} />}
               viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
             />
             {ord === 'nome' && filtered.length > 10 && (
-              <AlphabetSidebar data={filtered} flatRef={flatListLiqRef} heights={cardHeightsLiq} activeLetter={activeLetterLiq} setActive={setActiveLetterLiq} />
+              <AlphabetSidebar data={filtered} flatRef={flatListLiqRef} activeLetter={activeLetterLiq} setActive={setActiveLetterLiq} />
             )}
             {activeLetterLiq && (
               <View style={S.alphaIndicator}><Text style={S.alphaIndicatorText}>{activeLetterLiq}</Text></View>
@@ -1909,23 +1948,17 @@ export default function ClientesScreen({ navigation, route }: any) {
               ref={flatListTodosRef}
               data={todosFilt}
               keyExtractor={(item) => item.id}
-              renderItem={({ item, index }) => (
-                <View onLayout={(e) => onCardLayout(cardHeightsTodos, index, e.nativeEvent.layout.height)}>
-                  {renderTodos(item)}
-                </View>
-              )}
+              renderItem={({ item }) => renderTodos(item)}
               style={S.ls}
               contentContainerStyle={S.lsI}
               refreshControl={!isViz ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined}
               showsVerticalScrollIndicator={false}
               onScrollBeginDrag={() => { setShowFiltroTipo(false); setShowFiltroStatus(false); }}
-              decelerationRate={0.92}
-              onMomentumScrollEnd={(e) => snapToNearestItem(flatListTodosRef, e, cardHeightsTodos)}
               ListFooterComponent={<View style={{ height: 90 }} />}
               viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
             />
             {todosFilt.length > 10 && (
-              <AlphabetSidebar data={todosFilt} flatRef={flatListTodosRef} heights={cardHeightsTodos} activeLetter={activeLetterTodos} setActive={setActiveLetterTodos} />
+              <AlphabetSidebar data={todosFilt} flatRef={flatListTodosRef} activeLetter={activeLetterTodos} setActive={setActiveLetterTodos} />
             )}
             {activeLetterTodos && (
               <View style={S.alphaIndicator}><Text style={S.alphaIndicatorText}>{activeLetterTodos}</Text></View>
@@ -2270,7 +2303,6 @@ export default function ClientesScreen({ navigation, route }: any) {
       />
     </View>
   );
-
 }
 
 const S = StyleSheet.create({
@@ -2278,8 +2310,8 @@ const S = StyleSheet.create({
   lW: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EEF2FF' },
   lT: { marginTop: 12, color: '#6B7280', fontSize: 14 },
   hd: { backgroundColor: '#3B82F6', paddingTop: 48, paddingBottom: 14, paddingHorizontal: 16, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  hdHelp: { width: 26, height: 26, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.25)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.4)' },
-  hdHelpText: { color: '#fff', fontSize: 14, fontWeight: '700', lineHeight: 18 },
+  hdHelp: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#EFF6FF', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#BFDBFE' },
+  hdHelpText: { color: '#2563EB', fontSize: 14, fontWeight: '700', lineHeight: 18 },
   legendaOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 24 },
   legendaModal: { backgroundColor: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 340 },
   legendaTitle: { fontSize: 17, fontWeight: '700', color: '#1F2937', marginBottom: 4 },
