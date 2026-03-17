@@ -144,6 +144,11 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const [registros, setRegistros] = useState<any[]>([]);
   const [pagamentos, setPagamentos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [vendedorNome, setVendedorNome] = useState('');
+  const [dataLiquidacao, setDataLiquidacao] = useState('');
+  const [caixaMicroInicial, setCaixaMicroInicial] = useState(0);
+  const [caixaMicroFinal, setCaixaMicroFinal] = useState(0);
+  const [totalRetiroMicro, setTotalRetiroMicro] = useState(0);
   const extratoViewRef = useRef<View>(null);
 
   useEffect(() => {
@@ -153,6 +158,24 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const carregarExtrato = async () => {
     setLoading(true);
     try {
+      // Busca dados da liquidação (vendedor + data + microseguro)
+      const { data: liqData } = await supabase
+        .from('liquidacoes_diarias')
+        .select('data_liquidacao, data_abertura, vendedor_id, caixa_microseguro_inicial, caixa_microseguro_final, vendedores(nome)')
+        .eq('id', liquidacaoId)
+        .single();
+
+      if (liqData) {
+        const dataStr = liqData.data_liquidacao?.substring(0, 10) || liqData.data_abertura?.substring(0, 10) || '';
+        if (dataStr) {
+          const [y, m, d] = dataStr.split('-');
+          setDataLiquidacao(`${d}/${m}/${y}`);
+        }
+        setVendedorNome((liqData as any).vendedores?.nome || '');
+        setCaixaMicroInicial(liqData.caixa_microseguro_inicial || 0);
+        setCaixaMicroFinal(liqData.caixa_microseguro_final || 0);
+      }
+
       // Busca movimentações financeiras
       const { data, error } = await supabase
         .from('financeiro')
@@ -161,17 +184,25 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         .eq('status', 'PAGO')
         .order('created_at', { ascending: true });
 
-      if (!error) setRegistros(data || []);
+      if (!error) {
+        setRegistros(data || []);
+        const retiroMicro = (data || [])
+          .filter((r: any) => r.tipo === 'PAGAR' && ['RETIRO_MICROSEGURO', 'SAIDA_MICROSEGURO'].includes(r.categoria))
+          .reduce((s: number, r: any) => s + parseFloat(r.valor), 0);
+        setTotalRetiroMicro(retiroMicro);
+      }
 
       // Busca pagamentos de parcelas (cobranças)
       const { data: pags, error: errPag } = await supabase
         .from('pagamentos_parcelas')
         .select(`
-          id, numero_parcela, valor_pago_total, forma_pagamento, created_at,
+          id, numero_parcela, valor_pago_total, valor_parcela, valor_credito_gerado,
+          forma_pagamento, created_at, status_parcela,
           cliente:cliente_id(nome, consecutivo)
         `)
         .eq('liquidacao_id', liquidacaoId)
         .eq('estornado', false)
+        .neq('status_parcela', 'CANCELADO')
         .order('created_at', { ascending: true });
 
       if (!errPag) setPagamentos(pags || []);
@@ -185,8 +216,8 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const totalSaidas = registros.filter(r => r.tipo === 'PAGAR').reduce((s, r) => s + parseFloat(r.valor), 0);
   const totalEntradas = registros.filter(r => r.tipo === 'RECEBER').reduce((s, r) => s + parseFloat(r.valor), 0);
   const totalPagamentos = pagamentos.reduce((s, p) => s + parseFloat(p.valor_pago_total || 0), 0);
-  const registrosEntradas = registros.filter(r => r.tipo === 'RECEBER');
-  const registrosSaidas = registros.filter(r => r.tipo === 'PAGAR');
+  const registrosEntradas = registros.filter(r => r.tipo === 'RECEBER' && r.status !== 'CANCELADO');
+  const registrosSaidas = registros.filter(r => r.tipo === 'PAGAR' && r.status !== 'CANCELADO');
 
   // Separar entradas em 3 grupos
   const entradasCobrancas = registrosEntradas.filter(r => ['COBRANCA_PARCELAS', 'COBRANCA_CUOTAS'].includes(r.categoria));
@@ -365,30 +396,53 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
 
         <ScrollView style={cupom.scroll} showsVerticalScrollIndicator={false}>
           <View ref={extratoViewRef} collapsable={false} style={cupom.papel}>
-            {/* Cabeçalho */}
+            {/* ═══ CABEÇALHO ═══ */}
             <Text style={cupom.centro}>{rotaNome || 'Rota'}</Text>
-            <Text style={cupom.centroSub}>{t.extratoLiq}</Text>
-            <Text style={cupom.div2}>{DDIV}</Text>
-            <Text style={cupom.centro}>{dataHoje}  {horaAgora}</Text>
+            {vendedorNome ? <Text style={cupom.centroSub}>{vendedorNome}</Text> : null}
+            <Text style={cupom.centroSub}>{dataLiquidacao || dataHoje}</Text>
             <Text style={cupom.div2}>{DDIV}</Text>
 
-            {/* ═══ RESUMO (5 linhas essenciais) ═══ */}
+            {/* ═══ RESUMO CAIXA ═══ */}
             <View style={cupom.linha}>
               <Text style={cupom.txt}>{t.caixaInicial}</Text>
               <Text style={cupom.txt}>{fmt(caixaInicial)}</Text>
             </View>
             <View style={cupom.linha}>
-              <Text style={cupom.txtVerde}>{t.cobrancas}</Text>
-              <Text style={cupom.txtVerde}>{fmt(totalEntradas)}</Text>
+              <Text style={cupom.txtVerde}>(+) {lang === 'es' ? 'Cobros del día' : 'Cobrança do dia'}</Text>
+              <Text style={cupom.txtVerde}>{fmt(totalCobrancas)}</Text>
             </View>
             <View style={cupom.linha}>
-              <Text style={cupom.txtVerm}>{t.saidas}</Text>
+              <Text style={cupom.txtVerde}>(+) {lang === 'es' ? 'Ingresos del día' : 'Ingressos do dia'}</Text>
+              <Text style={cupom.txtVerde}>{fmt(totalOutrasReceitas)}</Text>
+            </View>
+            <View style={cupom.linha}>
+              <Text style={cupom.txtVerm}>(-) {lang === 'es' ? 'Gastos del día' : 'Despesas do dia'}</Text>
               <Text style={cupom.txtVerm}>{fmt(totalSaidas)}</Text>
             </View>
             <Text style={cupom.div2}>{DDIV}</Text>
             <View style={cupom.linha}>
               <Text style={cupom.txtBold}>{t.caixaFinal}</Text>
               <Text style={cupom.txtBold}>{fmt(caixaFinal)}</Text>
+            </View>
+            <Text style={cupom.div2}>{DDIV}</Text>
+
+            {/* ═══ RESUMO MICROSEGURO ═══ */}
+            <View style={cupom.linha}>
+              <Text style={[cupom.txt, { color: '#7C3AED' }]}>{lang === 'es' ? 'Caja inicial microseguro' : 'Caixa inicial microseguro'}</Text>
+              <Text style={[cupom.txt, { color: '#7C3AED' }]}>{fmt(caixaMicroInicial)}</Text>
+            </View>
+            <View style={cupom.linha}>
+              <Text style={[cupom.txtVerde, { fontSize: 10 }]}>(+) {lang === 'es' ? 'Microseguros del día' : 'Microseguro do dia'}</Text>
+              <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{fmt(totalMicroseguros)}</Text>
+            </View>
+            <View style={cupom.linha}>
+              <Text style={[cupom.txtVerm, { fontSize: 10 }]}>(-) {lang === 'es' ? 'Retiro microseguro' : 'Retiro microseguro'}</Text>
+              <Text style={[cupom.txtVerm, { fontSize: 10 }]}>{fmt(totalRetiroMicro)}</Text>
+            </View>
+            <Text style={cupom.div2}>{DDIV}</Text>
+            <View style={cupom.linha}>
+              <Text style={[cupom.txtBold, { color: '#7C3AED' }]}>{lang === 'es' ? 'Caja final microseguro' : 'Caixa final microseguro'}</Text>
+              <Text style={[cupom.txtBold, { color: '#7C3AED' }]}>{fmt(caixaMicroFinal)}</Text>
             </View>
             <Text style={cupom.div2}>{DDIV}</Text>
 
@@ -405,27 +459,38 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                 ) : (
                   <>
                     {/* ── COBRANÇAS DE PARCELAS ── */}
-                    {entradasCobrancas.length > 0 && (
+                    {/* ── COBRANÇAS DE PARCELAS — usa pagamentos_parcelas diretamente ── */}
+                    {pagamentos.length > 0 && (
                       <>
-                        <Text style={[cupom.centro, { fontSize: 10, marginTop: 6, color: '#6B7280' }]}>── {t.cobrancasParcelas} ({entradasCobrancas.length}) ──</Text>
-                        {entradasCobrancas.map((item, idx) => (
-                          <View key={item.id}>
-                            <View style={cupom.itemRow}>
-                              <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
-                              <Text style={cupom.itemSub} numberOfLines={1}>{item.cliente_nome || item.descricao || formatarCategoria(item.categoria)}</Text>
-                              <Text style={cupom.itemCat} numberOfLines={1}>{formatarCategoria(item.categoria)}</Text>
-                              <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(parseFloat(item.valor))}</Text>
+                        <Text style={[cupom.centro, { fontSize: 10, marginTop: 6, color: '#6B7280' }]}>── {t.cobrancasParcelas} ({pagamentos.length}) ──</Text>
+                        {pagamentos.map((p, idx) => {
+                          const nomeCliente = (p.cliente as any)?.nome || '';
+                          const excedente = parseFloat(p.valor_credito_gerado || 0);
+                          const temExcedente = excedente > 0;
+                          return (
+                            <View key={p.id}>
+                              <View style={cupom.itemRow}>
+                                <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
+                                <Text style={cupom.itemCat} numberOfLines={1}>{nomeCliente}</Text>
+                                <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(parseFloat(p.valor_pago_total || 0))}</Text>
+                              </View>
+                              {temExcedente && (
+                                <Text style={[cupom.itemSub, { color: '#2563EB', fontSize: 9 }]}>
+                                  {'   '}
+                                  {lang === 'es' ? 'Pagado de más' : 'Pago além'} {fmt(excedente)}
+                                </Text>
+                              )}
+                              <View style={cupom.itemMeta}>
+                                <Text style={cupom.itemHora}>   {fmtHora(p.created_at)}</Text>
+                                {p.forma_pagamento && <Text style={cupom.itemHora}>{p.forma_pagamento}</Text>}
+                              </View>
+                              {idx < pagamentos.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
                             </View>
-                            <View style={cupom.itemMeta}>
-                              <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
-                              {item.forma_pagamento && <Text style={cupom.itemHora}>{item.forma_pagamento}</Text>}
-                            </View>
-                            {idx < entradasCobrancas.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
-                          </View>
-                        ))}
+                          );
+                        })}
                         <View style={cupom.linha}>
                           <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{t.totalCobrancas}</Text>
-                          <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{fmt(totalCobrancas)}</Text>
+                          <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{fmt(pagamentos.reduce((s, p) => s + parseFloat(p.valor_pago_total || 0), 0))}</Text>
                         </View>
                       </>
                     )}
@@ -438,10 +503,12 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                           <View key={item.id}>
                             <View style={cupom.itemRow}>
                               <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
-                              <Text style={cupom.itemSub} numberOfLines={1}>{item.cliente_nome || item.descricao || formatarCategoria(item.categoria)}</Text>
                               <Text style={cupom.itemCat} numberOfLines={1}>{formatarCategoria(item.categoria)}</Text>
                               <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(parseFloat(item.valor))}</Text>
                             </View>
+                            {(item.cliente_nome || item.descricao) && (
+                              <Text style={cupom.itemSub} numberOfLines={1}>   {item.cliente_nome || item.descricao}</Text>
+                            )}
                             <View style={cupom.itemMeta}>
                               <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
                             </View>
@@ -463,10 +530,12 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                           <View key={item.id}>
                             <View style={cupom.itemRow}>
                               <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
-                              <Text style={cupom.itemSub} numberOfLines={1}>{item.cliente_nome || item.descricao || formatarCategoria(item.categoria)}</Text>
                               <Text style={cupom.itemCat} numberOfLines={1}>{formatarCategoria(item.categoria)}</Text>
                               <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(parseFloat(item.valor))}</Text>
                             </View>
+                            {(item.cliente_nome || item.descricao) && (
+                              <Text style={cupom.itemSub} numberOfLines={1}>   {item.cliente_nome || item.descricao}</Text>
+                            )}
                             <View style={cupom.itemMeta}>
                               <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
                               {item.forma_pagamento && <Text style={cupom.itemHora}>{item.forma_pagamento}</Text>}
@@ -500,10 +569,12 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                     <View key={item.id}>
                       <View style={cupom.itemRow}>
                         <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
-                        <Text style={cupom.itemSub} numberOfLines={1}>{item.cliente_nome || item.descricao || formatarCategoria(item.categoria)}</Text>
                         <Text style={cupom.itemCat} numberOfLines={1}>{formatarCategoria(item.categoria)}</Text>
                         <Text style={[cupom.itemVal, { color: '#DC2626' }]}>-{fmt(parseFloat(item.valor))}</Text>
                       </View>
+                      {(item.cliente_nome || item.descricao) && (
+                        <Text style={cupom.itemSub} numberOfLines={1}>   {item.cliente_nome || item.descricao}</Text>
+                      )}
                       <View style={cupom.itemMeta}>
                         <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
                         {item.forma_pagamento && <Text style={cupom.itemHora}>{item.forma_pagamento}</Text>}
@@ -572,9 +643,9 @@ const cupom = StyleSheet.create({
   divPonto: { textAlign: 'center', fontSize: 8, color: '#E5E7EB', fontFamily: MONO, marginVertical: 1 },
   itemRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
   itemIdx: { fontSize: 10, color: '#9CA3AF', width: 20, fontFamily: MONO },
-  itemCat: { fontSize: 10, color: '#6B7280', fontFamily: MONO },
+  itemCat: { flex: 1, fontSize: 11, color: '#1F2937', fontFamily: MONO, fontWeight: '600' },
   itemVal: { fontSize: 11, fontWeight: '700', fontFamily: MONO },
-  itemSub: { flex: 1, fontSize: 11, color: '#1F2937', fontFamily: MONO, fontWeight: '600' },
+  itemSub: { fontSize: 10, color: '#6B7280', fontFamily: MONO },
   itemMeta: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 1 },
   itemHora: { fontSize: 9, color: '#9CA3AF', fontFamily: MONO },
   shareBar: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#E8E4DF' },

@@ -254,13 +254,13 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       <View style={S.dadosCard}>
         {cli.codigo_cliente && (
           <View style={S.dadoRow}>
-            <Text style={S.dadoLabel}>🏷 {t.codigo}</Text>
+            <Text style={S.dadoLabel}>{t.codigo}</Text>
             <Text style={S.dadoValue}>{cli.codigo_cliente}</Text>
           </View>
         )}
         {(cli.documento || cliente.documento) && (
           <View style={S.dadoRow}>
-            <Text style={S.dadoLabel}>📄 {t.documento}</Text>
+            <Text style={S.dadoLabel}>{t.documento}</Text>
             <Text style={S.dadoValue}>{cli.documento || cliente.documento}</Text>
           </View>
         )}
@@ -268,7 +268,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           const tel = cli.telefone_celular || cliente.telefone || '';
           return (
             <View style={S.dadoRow}>
-              <Text style={S.dadoLabel}>📱 {t.telefone}</Text>
+              <Text style={S.dadoLabel}>{t.telefone}</Text>
               <View style={S.dadoActions}>
                 <TouchableOpacity onPress={() => Linking.openURL(`tel:${tel.replace(/\D/g, '')}`)}>
                   <Text style={[S.dadoValue, { color: '#2563EB' }]}>{tel}</Text>
@@ -277,7 +277,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                   const num = fmtWhatsApp(tel);
                   Linking.openURL(`https://wa.me/${num}`);
                 }}>
-                  <Text style={S.whatsappIcon}>💬</Text>
+                  <Text style={S.whatsappIcon}>WhatsApp</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -287,11 +287,11 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           const end = cli.endereco || cliente.endereco || '';
           return (
             <View style={S.dadoRow}>
-              <Text style={S.dadoLabel}>📍 {t.endereco}</Text>
+              <Text style={S.dadoLabel}>{t.endereco}</Text>
               <View style={S.dadoActions}>
                 <Text style={S.dadoValue} numberOfLines={2}>{end}</Text>
                 <TouchableOpacity style={S.mapaBtn} onPress={() => abrirMapa(end)}>
-                  <Text style={S.mapaIcon}>🧭</Text>
+                  <Text style={S.mapaIcon}>{lang === 'es' ? 'Ver mapa' : 'Ver mapa'}</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -405,7 +405,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                   const isPago = p.status === 'PAGO';
                   const isVencida = p.status === 'VENCIDO' || p.status === 'VENCIDA';
                   const isParcial = p.status === 'PARCIAL';
-                  const icon = isPago ? '✅' : isVencida ? '❌' : isParcial ? '🟡' : '📅';
+                  const icon = isPago ? '●' : isVencida ? '●' : isParcial ? '●' : '●';
                   const corP = corStatus[isPago ? 'PAGO' : isVencida ? 'VENCIDO' : isParcial ? 'PARCIAL' : 'PENDENTE'];
                   return (
                     <View key={p.id} style={S.parcelaRow}>
@@ -445,7 +445,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
         <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
       ) : empAtivos.length === 0 ? (
         <View style={S.emptyBox}>
-          <Text style={S.emptyIcon}>📋</Text>
+          <Text style={S.emptyIcon}>—</Text>
           <Text style={S.emptyText}>{t.semEmprestimo}</Text>
         </View>
       ) : (
@@ -461,7 +461,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
         <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
       ) : empHistorico.length === 0 ? (
         <View style={S.emptyBox}>
-          <Text style={S.emptyIcon}>📂</Text>
+          <Text style={S.emptyIcon}>—</Text>
           <Text style={S.emptyText}>{t.semHistorico}</Text>
         </View>
       ) : (
@@ -483,7 +483,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
               </View>
               <View style={S.headerTexts}>
                 <Text style={S.headerNome} numberOfLines={1}>{cliente.nome.toLowerCase()}</Text>
-                {cliente.telefone && <Text style={S.headerTel}>📱 {cliente.telefone}</Text>}
+                {cliente.telefone && <Text style={S.headerTel}>{cliente.telefone}</Text>}
               </View>
             </View>
             <TouchableOpacity onPress={onClose} style={S.closeBtn}>
@@ -500,7 +500,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                 onPress={() => setAba(a)}
               >
                 <Text style={[S.tabText, aba === a && S.tabTextAtivo]}>
-                  {a === 'pessoais' ? '👤' : a === 'emprestimo' ? '💰' : '📂'} {t[a]}
+                  {} {t[a]}
                 </Text>
                 {a === 'emprestimo' && empAtivos.length > 0 && (
                   <View style={S.tabBadge}><Text style={S.tabBadgeText}>{empAtivos.length}</Text></View>
@@ -564,10 +564,10 @@ const S = StyleSheet.create({
   dadoLabel: { fontSize: 13, color: '#6B7280', minWidth: 80 },
   dadoValue: { fontSize: 13, fontWeight: '600', color: '#1F2937', textAlign: 'right', flex: 1, marginLeft: 12 },
   dadoActions: { flexDirection: 'row', alignItems: 'center', flex: 1, justifyContent: 'flex-end', gap: 8 },
-  whatsappBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#25D366', alignItems: 'center', justifyContent: 'center' },
-  whatsappIcon: { fontSize: 15 },
-  mapaBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' },
-  mapaIcon: { fontSize: 15 },
+  whatsappBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, backgroundColor: '#25D366', alignItems: 'center', justifyContent: 'center' },
+  whatsappIcon: { fontSize: 11, color: '#fff', fontWeight: '600' },
+  mapaBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' },
+  mapaIcon: { fontSize: 11, color: '#fff', fontWeight: '600' },
 
   resumoCard: { marginTop: 16, backgroundColor: '#EFF6FF', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#BFDBFE' },
   resumoTitle: { fontSize: 13, fontWeight: '600', color: '#1E40AF', marginBottom: 8 },
