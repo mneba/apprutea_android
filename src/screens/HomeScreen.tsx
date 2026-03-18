@@ -26,7 +26,7 @@ interface LiquidacaoDiaria {
   valor_esperado_dia: number; valor_recebido_dia: number;
   valor_dinheiro: number; valor_transferencia: number; percentual_recebimento: number;
   clientes_iniciais: number; clientes_novos: number; clientes_renovados: number;
-  clientes_renegociados: number; clientes_cancelados: number;
+  clientes_renegociados: number; clientes_cancelados: number; clientes_quitados: number;
   pagamentos_pagos: number; pagamentos_nao_pagos: number;
   total_despesas_dia: number; qtd_despesas_dia: number;
   total_emprestado_dia: number; qtd_emprestimos_dia: number;
@@ -53,7 +53,7 @@ const textos = {
     resumoClientes: 'Resumo de Clientes',
     clientesIniciais: 'Clientes Iniciais:', clientesNovos: 'Clientes Novos:',
     clientesRenovados: 'Clientes Renovados:', clientesRenegociados: 'Clientes Renegociados:',
-    clientesCancelados: 'Clientes Cancelados:', totalClientes: 'Total de Clientes:',
+    clientesQuitados: 'Clientes Quitados:', totalClientes: 'Total de Clientes:',
     controlesFinanceiros: 'Controles Financeiros', caixa: 'Caixa', inicial: 'Inicial:',
     pagamentos: 'Pagamentos', pagos: 'Clientes Pagos:', naoPagos: 'Não Pagos:', efetividade: 'Efetividade:',
     outrasOperacoes: 'Outras Operações', vendas: 'Vendas', qtdEmprestimos: 'Qtd:',
@@ -81,7 +81,7 @@ const textos = {
     resumoClientes: 'Resumen de Clientes',
     clientesIniciais: 'Clientes Iniciales:', clientesNovos: 'Clientes Nuevos:',
     clientesRenovados: 'Clientes Renovados:', clientesRenegociados: 'Clientes Renegociados:',
-    clientesCancelados: 'Clientes Cancelados:', totalClientes: 'Total de Clientes:',
+    clientesQuitados: 'Clientes Liquidados:', totalClientes: 'Total de Clientes:',
     controlesFinanceiros: 'Controles Financieros', caixa: 'Caja', inicial: 'Inicial:',
     pagamentos: 'Pagos', pagos: 'Clientes Pagados:', naoPagos: 'No Pagados:', efetividade: 'Efectividad:',
     outrasOperacoes: 'Otras Operaciones', vendas: 'Ventas', qtdEmprestimos: 'Cant:',
@@ -334,7 +334,7 @@ export default function HomeScreen({ navigation }: any) {
   
   const calcularTotalClientes = () => liquidacao ? 
     (liquidacao.clientes_iniciais||0)+(liquidacao.clientes_novos||0)+(liquidacao.clientes_renovados||0)+
-    (liquidacao.clientes_renegociados||0)-(liquidacao.clientes_cancelados||0) : 0;
+    (liquidacao.clientes_renegociados||0)-(liquidacao.clientes_cancelados||0)-(liquidacao.clientes_quitados||0) : 0;
   
   const calcularCaixaAtual = () => liquidacao ?
     (liquidacao.caixa_inicial||0)+(liquidacao.valor_recebido_dia||0)-(liquidacao.total_despesas_dia||0)-(liquidacao.total_emprestado_dia||0) : 0;
@@ -611,7 +611,7 @@ export default function HomeScreen({ navigation }: any) {
           <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesNovos}</Text><Text style={styles.clienteValue}>{liquidacao?.clientes_novos || 0}</Text></View>
           <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesRenovados}</Text><Text style={styles.clienteValue}>{liquidacao?.clientes_renovados || 0}</Text></View>
           <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesRenegociados}</Text><Text style={styles.clienteValue}>{liquidacao?.clientes_renegociados || 0}</Text></View>
-          <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesCancelados}</Text><Text style={styles.clienteValue}>{liquidacao?.clientes_cancelados || 0}</Text></View>
+          <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesQuitados}</Text><Text style={styles.clienteValue}>{liquidacao?.clientes_quitados || 0}</Text></View>
           <View style={[styles.clienteRow, styles.clienteRowTotal]}>
             <Text style={styles.clienteLabelTotal}>{t.totalClientes}</Text>
             <Text style={styles.clienteValueTotal}>{calcularTotalClientes()}</Text>

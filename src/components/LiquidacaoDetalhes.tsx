@@ -265,7 +265,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   .mov:last-child { border-bottom: none; }
   .mov-row { display: flex; align-items: baseline; }
   .mov-idx { color: #999; width: 20px; font-size: 11px; flex-shrink: 0; }
-  .mov-cat { flex: 1; font-weight: 600; font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .mov-cat { flex: 1; font-weight: 600; font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 160px; min-width: 0; }
   .mov-val { font-weight: 700; font-size: 12px; flex-shrink: 0; white-space: nowrap; padding-left: 6px; }
   .mov-sub { color: #666; font-size: 10px; padding-left: 20px; margin-top: 1px; }
   .mov-meta { display: flex; justify-content: space-between; color: #999; font-size: 9px; padding-left: 20px; }
@@ -334,9 +334,10 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   <hr class="sep">
   ${registrosSaidas.length === 0 ? `<div class="c cinza">${t.nenhunaSaida}</div>` :
     registrosSaidas.map((item, idx) => {
-      const sub = item.cliente_nome || item.descricao || '';
+      const principal = item.cliente_nome || formatarCategoria(item.categoria);
+      const sub = item.cliente_nome && item.descricao ? item.descricao : '';
       return `<div class="mov">
-        <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${formatarCategoria(item.categoria)}</span><span class="mov-val verm">-${fmt(parseFloat(item.valor))}</span></div>
+        <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${principal}</span><span class="mov-val verm">-${fmt(parseFloat(item.valor))}</span></div>
         ${sub ? `<div class="mov-sub">${sub}</div>` : ''}
         <div class="mov-meta"><span>${fmtHora(item.created_at)}</span>${item.forma_pagamento ? `<span>${item.forma_pagamento}</span>` : ''}</div>
       </div>`;
@@ -569,11 +570,13 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                     <View key={item.id}>
                       <View style={cupom.itemRow}>
                         <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
-                        <Text style={cupom.itemCat} numberOfLines={1}>{formatarCategoria(item.categoria)}</Text>
+                        <Text style={cupom.itemCat} numberOfLines={1} ellipsizeMode="tail">
+                          {item.cliente_nome || formatarCategoria(item.categoria)}
+                        </Text>
                         <Text style={[cupom.itemVal, { color: '#DC2626' }]}>-{fmt(parseFloat(item.valor))}</Text>
                       </View>
-                      {(item.cliente_nome || item.descricao) && (
-                        <Text style={cupom.itemSub} numberOfLines={1}>   {item.cliente_nome || item.descricao}</Text>
+                      {item.cliente_nome && item.descricao && (
+                        <Text style={cupom.itemSub} numberOfLines={1}>   {item.descricao}</Text>
                       )}
                       <View style={cupom.itemMeta}>
                         <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>

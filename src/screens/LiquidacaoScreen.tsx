@@ -52,7 +52,7 @@ const textos = {
     clientesNovos: 'Clientes Novos:',
     clientesRenovados: 'Clientes Renovados:',
     clientesRenegociados: 'Clientes Renegociados:',
-    clientesCancelados: 'Clientes Cancelados:',
+    clientesQuitados: 'Clientes Quitados:',
     totalClientes: 'Total de Clientes:',
     controlesFinanceiros: 'Controles Financeiros',
     caixa: 'Caixa',
@@ -107,7 +107,7 @@ const textos = {
     clientesNovos: 'Clientes Nuevos:',
     clientesRenovados: 'Clientes Renovados:',
     clientesRenegociados: 'Clientes Renegociados:',
-    clientesCancelados: 'Clientes Cancelados:',
+    clientesQuitados: 'Clientes Liquidados:',
     totalClientes: 'Total de Clientes:',
     controlesFinanceiros: 'Controles Financieros',
     caixa: 'Caja',
@@ -582,7 +582,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
            (liquidacao.clientes_novos || 0) + 
            (liquidacao.clientes_renovados || 0) + 
            (liquidacao.clientes_renegociados || 0) - 
-           (liquidacao.clientes_cancelados || 0);
+           (liquidacao.clientes_cancelados || 0) - (liquidacao.clientes_quitados || 0);
   };
 
   // ==================== HANDLERS ====================
@@ -965,7 +965,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
               <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesNovos}</Text><Text style={styles.clienteValue}>{liquidacao.clientes_novos || 0}</Text></View>
               <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesRenovados}</Text><Text style={styles.clienteValue}>{liquidacao.clientes_renovados || 0}</Text></View>
               <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesRenegociados}</Text><Text style={styles.clienteValue}>{liquidacao.clientes_renegociados || 0}</Text></View>
-              <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesCancelados}</Text><Text style={styles.clienteValue}>{liquidacao.clientes_cancelados || 0}</Text></View>
+              <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesQuitados}</Text><Text style={styles.clienteValue}>{(liquidacao as any).clientes_quitados || 0}</Text></View>
               <View style={[styles.clienteRow, styles.clienteRowTotal]}><Text style={styles.clienteLabelTotal}>{t.totalClientes}</Text><Text style={styles.clienteValueTotal}>{calcularTotalClientes()}</Text></View>
             </View>
 
