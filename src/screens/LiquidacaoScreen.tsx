@@ -80,6 +80,12 @@ const textos = {
     confirmar: 'Confirmar',
     caixaInicialAutomatico: 'Caixa inicial (automático):',
     infoSaldoConta: 'O valor do caixa inicial é automaticamente o saldo atual da conta da rota.',
+    abrirDiaAnterior: 'Abrir dia anterior?',
+    seletorDataTitulo: 'Selecionar data',
+    avisoRetroativo: 'Liquidação retroativa para',
+    confirmarRetroativo: 'Você está abrindo uma liquidação para uma data passada. Deseja continuar?',
+    diaOcupado: 'Já existe liquidação',
+    diasDisponiveis: 'Dias disponíveis (últimos 30 dias)',
     selecioneData: 'Selecione uma Data',
     semLiquidacaoCalendario: 'Não há liquidação aberta para hoje. Selecione uma data no calendário abaixo para visualizar os dados.',
     legenda: 'Legenda:',
@@ -135,6 +141,12 @@ const textos = {
     confirmar: 'Confirmar',
     caixaInicialAutomatico: 'Caja inicial (automático):',
     infoSaldoConta: 'El valor de la caja inicial es automáticamente el saldo actual de la cuenta de la ruta.',
+    abrirDiaAnterior: '¿Abrir día anterior?',
+    seletorDataTitulo: 'Seleccionar fecha',
+    avisoRetroativo: 'Liquidación retroactiva para',
+    confirmarRetroativo: 'Está abriendo una liquidación para una fecha pasada. ¿Desea continuar?',
+    diaOcupado: 'Ya existe liquidación',
+    diasDisponiveis: 'Días disponibles (últimos 30 días)',
     selecioneData: 'Seleccione una Fecha',
     semLiquidacaoCalendario: 'No hay liquidación abierta para hoy. Seleccione una fecha en el calendario a continuación.',
     legenda: 'Leyenda:',
@@ -160,6 +172,9 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const [fechando, setFechando] = useState(false);
   const [fechandoEtapa, setFechandoEtapa] = useState<'confirmar' | 'processando' | 'gerando'>('confirmar');
   const [modalIniciarVisible, setModalIniciarVisible] = useState(false);
+  const [dataRetroativa, setDataRetroativa] = useState<string | null>(null); // 'YYYY-MM-DD'
+  const [mostrarSeletorData, setMostrarSeletorData] = useState(false);
+  const [datasOcupadas, setDatasOcupadas] = useState<Set<string>>(new Set());
   const [modalFecharVisible, setModalFecharVisible] = useState(false);
   const [extratoFechamentoVisible, setExtratoFechamentoVisible] = useState(false);
   const [liqFechadaId, setLiqFechadaId] = useState<string | null>(null);
@@ -451,11 +466,26 @@ export default function LiquidacaoScreen({ navigation }: any) {
         Alert.alert('Atenção', 'Já existe uma liquidação aberta. Feche-a antes de abrir outra.');
         return;
       }
+      setDataRetroativa(null);
+      setMostrarSeletorData(false);
+      carregarDatasOcupadas();
       setModalIniciarVisible(true);
     } else {
-      // Dia futuro ou passado sem liquidação → enterFutureView
-      setLiquidacao(null);
-      enterFutureView(dia.data);
+      // Dia passado sem liquidação → oferece abrir retroativamente
+      const temAberta = todasLiquidacoes.some(l => {
+        const s = l.status?.toUpperCase();
+        return s === 'ABERTO' || s === 'ABERTA';
+      });
+      if (temAberta) {
+        Alert.alert('Atenção', 'Já existe uma liquidação aberta. Feche-a antes de abrir outra.');
+        return;
+      }
+      // Pré-selecionar a data clicada
+      const dataStr = `${dia.data.getFullYear()}-${String(dia.data.getMonth()+1).padStart(2,'0')}-${String(dia.data.getDate()).padStart(2,'0')}`;
+      setDataRetroativa(dataStr);
+      setMostrarSeletorData(false);
+      carregarDatasOcupadas();
+      setModalIniciarVisible(true);
     }
   };
 
@@ -586,12 +616,27 @@ export default function LiquidacaoScreen({ navigation }: any) {
   };
 
   // ==================== HANDLERS ====================
+  const carregarDatasOcupadas = async () => {
+    if (!vendedor) return;
+    try {
+      const { data } = await supabase
+        .from('liquidacoes_diarias')
+        .select('data_liquidacao, data_abertura')
+        .eq('vendedor_id', vendedor.id)
+        .eq('rota_id', vendedor.rota_id)
+        .gte('data_abertura', new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString());
+      const ocupadas = new Set<string>();
+      (data || []).forEach((l: any) => {
+        const d = l.data_liquidacao?.substring(0, 10) || l.data_abertura?.substring(0, 10);
+        if (d) ocupadas.add(d);
+      });
+      setDatasOcupadas(ocupadas);
+    } catch {}
+  };
+
   const handleIniciarDia = async () => {
     if (!vendedor) return;
-    
-    // CAIXA INICIAL AUTOMÁTICO = SALDO DA CONTA DA ROTA
     const valorCaixaInicial = contaRota?.saldo_atual || 0;
-    
     setSalvando(true);
     try {
       const { data, error } = await supabase.rpc('fn_abrir_liquidacao_diaria', {
@@ -599,6 +644,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
         p_rota_id: vendedor.rota_id,
         p_caixa_inicial: valorCaixaInicial,
         p_user_id: vendedor.user_id,
+        ...(dataRetroativa ? { p_data_liquidacao: dataRetroativa } : {}),
       });
 
       if (error) throw error;
@@ -622,6 +668,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
       setModalIniciarVisible(false);
       setMostrarCalendario(false);
       setModoVisualizacao(false);
+      setDataRetroativa(null);
       await carregarLiquidacoes();
       Alert.alert('Sucesso', 'Dia iniciado com sucesso!');
     } catch (error: any) {
@@ -812,21 +859,77 @@ export default function LiquidacaoScreen({ navigation }: any) {
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
               <Text style={styles.modalTitle}>{t.iniciarDia}</Text>
-              
-              {/* Info: caixa inicial automático */}
+
+              {/* Badge retroativo */}
+              {dataRetroativa && (
+                <View style={{ backgroundColor: '#FEF3C7', borderRadius: 8, padding: 10, marginBottom: 14, borderWidth: 1, borderColor: '#FDE68A', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={{ fontSize: 13, color: '#92400E' }}>⚠ {t.avisoRetroativo} {dataRetroativa.split('-').reverse().join('/')}</Text>
+                </View>
+              )}
+
+              {/* Caixa inicial somente leitura */}
               <View style={styles.caixaInicialInfo}>
                 <Text style={styles.caixaInicialInfoIcon}>ℹ️</Text>
                 <Text style={styles.caixaInicialInfoText}>{t.infoSaldoConta}</Text>
               </View>
-              
-              {/* Valor do caixa inicial (somente leitura) */}
               <View style={styles.caixaInicialReadOnly}>
                 <Text style={styles.caixaInicialLabel}>{t.caixaInicialAutomatico}</Text>
                 <Text style={styles.caixaInicialValor}>{formatarMoeda(contaRota?.saldo_atual || 0)}</Text>
               </View>
-              
+
+              {/* Seletor de data retroativa */}
+              {!mostrarSeletorData ? (
+                <TouchableOpacity
+                  style={{ marginTop: 12, paddingVertical: 10, alignItems: 'center', borderRadius: 8, borderWidth: 1, borderColor: '#BFDBFE', backgroundColor: '#EFF6FF' }}
+                  onPress={() => setMostrarSeletorData(true)}
+                >
+                  <Text style={{ fontSize: 13, color: '#2563EB', fontWeight: '500' }}>{t.abrirDiaAnterior}</Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={{ marginTop: 12 }}>
+                  <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 8 }}>{t.diasDisponiveis}</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                    {(() => {
+                      const dias = [];
+                      for (let i = 1; i <= 30; i++) {
+                        const d = new Date();
+                        d.setDate(d.getDate() - i);
+                        const str = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                        const ocupado = datasOcupadas.has(str);
+                        const selecionado = dataRetroativa === str;
+                        dias.push(
+                          <TouchableOpacity
+                            key={str}
+                            disabled={ocupado}
+                            onPress={() => setDataRetroativa(str)}
+                            style={{
+                              marginRight: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
+                              backgroundColor: ocupado ? '#F3F4F6' : selecionado ? '#2563EB' : '#fff',
+                              borderWidth: 1,
+                              borderColor: ocupado ? '#E5E7EB' : selecionado ? '#2563EB' : '#D1D5DB',
+                              alignItems: 'center', minWidth: 56,
+                            }}
+                          >
+                            <Text style={{ fontSize: 13, fontWeight: '600', color: ocupado ? '#D1D5DB' : selecionado ? '#fff' : '#1F2937' }}>
+                              {String(d.getDate()).padStart(2,'0')}/{String(d.getMonth()+1).padStart(2,'0')}
+                            </Text>
+                            {ocupado && <Text style={{ fontSize: 8, color: '#9CA3AF', marginTop: 2 }}>ocupado</Text>}
+                          </TouchableOpacity>
+                        );
+                      }
+                      return dias;
+                    })()}
+                  </ScrollView>
+                  {dataRetroativa && (
+                    <TouchableOpacity onPress={() => { setDataRetroativa(null); setMostrarSeletorData(false); }} style={{ alignItems: 'center', paddingVertical: 6 }}>
+                      <Text style={{ fontSize: 12, color: '#6B7280' }}>Usar hoje</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+
               <View style={styles.modalButtons}>
-                <TouchableOpacity style={styles.modalButtonCancel} onPress={() => setModalIniciarVisible(false)}>
+                <TouchableOpacity style={styles.modalButtonCancel} onPress={() => { setModalIniciarVisible(false); setDataRetroativa(null); setMostrarSeletorData(false); }}>
                   <Text style={styles.modalButtonCancelText}>{t.cancelar}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.modalButtonConfirm} onPress={handleIniciarDia} disabled={salvando}>
@@ -1150,20 +1253,77 @@ export default function LiquidacaoScreen({ navigation }: any) {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{t.iniciarDia}</Text>
-            
-            {/* Info: caixa inicial automático */}
+
+            {/* Badge retroativo */}
+            {dataRetroativa && (
+              <View style={{ backgroundColor: '#FEF3C7', borderRadius: 8, padding: 10, marginBottom: 14, borderWidth: 1, borderColor: '#FDE68A', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={{ fontSize: 13, color: '#92400E' }}>⚠ {t.avisoRetroativo} {dataRetroativa.split('-').reverse().join('/')}</Text>
+              </View>
+            )}
+
+            {/* Caixa inicial somente leitura */}
             <View style={styles.caixaInicialInfo}>
               <Text style={styles.caixaInicialInfoIcon}>ℹ️</Text>
               <Text style={styles.caixaInicialInfoText}>{t.infoSaldoConta}</Text>
             </View>
-            
-            {/* Valor do caixa inicial (somente leitura) */}
             <View style={styles.caixaInicialReadOnly}>
               <Text style={styles.caixaInicialLabel}>{t.caixaInicialAutomatico}</Text>
               <Text style={styles.caixaInicialValor}>{formatarMoeda(contaRota?.saldo_atual || 0)}</Text>
             </View>
+
+            {/* Seletor de data retroativa */}
+            {!mostrarSeletorData ? (
+              <TouchableOpacity
+                style={{ marginTop: 12, paddingVertical: 10, alignItems: 'center', borderRadius: 8, borderWidth: 1, borderColor: '#BFDBFE', backgroundColor: '#EFF6FF' }}
+                onPress={() => setMostrarSeletorData(true)}
+              >
+                <Text style={{ fontSize: 13, color: '#2563EB', fontWeight: '500' }}>{t.abrirDiaAnterior}</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={{ marginTop: 12 }}>
+                <Text style={{ fontSize: 12, color: '#6B7280', marginBottom: 8 }}>{t.diasDisponiveis}</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                  {(() => {
+                    const dias = [];
+                    for (let i = 1; i <= 30; i++) {
+                      const d = new Date();
+                      d.setDate(d.getDate() - i);
+                      const str = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                      const ocupado = datasOcupadas.has(str);
+                      const selecionado = dataRetroativa === str;
+                      dias.push(
+                        <TouchableOpacity
+                          key={str}
+                          disabled={ocupado}
+                          onPress={() => setDataRetroativa(str)}
+                          style={{
+                            marginRight: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
+                            backgroundColor: ocupado ? '#F3F4F6' : selecionado ? '#2563EB' : '#fff',
+                            borderWidth: 1,
+                            borderColor: ocupado ? '#E5E7EB' : selecionado ? '#2563EB' : '#D1D5DB',
+                            alignItems: 'center', minWidth: 56,
+                          }}
+                        >
+                          <Text style={{ fontSize: 13, fontWeight: '600', color: ocupado ? '#D1D5DB' : selecionado ? '#fff' : '#1F2937' }}>
+                            {String(d.getDate()).padStart(2,'0')}/{String(d.getMonth()+1).padStart(2,'0')}
+                          </Text>
+                          {ocupado && <Text style={{ fontSize: 8, color: '#9CA3AF', marginTop: 2 }}>ocupado</Text>}
+                        </TouchableOpacity>
+                      );
+                    }
+                    return dias;
+                  })()}
+                </ScrollView>
+                {dataRetroativa && (
+                  <TouchableOpacity onPress={() => { setDataRetroativa(null); setMostrarSeletorData(false); }} style={{ alignItems: 'center', paddingVertical: 6 }}>
+                    <Text style={{ fontSize: 12, color: '#6B7280' }}>Usar hoje</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+
             <View style={styles.modalButtons}>
-              <TouchableOpacity style={styles.modalButtonCancel} onPress={() => setModalIniciarVisible(false)}>
+              <TouchableOpacity style={styles.modalButtonCancel} onPress={() => { setModalIniciarVisible(false); setDataRetroativa(null); setMostrarSeletorData(false); }}>
                 <Text style={styles.modalButtonCancelText}>{t.cancelar}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.modalButtonConfirm} onPress={handleIniciarDia} disabled={salvando}>
