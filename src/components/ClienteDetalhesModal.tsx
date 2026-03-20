@@ -184,6 +184,27 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
         .order('data_emprestimo', { ascending: false });
 
       const all = (emps || []) as any[];
+
+      // Descontar crédito acumulado (saldo_excedente) do saldo de cada empréstimo
+      const empIds = all.map(e => e.id).filter(Boolean);
+      if (empIds.length > 0) {
+        const { data: excedentes } = await supabase
+          .from('emprestimo_parcelas')
+          .select('emprestimo_id, saldo_excedente')
+          .in('emprestimo_id', empIds)
+          .gt('saldo_excedente', 0);
+        if (excedentes && excedentes.length > 0) {
+          const creditoMap = new Map<string, number>();
+          (excedentes as any[]).forEach(p => {
+            creditoMap.set(p.emprestimo_id, (creditoMap.get(p.emprestimo_id) || 0) + parseFloat(p.saldo_excedente || 0));
+          });
+          all.forEach(e => {
+            const credito = creditoMap.get(e.id) || 0;
+            if (credito > 0) e.valor_saldo = Math.max(0, (e.valor_saldo || 0) - credito);
+          });
+        }
+      }
+
       setEmpAtivos(all.filter(e => e.status === 'ATIVO' || e.status === 'VENCIDO'));
       setEmpHistorico(all.filter(e => e.status !== 'ATIVO' && e.status !== 'VENCIDO'));
     } catch (e) {

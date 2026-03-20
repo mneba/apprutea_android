@@ -1194,6 +1194,36 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
             {clienteExpanded && (
               <View style={styles.sectionBody}>
+                {clienteExistente ? (
+                  /* Cliente existente — somente leitura */
+                  <View style={styles.clienteReadOnlyBox}>
+                    {nome ? (
+                      <View style={styles.clienteReadOnlyRow}>
+                        <Text style={styles.clienteReadOnlyLabel}>Nome</Text>
+                        <Text style={styles.clienteReadOnlyValue}>{nome}</Text>
+                      </View>
+                    ) : null}
+                    {documento ? (
+                      <View style={styles.clienteReadOnlyRow}>
+                        <Text style={styles.clienteReadOnlyLabel}>{t.documento}</Text>
+                        <Text style={styles.clienteReadOnlyValue}>{documento}</Text>
+                      </View>
+                    ) : null}
+                    {telefoneCelular ? (
+                      <View style={styles.clienteReadOnlyRow}>
+                        <Text style={styles.clienteReadOnlyLabel}>Celular</Text>
+                        <Text style={styles.clienteReadOnlyValue}>{telefoneCelular}</Text>
+                      </View>
+                    ) : null}
+                    {endereco ? (
+                      <View style={styles.clienteReadOnlyRow}>
+                        <Text style={styles.clienteReadOnlyLabel}>{t.endereco}</Text>
+                        <Text style={styles.clienteReadOnlyValue} numberOfLines={2}>{endereco}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ) : (
+                  <>
                 {/* Nome completo */}
                 <View style={styles.fieldGroup}>
                   <Text style={styles.fieldLabel}>
@@ -1364,6 +1394,8 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                     textAlignVertical="top"
                   />
                 </View>
+                  </>
+                )}
               </View>
             )}
           </View>
@@ -2229,6 +2261,34 @@ const styles = StyleSheet.create({
   sectionBody: {
     paddingHorizontal: 20,
     paddingBottom: 20,
+  },
+
+  clienteReadOnlyBox: {
+    backgroundColor: '#F9FAFB',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  clienteReadOnlyRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 6,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#F3F4F6',
+  },
+  clienteReadOnlyLabel: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    width: 70,
+    flexShrink: 0,
+  },
+  clienteReadOnlyValue: {
+    fontSize: 13,
+    color: '#374151',
+    fontWeight: '500',
+    flex: 1,
   },
 
   // Campos

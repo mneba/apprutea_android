@@ -278,6 +278,23 @@ const FREQ: Record<Language, Record<string, string>> = {
 };
 const getIni = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase() || '').join('');
 const fmt = (v: number) => '$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Busca crédito acumulado (saldo_excedente) por empréstimo
+// Saldo real = valor_saldo - credito_acumulado
+const buscarCreditoMap = async (empIds: string[]): Promise<Map<string, number>> => {
+  if (empIds.length === 0) return new Map();
+  const { data } = await supabase
+    .from('emprestimo_parcelas')
+    .select('emprestimo_id, saldo_excedente')
+    .in('emprestimo_id', empIds)
+    .gt('saldo_excedente', 0);
+  const creditoMap = new Map<string, number>();
+  (data || []).forEach((p: any) => {
+    const atual = creditoMap.get(p.emprestimo_id) || 0;
+    creditoMap.set(p.emprestimo_id, atual + parseFloat(p.saldo_excedente || 0));
+  });
+  return creditoMap;
+};
 const fmtData = (d: string | null | undefined) => { 
   if (!d) return ''; 
   // Se é só data (YYYY-MM-DD), formata direto
@@ -659,6 +676,15 @@ export default function ClientesScreen({ navigation, route }: any) {
           const empDataMap = new Map((empsData as any[]).map(e => [e.id, e.data_emprestimo]));
           allData = allData.map(r => ({ ...r, data_emprestimo: empDataMap.get(r.emprestimo_id) || null }));
         }
+
+        // Descontar crédito acumulado do saldo do empréstimo
+        const creditoMap = await buscarCreditoMap(empIdsUnicos);
+        if (creditoMap.size > 0) {
+          allData = allData.map(r => ({
+            ...r,
+            saldo_emprestimo: Math.max(0, (r.saldo_emprestimo || 0) - (creditoMap.get(r.emprestimo_id) || 0)),
+          }));
+        }
       }
       
       // 2. Busca parcelas que foram pagas NA liquidação atual (para mostrar como "pagas")
@@ -857,6 +883,17 @@ export default function ClientesScreen({ navigation, route }: any) {
         const info = parcMap.get(e.id) || { maxParcela: 1, vencidas: 0, totalVencido: 0 };
         if (info.vencidas > 0) cli.tem_atraso = true;
         cli.emprestimos.push({ id: e.id, valor_principal: e.valor_principal, saldo_emprestimo: e.valor_saldo, valor_parcela: e.valor_parcela, numero_parcelas: e.numero_parcelas, numero_parcela_atual: info.maxParcela, status: e.status, frequencia_pagamento: e.frequencia_pagamento, tipo_emprestimo: (e as any).tipo_emprestimo || 'NOVO', total_parcelas_vencidas: info.vencidas, valor_total_vencido: info.totalVencido, data_emprestimo: (e as any).data_emprestimo || null });
+      }
+      // Descontar crédito acumulado do saldo de cada empréstimo
+      const empIdsTodos = (emps as any[]).map(e => e.id);
+      const creditoMapTodos = await buscarCreditoMap(empIdsTodos);
+      if (creditoMapTodos.size > 0) {
+        Array.from(cliMap.values()).forEach(cli => {
+          cli.emprestimos.forEach(emp => {
+            const credito = creditoMapTodos.get(emp.id) || 0;
+            if (credito > 0) emp.saldo_emprestimo = Math.max(0, emp.saldo_emprestimo - credito);
+          });
+        });
       }
       setTodosList(Array.from(cliMap.values()));
 
@@ -1996,75 +2033,6 @@ export default function ClientesScreen({ navigation, route }: any) {
             {loadingParcelas ? (<ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />) : parcelasModal.length === 0 ? (<Text style={S.modalEmpty}>{ t.nenhumaParcelaEncontrada }</Text>) : (parcelasModal.map(p => renderParcelaItem(p)))}
             <View style={{ height: 10 }} />
           </ScrollView>
-          {/* Botão Quitar Tudo */}
-          {(() => {
-            const saldoTotal = parcelasModal.reduce((s, p) => s + (p.valor_saldo || 0), 0);
-            const temPendente = parcelasModal.some(p => ['PENDENTE', 'PARCIAL', 'VENCIDO'].includes(p.status));
-            const empQuitado = ['QUITADO', 'RENEGOCIADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '');
-            const dinheiroNecessario = Math.max(saldoTotal - creditoDisponivel, 0);
-            if (!temPendente || saldoTotal <= 0 || !liqId || isViz || empQuitado) return null;
-            return (
-              <TouchableOpacity 
-                style={{ marginHorizontal: 16, marginBottom: 8, backgroundColor: '#F59E0B', borderRadius: 12, paddingVertical: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' }}
-                disabled={processando}
-                onPress={async () => {
-                  const msg = creditoDisponivel > 0
-                    ? `Quitar empréstimo?\n\nSaldo: ${fmt(saldoTotal)}\nCrédito: ${fmt(creditoDisponivel)}\nDinheiro: ${fmt(dinheiroNecessario)}`
-                    : `Quitar empréstimo?\n\nSaldo: ${fmt(saldoTotal)}`;
-                  
-                  const confirmar = async () => {
-                    setProcessando(true);
-                    try {
-                      const { data, error } = await supabase.rpc('fn_quitar_emprestimo', {
-                        p_emprestimo_id: clienteModal?.emprestimo_id,
-                        p_valor_pagamento: dinheiroNecessario,
-                        p_valor_credito: Math.min(creditoDisponivel, saldoTotal),
-                        p_forma_pagamento: 'DINHEIRO',
-                        p_latitude: coords?.lat || null,
-                        p_longitude: coords?.lng || null,
-                        p_precisao_gps: coords?.acc || null,
-                        p_liquidacao_id: liqId || null,
-                        p_user_id: vendedor?.user_id || null
-                      });
-                      if (error) throw error;
-                      const res = Array.isArray(data) ? data[0] : data;
-                      if (res?.sucesso) {
-                        showAlert(t.sucessoGenerico || 'Sucesso', res.mensagem || 'Empréstimo quitado!');
-                        setModalParcelasVisible(false);
-                        loadLiq();
-                      } else {
-                        showAlert(t.erroGenerico || 'Erro', res?.mensagem || 'Erro ao quitar');
-                      }
-                    } catch (e: any) {
-                      console.error('Erro quitar:', e);
-                      showAlert(t.erroGenerico || 'Erro', e.message || 'Erro ao quitar empréstimo');
-                    } finally {
-                      setProcessando(false);
-                    }
-                  };
-                  
-                  if (Platform.OS === 'web') {
-                    if (window.confirm(msg)) confirmar();
-                  } else {
-                    Alert.alert(t.atencao || 'Atenção', msg, [
-                      { text: t.cancelar || 'Cancelar', style: 'cancel' },
-                      { text: t.confirmar || 'Confirmar', onPress: confirmar }
-                    ]);
-                  }
-                }}
-              >
-                {processando ? <ActivityIndicator color="#fff" /> : (
-                  <>
-                    <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700', marginRight: 6 }}>⚡</Text>
-                    <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>
-                      {t.quitarTudo || 'QUITAR TUDO'} {fmt(dinheiroNecessario)}
-                      {creditoDisponivel > 0 ? ` (+${fmt(Math.min(creditoDisponivel, saldoTotal))} crédito)` : ''}
-                    </Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            );
-          })()}
           <View style={S.mBtnFecharWrap}>
             <TouchableOpacity style={S.mBtnFechar} onPress={() => setModalParcelasVisible(false)}>
               <Text style={S.mBtnFecharTx}>{t.fechar}</Text>
