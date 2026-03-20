@@ -38,6 +38,7 @@ interface ClienteRotaDia {
   total_parcelas_vencidas: number; valor_total_vencido: number;
   status_dia: 'PAGO' | 'PARCIAL' | 'EM_ATRASO' | 'PENDENTE';
   permite_emprestimo_adicional: boolean; is_parcela_atrasada?: boolean;
+  data_emprestimo?: string; cliente_created_at?: string;
 }
 
 interface EmprestimoData {
@@ -50,6 +51,7 @@ interface EmprestimoData {
   valor_total_vencido: number; status_dia: 'PAGO' | 'PARCIAL' | 'EM_ATRASO' | 'PENDENTE';
   is_parcela_atrasada?: boolean;
   pagamento_info?: { valorPago: number; creditoGerado: number; valorParcela: number };
+  data_emprestimo?: string;
 }
 
 interface ClienteAgrupado {
@@ -62,7 +64,7 @@ interface ClienteAgrupado {
 interface ClienteTodos {
   id: string; codigo_cliente: number | null; nome: string;
   telefone_celular: string | null; status: string; tem_atraso: boolean;
-  permite_renegociacao: boolean;
+  permite_renegociacao: boolean; cliente_created_at?: string;
   emprestimos: EmprestimoTodos[];
 }
 
@@ -71,6 +73,7 @@ interface EmprestimoTodos {
   valor_parcela: number; numero_parcelas: number; numero_parcela_atual: number;
   status: string; frequencia_pagamento: string; tipo_emprestimo: string;
   total_parcelas_vencidas: number; valor_total_vencido: number;
+  data_emprestimo?: string;
 }
 
 interface PagamentoParcela {
@@ -644,6 +647,19 @@ export default function ClientesScreen({ navigation, route }: any) {
         codigo_cliente: r.codigo_cliente ?? r.consecutivo ?? null,
       })) as ClienteRotaDia[];
       const existingParcelaIds = new Set(allData.map(r => r.parcela_id));
+
+      // Enriquecer com data_emprestimo (RPC não retorna esse campo)
+      const empIdsUnicos = [...new Set(allData.map(r => r.emprestimo_id).filter(Boolean))];
+      if (empIdsUnicos.length > 0) {
+        const { data: empsData } = await supabase
+          .from('emprestimos')
+          .select('id, data_emprestimo')
+          .in('id', empIdsUnicos);
+        if (empsData && empsData.length > 0) {
+          const empDataMap = new Map((empsData as any[]).map(e => [e.id, e.data_emprestimo]));
+          allData = allData.map(r => ({ ...r, data_emprestimo: empDataMap.get(r.emprestimo_id) || null }));
+        }
+      }
       
       // 2. Busca parcelas que foram pagas NA liquidação atual (para mostrar como "pagas")
       if (liqId) {
@@ -677,7 +693,7 @@ export default function ClientesScreen({ navigation, route }: any) {
             const empIds = [...new Set(pagamentosNovos.map(p => p.emprestimo_id))];
             const { data: emps } = await supabase
               .from('emprestimos')
-              .select('id, valor_principal, valor_saldo, numero_parcelas, status, frequencia_pagamento, rota_id')
+              .select('id, valor_principal, valor_saldo, numero_parcelas, status, frequencia_pagamento, rota_id, data_emprestimo')
               .in('id', empIds);
             const empMap = new Map((emps || []).map(e => [e.id, e]));
             
@@ -726,6 +742,7 @@ export default function ClientesScreen({ navigation, route }: any) {
                 status_dia: 'PAGO',
                 permite_emprestimo_adicional: false,
                 is_parcela_atrasada: false,
+                data_emprestimo: (emp as any).data_emprestimo || null,
               };
               allData.push(pagaRow);
               existingParcelaIds.add(pag.parcela_id);
@@ -815,7 +832,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     setLoadTodos(true);
     try {
       // Query 1: Todos os empréstimos da rota com dados do cliente
-      const { data: emps } = await supabase.from('emprestimos').select(`id, valor_principal, valor_saldo, valor_parcela, numero_parcelas, status, frequencia_pagamento, tipo_emprestimo, clientes!inner(id, nome, telefone_celular, status, codigo_cliente, permite_renegociacao)`).eq('rota_id', rotaId).in('status', ['ATIVO', 'VENCIDO', 'QUITADO', 'RENEGOCIADO']);
+      const { data: emps } = await supabase.from('emprestimos').select(`id, valor_principal, valor_saldo, valor_parcela, numero_parcelas, status, frequencia_pagamento, tipo_emprestimo, data_emprestimo, clientes!inner(id, nome, telefone_celular, status, codigo_cliente, permite_renegociacao, created_at)`).eq('rota_id', rotaId).in('status', ['ATIVO', 'VENCIDO', 'QUITADO', 'RENEGOCIADO']);
       if (!emps || emps.length === 0) { setTodosList([]); return; }
 
       // Query 2: Todas as parcelas dos empréstimos de uma vez
@@ -836,10 +853,10 @@ export default function ClientesScreen({ navigation, route }: any) {
       for (const e of emps as any[]) {
         const c = e.clientes; if (!c) continue;
         let cli = cliMap.get(c.id);
-        if (!cli) { cli = { id: c.id, codigo_cliente: c.codigo_cliente, nome: c.nome, telefone_celular: c.telefone_celular, status: c.status, tem_atraso: false, permite_renegociacao: c.permite_renegociacao || false, emprestimos: [] }; cliMap.set(c.id, cli); }
+        if (!cli) { cli = { id: c.id, codigo_cliente: c.codigo_cliente, nome: c.nome, telefone_celular: c.telefone_celular, status: c.status, tem_atraso: false, permite_renegociacao: c.permite_renegociacao || false, cliente_created_at: c.created_at || null, emprestimos: [] }; cliMap.set(c.id, cli); }
         const info = parcMap.get(e.id) || { maxParcela: 1, vencidas: 0, totalVencido: 0 };
         if (info.vencidas > 0) cli.tem_atraso = true;
-        cli.emprestimos.push({ id: e.id, valor_principal: e.valor_principal, saldo_emprestimo: e.valor_saldo, valor_parcela: e.valor_parcela, numero_parcelas: e.numero_parcelas, numero_parcela_atual: info.maxParcela, status: e.status, frequencia_pagamento: e.frequencia_pagamento, tipo_emprestimo: (e as any).tipo_emprestimo || 'NOVO', total_parcelas_vencidas: info.vencidas, valor_total_vencido: info.totalVencido });
+        cli.emprestimos.push({ id: e.id, valor_principal: e.valor_principal, saldo_emprestimo: e.valor_saldo, valor_parcela: e.valor_parcela, numero_parcelas: e.numero_parcelas, numero_parcela_atual: info.maxParcela, status: e.status, frequencia_pagamento: e.frequencia_pagamento, tipo_emprestimo: (e as any).tipo_emprestimo || 'NOVO', total_parcelas_vencidas: info.vencidas, valor_total_vencido: info.totalVencido, data_emprestimo: (e as any).data_emprestimo || null });
       }
       setTodosList(Array.from(cliMap.values()));
 
@@ -1249,7 +1266,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       } else {
         // Novo empréstimo para este cliente
         const pi = pagMap.get(r.parcela_id);
-        g.emprestimos.push({ emprestimo_id: r.emprestimo_id, saldo_emprestimo: r.saldo_emprestimo, valor_principal: r.valor_principal, numero_parcelas: r.numero_parcelas, status_emprestimo: r.status_emprestimo, frequencia_pagamento: r.frequencia_pagamento, parcela_id: r.parcela_id, numero_parcela: r.numero_parcela, valor_parcela: r.valor_parcela, valor_pago_parcela: r.valor_pago_parcela, saldo_parcela: r.saldo_parcela, status_parcela: r.status_parcela, data_vencimento: r.data_vencimento, ordem_visita_dia: r.ordem_visita_dia, tem_parcelas_vencidas: r.tem_parcelas_vencidas, total_parcelas_vencidas: r.total_parcelas_vencidas, valor_total_vencido: r.valor_total_vencido, status_dia: r.status_dia, is_parcela_atrasada: r.is_parcela_atrasada, pagamento_info: pi ? { valorPago: pi.valor_pago_atual, creditoGerado: pi.valor_credito_gerado, valorParcela: pi.valor_parcela } : undefined });
+        g.emprestimos.push({ emprestimo_id: r.emprestimo_id, saldo_emprestimo: r.saldo_emprestimo, valor_principal: r.valor_principal, numero_parcelas: r.numero_parcelas, status_emprestimo: r.status_emprestimo, frequencia_pagamento: r.frequencia_pagamento, parcela_id: r.parcela_id, numero_parcela: r.numero_parcela, valor_parcela: r.valor_parcela, valor_pago_parcela: r.valor_pago_parcela, saldo_parcela: r.saldo_parcela, status_parcela: r.status_parcela, data_vencimento: r.data_vencimento, ordem_visita_dia: r.ordem_visita_dia, tem_parcelas_vencidas: r.tem_parcelas_vencidas, total_parcelas_vencidas: r.total_parcelas_vencidas, valor_total_vencido: r.valor_total_vencido, status_dia: r.status_dia, is_parcela_atrasada: r.is_parcela_atrasada, pagamento_info: pi ? { valorPago: pi.valor_pago_atual, creditoGerado: pi.valor_credito_gerado, valorParcela: pi.valor_parcela } : undefined, data_emprestimo: (r as any).data_emprestimo || null });
       }
     });
     m.forEach(g => { g.qtd_emprestimos = g.emprestimos.length; g.tem_multiplos_vencimentos = g.emprestimos.length > 1; });
@@ -1437,6 +1454,7 @@ export default function ClientesScreen({ navigation, route }: any) {
               <Text style={S.pLbl}>{t.parcela} {e.numero_parcela}/{e.numero_parcelas}</Text>
               <View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento}</Text></View>
             </View>
+            {e.data_emprestimo ? <Text style={S.dataEmpLbl}>{lang === 'es' ? 'Préstamo:' : 'Empréstimo:'} {fmtData(e.data_emprestimo)}</Text> : null}
           </View>
           <View style={S.sCol}>
             {pg && pi ? (
@@ -1558,6 +1576,7 @@ export default function ClientesScreen({ navigation, route }: any) {
                 <Text style={S.pLbl}>{t.parcela} {emp.numero_parcela_atual}/{emp.numero_parcelas}</Text>
                 <View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[lang][emp.frequencia_pagamento] || emp.frequencia_pagamento}</Text></View>
               </View>
+              {emp.data_emprestimo ? <Text style={S.dataEmpLbl}>{lang === 'es' ? 'Préstamo:' : 'Empréstimo:'} {fmtData(emp.data_emprestimo)}</Text> : null}
             </View>
             <View style={S.sCol}>
               <Text style={S.pValBig}>{fmt(emp.valor_parcela)}</Text>
@@ -2399,6 +2418,7 @@ const S = StyleSheet.create({
   pRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
   pLblR: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }, pLbl: { fontSize: 11, color: '#6B7280' },
   fBdg: { backgroundColor: '#EDE9FE', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }, fBdgT: { fontSize: 9, fontWeight: '600', color: '#7C3AED' },
+  dataEmpLbl: { fontSize: 10, color: '#9CA3AF', marginTop: 2 },
   pVal: { fontSize: 15, fontWeight: '700', color: '#1F2937' },
   pValBig: { fontSize: 18, fontWeight: '800', color: '#1F2937', textAlign: 'right' },
   sCol: { alignItems: 'flex-end' }, sLbl: { fontSize: 11, color: '#6B7280', marginBottom: 2 }, sVal: { fontSize: 15, fontWeight: '700', color: '#1F2937' },

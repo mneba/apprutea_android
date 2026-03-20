@@ -136,10 +136,11 @@ interface ExtratoProps {
   caixaInicial: number;
   caixaFinal: number;
   rotaNome?: string;
+  vendedorNomeExterno?: string;
   lang?: Lang;
 }
 
-export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, caixaFinal, rotaNome, lang = 'pt-BR' }: ExtratoProps) {
+export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, caixaFinal, rotaNome, vendedorNomeExterno, lang = 'pt-BR' }: ExtratoProps) {
   const t = i18n[lang];
   const [registros, setRegistros] = useState<any[]>([]);
   const [pagamentos, setPagamentos] = useState<any[]>([]);
@@ -149,6 +150,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const [caixaMicroInicial, setCaixaMicroInicial] = useState(0);
   const [caixaMicroFinal, setCaixaMicroFinal] = useState(0);
   const [totalRetiroMicro, setTotalRetiroMicro] = useState(0);
+  const [resumoOp, setResumoOp] = useState({ pagos: 0, naoPagos: 0, novos: 0, renovados: 0, renegociados: 0 });
   const extratoViewRef = useRef<View>(null);
 
   useEffect(() => {
@@ -161,7 +163,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
       // Busca dados da liquidação (vendedor + data + microseguro)
       const { data: liqData } = await supabase
         .from('liquidacoes_diarias')
-        .select('data_liquidacao, data_abertura, vendedor_id, caixa_microseguro_inicial, caixa_microseguro_final, vendedores(nome)')
+        .select('data_liquidacao, data_abertura, microseguro_inicial, microseguro_final, clientes_pagos, clientes_nao_pagos, clientes_novos, clientes_renovados, clientes_renegociados')
         .eq('id', liquidacaoId)
         .single();
 
@@ -171,9 +173,16 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
           const [y, m, d] = dataStr.split('-');
           setDataLiquidacao(`${d}/${m}/${y}`);
         }
-        setVendedorNome((liqData as any).vendedores?.nome || '');
-        setCaixaMicroInicial(liqData.caixa_microseguro_inicial || 0);
-        setCaixaMicroFinal(liqData.caixa_microseguro_final || 0);
+        if (vendedorNomeExterno) setVendedorNome(vendedorNomeExterno);
+        setCaixaMicroInicial(liqData.microseguro_inicial || 0);
+        setCaixaMicroFinal(liqData.microseguro_final || 0);
+        setResumoOp({
+          pagos: (liqData as any).clientes_pagos || 0,
+          naoPagos: (liqData as any).clientes_nao_pagos || 0,
+          novos: (liqData as any).clientes_novos || 0,
+          renovados: (liqData as any).clientes_renovados || 0,
+          renegociados: (liqData as any).clientes_renegociados || 0,
+        });
       }
 
       // Busca movimentações financeiras
@@ -197,15 +206,39 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         .from('pagamentos_parcelas')
         .select(`
           id, numero_parcela, valor_pago_total, valor_parcela, valor_credito_gerado,
-          forma_pagamento, created_at, status_parcela,
-          cliente:cliente_id(nome, consecutivo)
+          forma_pagamento, created_at, cliente_id,
+          clientes!pagamentos_parcelas_cliente_id_fkey(nome, consecutivo)
         `)
         .eq('liquidacao_id', liquidacaoId)
         .eq('estornado', false)
-        .neq('status_parcela', 'CANCELADO')
         .order('created_at', { ascending: true });
 
-      if (!errPag) setPagamentos(pags || []);
+      if (errPag) {
+        console.log('❌ Erro query pagamentos_parcelas:', errPag.message, errPag.details, errPag.hint);
+        // Fallback: busca sem join se foreign key falhar
+        const { data: pagsSem, error: errSem } = await supabase
+          .from('pagamentos_parcelas')
+          .select('id, numero_parcela, valor_pago_total, valor_parcela, valor_credito_gerado, forma_pagamento, created_at, cliente_id')
+          .eq('liquidacao_id', liquidacaoId)
+          .eq('estornado', false)
+          .order('created_at', { ascending: true });
+        console.log('🔄 Fallback pagamentos:', pagsSem?.length, errSem?.message);
+        // Busca nomes dos clientes separadamente
+        const ids = [...new Set((pagsSem || []).map((p: any) => p.cliente_id).filter(Boolean))];
+        if (ids.length > 0) {
+          const { data: clisData } = await supabase
+            .from('clientes')
+            .select('id, nome')
+            .in('id', ids);
+          const nomeMap = new Map((clisData || []).map((c: any) => [c.id, c.nome]));
+          setPagamentos((pagsSem || []).map((p: any) => ({ ...p, clientes: { nome: nomeMap.get(p.cliente_id) || '' } })));
+        } else {
+          setPagamentos(pagsSem || []);
+        }
+      } else {
+        console.log('✅ Pagamentos carregados:', pags?.length);
+        setPagamentos(pags || []);
+      }
     } catch (e) {
       console.error('Erro extrato:', e);
     } finally {
@@ -447,12 +480,38 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
             </View>
             <Text style={cupom.div2}>{DDIV}</Text>
 
+            {/* ═══ RESUMO OPERACIONAL ═══ */}
+            <Text style={[cupom.centro, { fontSize: 10, marginBottom: 6, color: '#6B7280' }]}>
+              {lang === 'es' ? 'RESUMEN OPERACIONAL' : 'RESUMO OPERACIONAL'}
+            </Text>
+            <View style={cupom.linha}>
+              <Text style={[cupom.txt, { fontSize: 10 }]}>{lang === 'es' ? 'Clientes pagados' : 'Clientes pagos'}</Text>
+              <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{resumoOp.pagos}</Text>
+            </View>
+            <View style={cupom.linha}>
+              <Text style={[cupom.txt, { fontSize: 10 }]}>{lang === 'es' ? 'Clientes no pagados' : 'Clientes não pagos'}</Text>
+              <Text style={[cupom.txtVerm, { fontSize: 10 }]}>{resumoOp.naoPagos}</Text>
+            </View>
+            <View style={cupom.linha}>
+              <Text style={[cupom.txt, { fontSize: 10 }]}>{lang === 'es' ? 'Clientes nuevos' : 'Clientes novos'}</Text>
+              <Text style={[cupom.txt, { fontSize: 10 }]}>{resumoOp.novos}</Text>
+            </View>
+            <View style={cupom.linha}>
+              <Text style={[cupom.txt, { fontSize: 10 }]}>{lang === 'es' ? 'Renovaciones' : 'Renovações'}</Text>
+              <Text style={[cupom.txt, { fontSize: 10 }]}>{resumoOp.renovados}</Text>
+            </View>
+            <View style={cupom.linha}>
+              <Text style={[cupom.txt, { fontSize: 10 }]}>{lang === 'es' ? 'Renegociaciones' : 'Renegociações'}</Text>
+              <Text style={[cupom.txt, { fontSize: 10 }]}>{resumoOp.renegociados}</Text>
+            </View>
+            <Text style={cupom.div2}>{DDIV}</Text>
+
             {loading ? (
               <ActivityIndicator size="small" color="#333" style={{ marginVertical: 20 }} />
             ) : (
               <>
                 {/* ═══ DETALHES ENTRADAS ═══ */}
-                <Text style={[cupom.centro, { marginTop: 14 }]}>{t.detalheEntradas} ({registrosEntradas.length})</Text>
+                <Text style={[cupom.centro, { marginTop: 14 }]}>{t.detalheEntradas} ({pagamentos.length + entradasMicroseguro.length + entradasOutras.length})</Text>
                 <Text style={cupom.div1}>{DIV}</Text>
 
                 {registrosEntradas.length === 0 ? (
@@ -465,7 +524,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                       <>
                         <Text style={[cupom.centro, { fontSize: 10, marginTop: 6, color: '#6B7280' }]}>── {t.cobrancasParcelas} ({pagamentos.length}) ──</Text>
                         {pagamentos.map((p, idx) => {
-                          const nomeCliente = (p.cliente as any)?.nome || '';
+                          const nomeCliente = (p.clientes as any)?.nome || (p.cliente as any)?.nome || `Parcela ${p.numero_parcela}`;
                           const excedente = parseFloat(p.valor_credito_gerado || 0);
                           const temExcedente = excedente > 0;
                           return (
@@ -983,10 +1042,12 @@ interface MicroseguroProps {
   liquidacaoId: string;
   totalValor: number;
   totalQtd: number;
+  microseguroInicial?: number;
+  microseguroFinal?: number;
   lang?: Lang;
 }
 
-export function ModalMicroseguro({ visible, onClose, liquidacaoId, totalValor, totalQtd, lang = 'pt-BR' }: MicroseguroProps) {
+export function ModalMicroseguro({ visible, onClose, liquidacaoId, totalValor, totalQtd, microseguroInicial = 0, microseguroFinal = 0, lang = 'pt-BR' }: MicroseguroProps) {
   const t = i18n[lang];
   const [vendas, setVendas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1057,16 +1118,21 @@ export function ModalMicroseguro({ visible, onClose, liquidacaoId, totalValor, t
       <View style={dStyles.container}>
         <ModalHeader titulo={t.microseguro} icone="🛡️" cor="#D97706" onClose={onClose} />
 
-        {/* Resumo */}
+        {/* Resumo caixa microseguro */}
         <View style={dStyles.microResumo}>
           <View style={dStyles.microResumoItem}>
-            <Text style={dStyles.microResumoValor}>{fmt(loading ? totalValor : vendas.reduce((s, v) => s + parseFloat(v.valor || 0), 0))}</Text>
-            <Text style={dStyles.microResumoLabel}>{t.totalVendido}</Text>
+            <Text style={dStyles.microResumoValor}>{fmt(microseguroInicial)}</Text>
+            <Text style={dStyles.microResumoLabel}>{lang === 'es' ? 'Inicial' : 'Inicial'}</Text>
           </View>
           <View style={dStyles.microResumoDivider} />
           <View style={dStyles.microResumoItem}>
-            <Text style={dStyles.microResumoValor}>{loading ? totalQtd : vendas.length}</Text>
-            <Text style={dStyles.microResumoLabel}>{t.contratos}</Text>
+            <Text style={[dStyles.microResumoValor, { color: '#059669' }]}>+{fmt(loading ? totalValor : vendas.reduce((s, v) => s + parseFloat(v.valor || 0), 0))}</Text>
+            <Text style={dStyles.microResumoLabel}>{loading ? totalQtd : vendas.length} {lang === 'es' ? 'contratos' : 'contratos'}</Text>
+          </View>
+          <View style={dStyles.microResumoDivider} />
+          <View style={dStyles.microResumoItem}>
+            <Text style={[dStyles.microResumoValor, { color: '#D97706' }]}>{fmt(microseguroFinal || microseguroInicial + (loading ? totalValor : vendas.reduce((s, v) => s + parseFloat(v.valor || 0), 0)))}</Text>
+            <Text style={dStyles.microResumoLabel}>{lang === 'es' ? 'Final' : 'Final'}</Text>
           </View>
         </View>
 

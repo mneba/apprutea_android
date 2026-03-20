@@ -59,7 +59,7 @@ const T = {
   'pt-BR': {
     pessoais: 'Pessoais', emprestimo: 'Empréstimo', historico: 'Histórico',
     nome: 'Nome', telefone: 'Telefone', documento: 'Documento', endereco: 'Endereço',
-    codigo: 'Código', status: 'Status',
+    codigo: 'Código', status: 'Status', dataCadastro: 'Cadastro', dataEmprestimo: 'Empréstimo',
     valorPrincipal: 'Principal', valorTotal: 'Total', valorPago: 'Pago', saldo: 'Saldo',
     taxa: 'Taxa', parcelas: 'Parcelas', frequencia: 'Frequência', data: 'Data',
     proxVencimento: 'Próximo Vencimento', pagas: 'Pagas', vencidas: 'Vencidas',
@@ -73,7 +73,7 @@ const T = {
   'es': {
     pessoais: 'Personales', emprestimo: 'Préstamo', historico: 'Historial',
     nome: 'Nombre', telefone: 'Teléfono', documento: 'Documento', endereco: 'Dirección',
-    codigo: 'Código', status: 'Estado',
+    codigo: 'Código', status: 'Estado', dataCadastro: 'Registro', dataEmprestimo: 'Préstamo',
     valorPrincipal: 'Principal', valorTotal: 'Total', valorPago: 'Pagado', saldo: 'Saldo',
     taxa: 'Tasa', parcelas: 'Cuotas', frequencia: 'Frecuencia', data: 'Fecha',
     proxVencimento: 'Próximo Vencimiento', pagas: 'Pagadas', vencidas: 'Vencidas',
@@ -297,6 +297,12 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
             </View>
           );
         })()}
+        {clienteCompleto?.created_at && (
+          <View style={S.dadoRow}>
+            <Text style={S.dadoLabel}>{t.dataCadastro}</Text>
+            <Text style={S.dadoValue}>{fmtData(clienteCompleto.created_at)}</Text>
+          </View>
+        )}
       </View>
 
       {/* Resumo rápido empréstimos */}
@@ -346,7 +352,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
 
         {/* Info compacta */}
         <View style={S.empInfoRow}>
-          <Text style={S.empInfoItem}>{fmtData(emp.data_emprestimo)}</Text>
+          <Text style={S.empInfoItem}>{t.dataEmprestimo} {fmtData(emp.data_emprestimo)}</Text>
           <Text style={S.empInfoDot}>•</Text>
           <Text style={S.empInfoItem}>{emp.parcelas_pagas}/{emp.numero_parcelas} {t.parcelas.toLowerCase()}</Text>
           <Text style={S.empInfoDot}>•</Text>

@@ -69,6 +69,7 @@ const textos = {
     microSeguro: 'MICRO SEGURO',
     totalDoDia: 'Total do Dia',
     quantidade: 'Quantidade',
+    contratos: 'contratos',
     encerrarDia: 'Encerrar Dia',
     diaEncerrado: 'Dia Encerrado',
     iniciarDia: 'Iniciar Dia',
@@ -130,6 +131,7 @@ const textos = {
     microSeguro: 'MICRO SEGURO',
     totalDoDia: 'Total del Día',
     quantidade: 'Cantidad',
+    contratos: 'contratos',
     encerrarDia: 'Cerrar Día',
     diaEncerrado: 'Día Cerrado',
     iniciarDia: 'Iniciar Día',
@@ -948,6 +950,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
             liquidacaoId={liqFechadaId}
             caixaInicial={liqFechadaCaixaInicial}
             caixaFinal={liqFechadaCaixaFinal}
+            rotaNome={(vendedor as any)?.rota_nome || ''}
+            vendedorNomeExterno={vendedor?.nome || ''}
           />
         )}
       </View>
@@ -1121,21 +1125,15 @@ export default function LiquidacaoScreen({ navigation }: any) {
             </View>
 
             {/* Micro Seguro */}
-            <TouchableOpacity style={styles.microSeguroCard} onPress={() => setModalMicroseguroVisible(true)} activeOpacity={0.7}>
-              <View style={styles.microSeguroHeader}>
-                <Text style={styles.microSeguroIcon}>🛡️</Text>
-                <Text style={styles.microSeguroTitle}>{t.microSeguro}</Text>
-                <Text style={styles.microSeguroArrow}>›</Text>
-              </View>
-              <View style={styles.microSeguroContent}>
-                <View style={styles.microSeguroItem}>
-                  <Text style={styles.microSeguroLabel}>{t.totalDoDia}</Text>
-                  <Text style={styles.microSeguroValue}>{formatarMoeda(liquidacao.total_microseguro_dia)}</Text>
+            <TouchableOpacity style={[styles.card, styles.cardMicroseguro]} onPress={() => setModalMicroseguroVisible(true)} activeOpacity={0.7}>
+              <View style={styles.financeiroContent}>
+                <View>
+                  <Text style={styles.financeiroLabel}>{t.microSeguro}</Text>
+                  <Text style={styles.financeiroValor}>{formatarMoeda((liquidacao as any).microseguro_final ?? (liquidacao as any).microseguro_inicial ?? 0)}</Text>
+                  <Text style={styles.financeiroDetalhe}>{t.inicial} {formatarMoeda((liquidacao as any).microseguro_inicial ?? 0)}</Text>
+                  <Text style={[styles.financeiroDetalhe, { color: '#D97706', marginTop: 2 }]}>{t.totalDoDia} {formatarMoeda(liquidacao.total_microseguro_dia)} · {liquidacao.qtd_microseguros_dia || 0} {t.contratos}</Text>
                 </View>
-                <View style={styles.microSeguroItem}>
-                  <Text style={styles.microSeguroLabel}>{t.quantidade}</Text>
-                  <Text style={styles.microSeguroValue}>{liquidacao.qtd_microseguros_dia || 0}</Text>
-                </View>
+                <View style={styles.indicadorAmbar} />
               </View>
             </TouchableOpacity>
 
@@ -1380,6 +1378,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
           liquidacaoId={liqFechadaId}
           caixaInicial={liqFechadaCaixaInicial}
           caixaFinal={liqFechadaCaixaFinal}
+          rotaNome={(vendedor as any)?.rota_nome || ''}
+          vendedorNomeExterno={vendedor?.nome || ''}
         />
       )}
 
@@ -1392,6 +1392,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
             liquidacaoId={liquidacao.id}
             caixaInicial={liquidacao.caixa_inicial || 0}
             caixaFinal={liquidacao.caixa_final || liquidacao.caixa_inicial || 0}
+            rotaNome={(vendedor as any)?.rota_nome || ''}
+            vendedorNomeExterno={vendedor?.nome || ''}
           />
           <ModalPagamentos
             visible={modalPagamentosVisible}
@@ -1430,6 +1432,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
             liquidacaoId={liquidacao.id}
             totalValor={liquidacao.total_microseguro_dia || 0}
             totalQtd={liquidacao.qtd_microseguros_dia || 0}
+            microseguroInicial={(liquidacao as any).microseguro_inicial ?? 0}
+            microseguroFinal={(liquidacao as any).microseguro_final ?? (liquidacao as any).microseguro_inicial ?? 0}
           />
 
           <ModalNotasLista
@@ -1621,6 +1625,8 @@ const styles = StyleSheet.create({
   financeiroValor: { fontSize: 24, fontWeight: '700', color: '#1F2937' },
   financeiroDetalhe: { fontSize: 12, color: '#9CA3AF', marginTop: 8 },
   indicadorVerde: { width: 40, height: 40, backgroundColor: '#D1FAE5', borderRadius: 8 },
+  indicadorAmbar: { width: 40, height: 40, backgroundColor: '#FEF3C7', borderRadius: 8 },
+  cardMicroseguro: { borderLeftWidth: 4, borderLeftColor: '#D97706' },
   indicadorVermelho: { width: 40, height: 40, backgroundColor: '#FEE2E2', borderRadius: 8 },
   operacoesRow: { flexDirection: 'row', gap: 6, marginBottom: 12 },
   operacaoCard: { flex: 1, borderRadius: 8, padding: 8, borderLeftWidth: 2 },
