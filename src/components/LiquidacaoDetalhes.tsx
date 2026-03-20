@@ -1042,12 +1042,10 @@ interface MicroseguroProps {
   liquidacaoId: string;
   totalValor: number;
   totalQtd: number;
-  microseguroInicial?: number;
-  microseguroFinal?: number;
   lang?: Lang;
 }
 
-export function ModalMicroseguro({ visible, onClose, liquidacaoId, totalValor, totalQtd, microseguroInicial = 0, microseguroFinal = 0, lang = 'pt-BR' }: MicroseguroProps) {
+export function ModalMicroseguro({ visible, onClose, liquidacaoId, totalValor, totalQtd, lang = 'pt-BR' }: MicroseguroProps) {
   const t = i18n[lang];
   const [vendas, setVendas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1118,21 +1116,16 @@ export function ModalMicroseguro({ visible, onClose, liquidacaoId, totalValor, t
       <View style={dStyles.container}>
         <ModalHeader titulo={t.microseguro} icone="🛡️" cor="#D97706" onClose={onClose} />
 
-        {/* Resumo caixa microseguro */}
+        {/* Resumo */}
         <View style={dStyles.microResumo}>
           <View style={dStyles.microResumoItem}>
-            <Text style={dStyles.microResumoValor}>{fmt(microseguroInicial)}</Text>
-            <Text style={dStyles.microResumoLabel}>{lang === 'es' ? 'Inicial' : 'Inicial'}</Text>
+            <Text style={dStyles.microResumoValor}>{fmt(loading ? totalValor : vendas.reduce((s, v) => s + parseFloat(v.valor || 0), 0))}</Text>
+            <Text style={dStyles.microResumoLabel}>{t.totalVendido}</Text>
           </View>
           <View style={dStyles.microResumoDivider} />
           <View style={dStyles.microResumoItem}>
-            <Text style={[dStyles.microResumoValor, { color: '#059669' }]}>+{fmt(loading ? totalValor : vendas.reduce((s, v) => s + parseFloat(v.valor || 0), 0))}</Text>
-            <Text style={dStyles.microResumoLabel}>{loading ? totalQtd : vendas.length} {lang === 'es' ? 'contratos' : 'contratos'}</Text>
-          </View>
-          <View style={dStyles.microResumoDivider} />
-          <View style={dStyles.microResumoItem}>
-            <Text style={[dStyles.microResumoValor, { color: '#D97706' }]}>{fmt(microseguroFinal || microseguroInicial + (loading ? totalValor : vendas.reduce((s, v) => s + parseFloat(v.valor || 0), 0)))}</Text>
-            <Text style={dStyles.microResumoLabel}>{lang === 'es' ? 'Final' : 'Final'}</Text>
+            <Text style={dStyles.microResumoValor}>{loading ? totalQtd : vendas.length}</Text>
+            <Text style={dStyles.microResumoLabel}>{t.contratos}</Text>
           </View>
         </View>
 

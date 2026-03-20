@@ -1154,13 +1154,14 @@ export default function ClientesScreen({ navigation, route }: any) {
         if (error) throw error;
         const res = Array.isArray(data) ? data[0] : data;
         if (res?.sucesso) {
-          showAlert(t.sucessoGenerico || 'Sucesso', res.mensagem || t.sucesso);
           setModalPagamentoVisible(false);
+          setModalParcelasVisible(false);
           setParcelaPagamento(null);
           setDadosPagamento(null);
           setUsarCredito(false);
-          if (clienteModal) abrirParcelas(clienteModal.id, clienteModal.nome, clienteModal.emprestimo_id);
+          setClienteModal(null);
           loadLiq();
+          showAlert(t.sucessoGenerico || 'Sucesso', res.mensagem || t.sucesso);
         } else { showAlert(t.erroGenerico, res?.mensagem || t.erro); }
       } catch (e: any) { console.error('Erro pagamento:', e); showAlert(t.erroGenerico, e.message || t.erro); }
       finally { setProcessando(false); }

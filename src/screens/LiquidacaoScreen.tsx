@@ -1125,15 +1125,20 @@ export default function LiquidacaoScreen({ navigation }: any) {
             </View>
 
             {/* Micro Seguro */}
-            <TouchableOpacity style={[styles.card, styles.cardMicroseguro]} onPress={() => setModalMicroseguroVisible(true)} activeOpacity={0.7}>
-              <View style={styles.financeiroContent}>
-                <View>
-                  <Text style={styles.financeiroLabel}>{t.microSeguro}</Text>
-                  <Text style={styles.financeiroValor}>{formatarMoeda((liquidacao as any).microseguro_final ?? (liquidacao as any).microseguro_inicial ?? 0)}</Text>
-                  <Text style={styles.financeiroDetalhe}>{t.inicial} {formatarMoeda((liquidacao as any).microseguro_inicial ?? 0)}</Text>
-                  <Text style={[styles.financeiroDetalhe, { color: '#D97706', marginTop: 2 }]}>{t.totalDoDia} {formatarMoeda(liquidacao.total_microseguro_dia)} · {liquidacao.qtd_microseguros_dia || 0} {t.contratos}</Text>
+            <TouchableOpacity style={styles.microSeguroCard} onPress={() => setModalMicroseguroVisible(true)} activeOpacity={0.7}>
+              <View style={styles.microSeguroHeader}>
+                <Text style={styles.microSeguroTitle}>{t.microSeguro}</Text>
+                <Text style={styles.microSeguroArrow}>›</Text>
+              </View>
+              <View style={styles.microSeguroContent}>
+                <View style={styles.microSeguroItem}>
+                  <Text style={styles.microSeguroLabel}>{t.totalDoDia}</Text>
+                  <Text style={styles.microSeguroValue}>{formatarMoeda(liquidacao.total_microseguro_dia)}</Text>
                 </View>
-                <View style={styles.indicadorAmbar} />
+                <View style={styles.microSeguroItem}>
+                  <Text style={styles.microSeguroLabel}>{t.quantidade}</Text>
+                  <Text style={styles.microSeguroValue}>{liquidacao.qtd_microseguros_dia || 0}</Text>
+                </View>
               </View>
             </TouchableOpacity>
 
@@ -1432,8 +1437,6 @@ export default function LiquidacaoScreen({ navigation }: any) {
             liquidacaoId={liquidacao.id}
             totalValor={liquidacao.total_microseguro_dia || 0}
             totalQtd={liquidacao.qtd_microseguros_dia || 0}
-            microseguroInicial={(liquidacao as any).microseguro_inicial ?? 0}
-            microseguroFinal={(liquidacao as any).microseguro_final ?? (liquidacao as any).microseguro_inicial ?? 0}
           />
 
           <ModalNotasLista
