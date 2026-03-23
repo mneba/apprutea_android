@@ -246,11 +246,11 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
     }
   };
 
-  const totalSaidas = registros.filter(r => r.tipo === 'PAGAR').reduce((s, r) => s + parseFloat(r.valor), 0);
+  const totalSaidas = registros.filter(r => r.tipo === 'PAGAR' && r.categoria !== 'ESTORNO_PAGAMENTO').reduce((s, r) => s + parseFloat(r.valor), 0);
   const totalEntradas = registros.filter(r => r.tipo === 'RECEBER').reduce((s, r) => s + parseFloat(r.valor), 0);
   const totalPagamentos = pagamentos.reduce((s, p) => s + parseFloat(p.valor_pago_total || 0), 0);
   const registrosEntradas = registros.filter(r => r.tipo === 'RECEBER' && r.status !== 'CANCELADO');
-  const registrosSaidas = registros.filter(r => r.tipo === 'PAGAR' && r.status !== 'CANCELADO');
+  const registrosSaidas = registros.filter(r => r.tipo === 'PAGAR' && r.status !== 'CANCELADO' && r.categoria !== 'ESTORNO_PAGAMENTO');
 
   // Separar entradas em 3 grupos
   const entradasCobrancas = registrosEntradas.filter(r => ['COBRANCA_PARCELAS', 'COBRANCA_CUOTAS'].includes(r.categoria));
@@ -308,17 +308,23 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
 <div class="cupom">
 
   <div class="cb" style="font-size:14px">${rotaNome || 'Rota'}</div>
-  <div class="sub">${t.extratoLiq}</div>
-  <hr class="sep2">
-  <div class="cb" style="font-size:12px">${dataHoje}&nbsp;&nbsp;${horaAgora}</div>
+  ${vendedorNome ? `<div class="sub">${vendedorNome}</div>` : ''}
+  <div class="sub">${dataLiquidacao || dataHoje}</div>
   <hr class="sep2">
 
-  <div class="row"><span>${t.caixaInicial}</span><span class="r">${fmt(caixaInicial)}</span></div>
-  <div class="row"><span class="verde">${t.cobrancas}</span><span class="r verde">${fmt(totalEntradas)}</span></div>
-  <div class="row"><span class="verm">${t.saidas}</span><span class="r verm">${fmt(totalSaidas)}</span></div>
+  <div class="row"><span>${lang === 'es' ? 'Caja inicial' : 'Caixa inicial'}</span><span class="r">${fmt(caixaInicial)}</span></div>
+  <div class="row"><span class="verde">(+) ${lang === 'es' ? 'Cobros del día' : 'Cobrança do dia'}</span><span class="r verde">${fmt(totalCobrancas)}</span></div>
+  <div class="row"><span class="verde">(+) ${lang === 'es' ? 'Ingresos del día' : 'Ingressos do dia'}</span><span class="r verde">${fmt(totalOutrasReceitas)}</span></div>
+  <div class="row"><span class="verm">(-) ${lang === 'es' ? 'Gastos del día' : 'Despesas do dia'}</span><span class="r verm">${fmt(totalSaidas)}</span></div>
   <hr class="sep2">
-  <div class="row"><span class="lg">${t.caixaFinal}</span><span class="r lg">${fmt(caixaFinal)}</span></div>
+  <div class="row"><span class="lg">(=) ${lang === 'es' ? 'Caja final' : 'Caixa final'}</span><span class="r lg">${fmt(caixaFinal)}</span></div>
   <hr class="sep2">
+  ${totalMicroseguros > 0 ? `
+  <div class="row"><span style="color:#7C3AED">(+) ${lang === 'es' ? 'Microseguro del día' : 'Microseguro do dia'}</span><span class="r" style="color:#7C3AED">${fmt(totalMicroseguros)}</span></div>
+  <hr class="sep2">
+  <div class="row"><span class="lg" style="color:#7C3AED">(=) ${lang === 'es' ? 'Caja final microseguro' : 'Caixa final microseguro'}</span><span class="r lg" style="color:#7C3AED">${fmt(caixaMicroFinal)}</span></div>
+  <hr class="sep2">
+  ` : ''}
 
   <div class="secao">${t.detalheEntradas} (${registrosEntradas.length})</div>
   <hr class="sep">
@@ -340,8 +346,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
       ${entradasMicroseguro.map((item, idx) => {
         const sub = item.cliente_nome || item.descricao || '';
         return `<div class="mov">
-          <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${formatarCategoria(item.categoria)}</span><span class="mov-val verde">+${fmt(parseFloat(item.valor))}</span></div>
-          ${sub ? `<div class="mov-sub">${sub}</div>` : ''}
+          <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${sub || formatarCategoria(item.categoria)}</span><span class="mov-val verde">+${fmt(parseFloat(item.valor))}</span></div>
           <div class="mov-meta"><span>${fmtHora(item.created_at)}</span></div>
         </div>`;
       }).join('')}
@@ -438,7 +443,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
 
             {/* ═══ RESUMO CAIXA ═══ */}
             <View style={cupom.linha}>
-              <Text style={cupom.txt}>{t.caixaInicial}</Text>
+              <Text style={cupom.txt}>{lang === 'es' ? 'Caja inicial' : 'Caixa inicial'}</Text>
               <Text style={cupom.txt}>{fmt(caixaInicial)}</Text>
             </View>
             <View style={cupom.linha}>
@@ -455,30 +460,26 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
             </View>
             <Text style={cupom.div2}>{DDIV}</Text>
             <View style={cupom.linha}>
-              <Text style={cupom.txtBold}>{t.caixaFinal}</Text>
+              <Text style={cupom.txtBold}>(=) {lang === 'es' ? 'Caja final' : 'Caixa final'}</Text>
               <Text style={cupom.txtBold}>{fmt(caixaFinal)}</Text>
             </View>
             <Text style={cupom.div2}>{DDIV}</Text>
 
-            {/* ═══ RESUMO MICROSEGURO ═══ */}
-            <View style={cupom.linha}>
-              <Text style={[cupom.txt, { color: '#7C3AED' }]}>{lang === 'es' ? 'Caja inicial microseguro' : 'Caixa inicial microseguro'}</Text>
-              <Text style={[cupom.txt, { color: '#7C3AED' }]}>{fmt(caixaMicroInicial)}</Text>
-            </View>
-            <View style={cupom.linha}>
-              <Text style={[cupom.txtVerde, { fontSize: 10 }]}>(+) {lang === 'es' ? 'Microseguros del día' : 'Microseguro do dia'}</Text>
-              <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{fmt(totalMicroseguros)}</Text>
-            </View>
-            <View style={cupom.linha}>
-              <Text style={[cupom.txtVerm, { fontSize: 10 }]}>(-) {lang === 'es' ? 'Retiro microseguro' : 'Retiro microseguro'}</Text>
-              <Text style={[cupom.txtVerm, { fontSize: 10 }]}>{fmt(totalRetiroMicro)}</Text>
-            </View>
-            <Text style={cupom.div2}>{DDIV}</Text>
-            <View style={cupom.linha}>
-              <Text style={[cupom.txtBold, { color: '#7C3AED' }]}>{lang === 'es' ? 'Caja final microseguro' : 'Caixa final microseguro'}</Text>
-              <Text style={[cupom.txtBold, { color: '#7C3AED' }]}>{fmt(caixaMicroFinal)}</Text>
-            </View>
-            <Text style={cupom.div2}>{DDIV}</Text>
+            {/* ═══ MICROSEGURO ═══ */}
+            {(caixaMicroInicial > 0 || totalMicroseguros > 0) && (
+              <>
+                <View style={cupom.linha}>
+                  <Text style={[cupom.txt, { color: '#7C3AED' }]}>{lang === 'es' ? 'Microseguro del día' : 'Microseguro do dia'}</Text>
+                  <Text style={[cupom.txtVerde, { color: '#7C3AED' }]}>{fmt(totalMicroseguros)}</Text>
+                </View>
+                <Text style={cupom.div2}>{DDIV}</Text>
+                <View style={cupom.linha}>
+                  <Text style={[cupom.txtBold, { color: '#7C3AED' }]}>(=) {lang === 'es' ? 'Caja final microseguro' : 'Caixa final microseguro'}</Text>
+                  <Text style={[cupom.txtBold, { color: '#7C3AED' }]}>{fmt(caixaMicroFinal)}</Text>
+                </View>
+                <Text style={cupom.div2}>{DDIV}</Text>
+              </>
+            )}
 
             {/* ═══ RESUMO OPERACIONAL ═══ */}
             <Text style={[cupom.centro, { fontSize: 10, marginBottom: 6, color: '#6B7280' }]}>
@@ -563,12 +564,11 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                           <View key={item.id}>
                             <View style={cupom.itemRow}>
                               <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
-                              <Text style={cupom.itemCat} numberOfLines={1}>{formatarCategoria(item.categoria)}</Text>
+                              <Text style={cupom.itemCat} numberOfLines={1} ellipsizeMode="tail">
+                                {item.cliente_nome || formatarCategoria(item.categoria)}
+                              </Text>
                               <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(parseFloat(item.valor))}</Text>
                             </View>
-                            {(item.cliente_nome || item.descricao) && (
-                              <Text style={cupom.itemSub} numberOfLines={1}>   {item.cliente_nome || item.descricao}</Text>
-                            )}
                             <View style={cupom.itemMeta}>
                               <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
                             </View>
@@ -947,6 +947,24 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
   const carregarRegistros = async () => {
     setLoading(true);
     try {
+      // VENDAS: busca direto em emprestimos para ter todos os campos de condições
+      if (tipo === 'VENDAS') {
+        const { data, error } = await supabase
+          .from('emprestimos')
+          .select(`
+            id, valor_principal, valor_total, valor_parcela, numero_parcelas,
+            taxa_juros, frequencia_pagamento, data_primeiro_vencimento,
+            tipo_emprestimo, created_at,
+            cliente:cliente_id(nome, codigo_cliente)
+          `)
+          .eq('liquidacao_id', liquidacaoId)
+          .neq('status', 'CANCELADO')
+          .order('created_at', { ascending: false });
+        if (!error) setRegistros(data || []);
+        setLoading(false);
+        return;
+      }
+
       let query = supabase
         .from('financeiro')
         .select('id, tipo, categoria, descricao, valor, created_at, forma_pagamento, cliente_nome, vendedor_nome, status')
@@ -954,15 +972,14 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
         .eq('status', 'PAGO')
         .order('created_at', { ascending: false });
 
-      if (tipo === 'VENDAS') {
-        // Vendas = empréstimos (PAGAR com categoria EMPRESTIMO)
-        query = query.eq('categoria', 'EMPRESTIMO');
-      } else if (tipo === 'RECEITAS') {
+      if (tipo === 'RECEITAS') {
         // Receitas financeiras (excluindo cobranças e microseguros)
         query = query.eq('tipo', 'RECEBER')
           .not('categoria', 'in', '("COBRANCA_PARCELAS","COBRANCA_CUOTAS","VENDA_MICROSEGURO","MICROSEGURO")');
       } else if (tipo === 'DESPESAS') {
-        query = query.eq('tipo', 'PAGAR').neq('categoria', 'EMPRESTIMO');
+        query = query.eq('tipo', 'PAGAR')
+          .neq('categoria', 'EMPRESTIMO')
+          .neq('categoria', 'ESTORNO_PAGAMENTO');
       }
 
       const { data, error } = await query;
@@ -974,7 +991,44 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
     }
   };
 
-  const renderItem = ({ item }: any) => (
+  const fmtFrequencia = (f: string) => ({
+    DIARIO: lang === 'es' ? 'Diario' : 'Diário',
+    SEMANAL: lang === 'es' ? 'Semanal' : 'Semanal',
+    QUINZENAL: 'Quinzenal',
+    MENSAL: lang === 'es' ? 'Mensual' : 'Mensal',
+    FLEXIVEL: lang === 'es' ? 'Flexible' : 'Flexível',
+  }[f] || f);
+
+  const renderItem = ({ item }: any) => {
+    // Card especial para VENDAS (empréstimos)
+    if (tipo === 'VENDAS') {
+      const clienteNome = item.cliente?.nome || '—';
+      const primeiroPgto = item.data_primeiro_vencimento
+        ? new Date(item.data_primeiro_vencimento + 'T00:00:00').toLocaleDateString(lang === 'es' ? 'es-CO' : 'pt-BR')
+        : '—';
+      return (
+        <View style={dStyles.finItem}>
+          <View style={dStyles.finItemTop}>
+            <View style={[dStyles.finItemDot, { backgroundColor: config.cor }]} />
+            <View style={{ flex: 1 }}>
+              <Text style={[dStyles.finItemCategoria, { fontWeight: '700', fontSize: 14 }]}>{clienteNome}</Text>
+              <Text style={[dStyles.finItemCliente, { color: '#6B7280', marginTop: 2 }]}>
+                {lang === 'es' ? '1° pago' : '1° pgto'}: {primeiroPgto}
+                {'  ·  '}{item.numero_parcelas}x {'  ·  '}{item.taxa_juros}%
+                {'  ·  '}{fmtFrequencia(item.frequencia_pagamento)}
+              </Text>
+            </View>
+            <Text style={[dStyles.finItemValor, { color: config.cor }]}>{fmt(parseFloat(item.valor_total || item.valor_principal))}</Text>
+          </View>
+          <View style={dStyles.finItemBottom}>
+            <Text style={dStyles.finItemHora}>{fmtHora(item.created_at)}</Text>
+            <Text style={dStyles.finItemForma}>{item.tipo_emprestimo || 'NOVO'}</Text>
+          </View>
+        </View>
+      );
+    }
+
+    return (
     <View style={dStyles.finItem}>
       <View style={dStyles.finItemTop}>
         <View style={[dStyles.finItemDot, { backgroundColor: config.cor }]} />
@@ -990,10 +1044,13 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
         {item.forma_pagamento && <Text style={dStyles.finItemForma}>{item.forma_pagamento}</Text>}
       </View>
     </View>
-  );
+    );
+  };
 
   // Calcular total e qtd dos registros reais (mais confiável que props da liquidação)
-  const totalReal = registros.reduce((s, r) => s + parseFloat(r.valor || 0), 0);
+  const totalReal = tipo === 'VENDAS'
+    ? registros.reduce((s, r) => s + parseFloat(r.valor_total || r.valor_principal || 0), 0)
+    : registros.reduce((s, r) => s + parseFloat(r.valor || 0), 0);
   const qtdReal = registros.length;
 
   return (
