@@ -458,6 +458,132 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   const [fotoCliente, setFotoCliente] = useState<string | null>(null);
   const [observacoesCliente, setObservacoesCliente] = useState('');
 
+  // -----------------------------------------------------------
+  // POPUP BUSCA POR DOCUMENTO (somente fluxo novo cliente)
+  // -----------------------------------------------------------
+  const [modalDocVisible, setModalDocVisible] = useState(!clienteExistente && !isRenegociacao);
+  const [docBusca, setDocBusca] = useState('');
+  const [buscandoDoc, setBuscandoDoc] = useState(false);
+  const [clienteEncontradoId, setClienteEncontradoId] = useState<string | null>(null);
+  const [tipoEmprestimoDetectado, setTipoEmprestimoDetectado] = useState<'RENOVACAO' | 'ADICIONAL' | null>(null);
+
+  const buscarClientePorDocumento = async () => {
+    const doc = docBusca.replace(/\D/g, '');
+    if (!doc) return;
+    setBuscandoDoc(true);
+    try {
+      const docSemMask = docBusca.replace(/\D/g, '');
+      // Busca pelo documento com e sem formatação
+      const { data: clientes } = await supabase
+        .from('clientes')
+        .select('id, nome, documento, telefone_celular, endereco, codigo_cliente, permite_emprestimo_adicional, permite_renegociacao')
+        .or(`documento.ilike.%${docSemMask}%,documento.ilike.%${docBusca}%`)
+        .limit(1);
+
+      const cli = clientes?.[0];
+      if (!cli) {
+        // Novo cliente — pré-preenche documento e fecha popup
+        setDocumento(docBusca);
+        setModalDocVisible(false);
+        return;
+      }
+
+      // Cliente encontrado — verificar empréstimos
+      const { data: emps } = await supabase
+        .from('emprestimos')
+        .select('id, status, valor_saldo')
+        .eq('cliente_id', cli.id)
+        .in('status', ['ATIVO', 'VENCIDO'])
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      const emp = emps?.[0];
+
+      if (!emp) {
+        // Já teve empréstimo mas não tem ativo — renovação
+        // Preenche dados do cliente e fecha popup com aviso
+        setNome(cli.nome || '');
+        setTelefoneCelular(cli.telefone_celular || '');
+        setDocumento(cli.documento || docBusca);
+        setEndereco(cli.endereco || '');
+        setClienteEncontradoId(cli.id);
+        setTipoEmprestimoDetectado('RENOVACAO');
+        setModalDocVisible(false);
+        const msg = lang === 'es'
+          ? `Cliente encontrado: ${cli.nome}. Este es un préstamo de renovación.`
+          : `Cliente encontrado: ${cli.nome}. Este é um empréstimo de renovação.`;
+        if (Platform.OS === 'web') window.alert(msg);
+        else Alert.alert(lang === 'es' ? 'Renovación' : 'Renovação', msg, [{ text: 'OK' }]);
+        return;
+      }
+
+      // Tem empréstimo ativo — verificar parcelas atrasadas
+      const { data: atrasadas } = await supabase
+        .from('emprestimo_parcelas')
+        .select('id')
+        .eq('emprestimo_id', emp.id)
+        .eq('status', 'VENCIDO')
+        .limit(1);
+
+      const temAtraso = (atrasadas?.length || 0) > 0;
+      const permiteAdicional = cli.permite_emprestimo_adicional === true;
+      const permiteReneg = cli.permite_renegociacao === true;
+
+      if (temAtraso) {
+        if (permiteReneg) {
+          // Autorizado para renegociar — preenche dados e avisa
+          setNome(cli.nome || '');
+          setTelefoneCelular(cli.telefone_celular || '');
+          setDocumento(cli.documento || docBusca);
+          setEndereco(cli.endereco || '');
+          setClienteEncontradoId(cli.id);
+          setTipoEmprestimoDetectado('RENOVACAO');
+          setModalDocVisible(false);
+          const msg = lang === 'es'
+            ? `Cliente encontrado: ${cli.nome}. Está autorizado para renegociar la deuda. Complete los datos del nuevo préstamo.`
+            : `Cliente encontrado: ${cli.nome}. Está autorizado para renegociar a dívida. Preencha os dados do novo empréstimo.`;
+          if (Platform.OS === 'web') window.alert(msg);
+          else Alert.alert(lang === 'es' ? 'Renegociación autorizada' : 'Renegociação autorizada', msg, [{ text: 'OK' }]);
+        } else {
+          // Sem autorização
+          const titulo = lang === 'es' ? 'Parcelas atrasadas' : 'Parcelas atrasadas';
+          const msg = lang === 'es'
+            ? `El cliente ${cli.nome} tiene parcelas atrasadas. Solicite autorización al administrador para renegociar la deuda.`
+            : `O cliente ${cli.nome} tem parcelas atrasadas. Solicite autorização ao administrador para renegociar a dívida.`;
+          if (Platform.OS === 'web') window.alert(`${titulo}\n\n${msg}`);
+          else Alert.alert(titulo, msg, [{ text: 'OK' }]);
+        }
+      } else {
+        if (permiteAdicional) {
+          // Autorizado para empréstimo adicional — preenche dados e avisa
+          setNome(cli.nome || '');
+          setTelefoneCelular(cli.telefone_celular || '');
+          setDocumento(cli.documento || docBusca);
+          setEndereco(cli.endereco || '');
+          setClienteEncontradoId(cli.id);
+          setTipoEmprestimoDetectado('ADICIONAL');
+          setModalDocVisible(false);
+          const msg = lang === 'es'
+            ? `Cliente encontrado: ${cli.nome}. Está autorizado a recibir un préstamo adicional. Complete los datos del nuevo préstamo.`
+            : `Cliente encontrado: ${cli.nome}. Está autorizado a receber um novo empréstimo. Preencha os dados do empréstimo.`;
+          if (Platform.OS === 'web') window.alert(msg);
+          else Alert.alert(lang === 'es' ? 'Préstamo adicional autorizado' : 'Empréstimo adicional autorizado', msg, [{ text: 'OK' }]);
+        } else {
+          // Sem autorização
+          const titulo = lang === 'es' ? 'Préstamo activo' : 'Empréstimo ativo';
+          const msg = lang === 'es'
+            ? `El cliente ${cli.nome} tiene un préstamo vigente. Solicite autorización al administrador para un préstamo adicional.`
+            : `O cliente ${cli.nome} tem um empréstimo em dia. Solicite autorização ao administrador para um empréstimo adicional.`;
+          if (Platform.OS === 'web') window.alert(`${titulo}\n\n${msg}`);
+          else Alert.alert(titulo, msg, [{ text: 'OK' }]);
+        }
+      }
+    } catch (e) {
+      console.error('Erro busca documento:', e);
+    } finally {
+      setBuscandoDoc(false);
+    }
+  };
   // Seções colapsáveis
   const [clienteExpanded, setClienteExpanded] = useState(!clienteExistente && !isRenegociacao);
   const [emprestimoExpanded, setEmprestimoExpanded] = useState(true);
@@ -476,9 +602,13 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   const [diaMesPagamento, setDiaMesPagamento] = useState('15');
   const [diasMesFlexivel, setDiasMesFlexivel] = useState<number[]>([]);
   const [iniciarProximoMes, setIniciarProximoMes] = useState(false);
-  const [dataPrimeiroVencimento, setDataPrimeiroVencimento] = useState(
-    new Date().toISOString().split('T')[0]
-  );
+  const amanha = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split('T')[0];
+  };
+
+  const [dataPrimeiroVencimento, setDataPrimeiroVencimento] = useState(amanha());
   const [observacoesEmprestimo, setObservacoesEmprestimo] = useState('');
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showDiaSemanaModal, setShowDiaSemanaModal] = useState(false);
@@ -611,26 +741,17 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   // -----------------------------------------------------------
   // HELPERS DE FORMATAÇÃO MONETÁRIA
   // -----------------------------------------------------------
-  const formatarMoeda = (valor: string): string => {
-    const numeros = valor.replace(/[^\d]/g, '');
-    if (!numeros) return '';
-    const numero = parseInt(numeros, 10) / 100;
-    return numero.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-  };
-
-  const parseMoeda = (valor: string): number => {
-    if (!valor) return 0;
-    return parseFloat(valor.replace(/\./g, '').replace(',', '.')) || 0;
-  };
+  // Formata número para exibição: 500 → "500,00", 500.5 → "500,50"
+  // Entrada natural: digita 500 = R$ 500, digita 0.5 = R$ 0,50
+  const parseMoeda = (valor: string): number =>
+    parseFloat((valor || '').replace(',', '.')) || 0;
 
   const handleValorEmprestimoChange = (text: string) => {
-    const numeros = text.replace(/[^\d]/g, '');
-    setValorEmprestimo(formatarMoeda(numeros));
+    setValorEmprestimo(text.replace(/[^\d.,]/g, '').replace(',', '.'));
   };
 
   const handleValorMicroseguroChange = (text: string) => {
-    const numeros = text.replace(/[^\d]/g, '');
-    setValorMicroseguro(formatarMoeda(numeros));
+    setValorMicroseguro(text.replace(/[^\d.,]/g, '').replace(',', '.'));
   };
 
   // -----------------------------------------------------------
@@ -820,7 +941,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     setDiaMesPagamento('15');
     setDiasMesFlexivel([]);
     setIniciarProximoMes(false);
-    setDataPrimeiroVencimento(new Date().toISOString().split('T')[0]);
+    setDataPrimeiroVencimento(amanha());
     setObservacoesEmprestimo('');
     setValorMicroseguro('');
     setResultado(null);
@@ -978,31 +1099,11 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         };
         console.log('🔄 Renegociação - chamando fn_renegociar_emprestimo para:', renegociacao.cliente_nome, 'liqId:', liqId);
         ({ data, error } = await supabase.rpc('fn_renegociar_emprestimo', paramsReneg));
-      } else if (clienteExistente?.id) {
-        // RENOVAÇÃO - cliente já existe, usa fn_renovar_emprestimo
-        const paramsRenov: Record<string, any> = {
-          p_cliente_id: clienteExistente.id,
-          p_valor_principal: valorPrincipal,
-          p_numero_parcelas: parseInt(numeroParcelas),
-          p_taxa_juros: parseFloat(taxaJuros.replace(',', '.')) || 0,
-          p_frequencia: frequencia,
-          p_data_primeiro_vencimento: dataPrimeiroVencimento,
-          p_dia_semana_cobranca: frequencia === 'SEMANAL' ? parseInt(diaSemanaPagamento) : null,
-          p_dia_mes_cobranca: frequencia === 'MENSAL' ? parseInt(diaMesPagamento) : null,
-          p_dias_mes_cobranca: frequencia === 'FLEXIVEL' ? diasMesFlexivel : null,
-          p_iniciar_proximo_mes: frequencia === 'FLEXIVEL' ? iniciarProximoMes : false,
-          p_observacoes: observacoesEmprestimo.trim() || null,
-          p_microseguro_valor: microValor > 0 ? microValor : null,
-          p_empresa_id: empresaId,
-          p_rota_id: rotaId,
-          p_vendedor_id: vendedorId,
-          p_user_id: userId,
-          p_latitude: latitude,
-          p_longitude: longitude,
-        };
-        console.log('🔄 Renovação - chamando fn_renovar_emprestimo para:', clienteExistente.nome);
-        
-        // Atualiza dados cadastrais do cliente (email, telefone, endereço, etc. podem ter sido editados)
+      } else if (clienteExistente?.id || clienteEncontradoId) {
+        const clienteId = clienteExistente?.id || clienteEncontradoId;
+        const isAdicional = tipoEmprestimoDetectado === 'ADICIONAL';
+
+        // Atualiza dados cadastrais do cliente
         const updateData: Record<string, any> = {};
         if (nome.trim()) updateData.nome = nome.trim();
         if (documento.trim()) updateData.documento = documento.trim();
@@ -1012,13 +1113,66 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         if (endereco.trim()) updateData.endereco = endereco.trim();
         if (enderecoComercial.trim()) updateData.endereco_comercial = enderecoComercial.trim();
         if (observacoesCliente.trim()) updateData.observacoes = observacoesCliente.trim();
-        
-        if (Object.keys(updateData).length > 0) {
-          await supabase.from('clientes').update(updateData).eq('id', clienteExistente.id);
-          console.log('📝 Dados do cliente atualizados:', Object.keys(updateData));
+
+        if (Object.keys(updateData).length > 0 && clienteId) {
+          await supabase.from('clientes').update(updateData).eq('id', clienteId);
         }
-        
-        ({ data, error } = await supabase.rpc('fn_renovar_emprestimo', paramsRenov));
+
+        if (isAdicional) {
+          // ADICIONAL — cliente tem empréstimo ativo, usa fn_nova_venda_completa com tipo ADICIONAL
+          console.log('➕ Adicional - chamando fn_nova_venda_completa ADICIONAL para:', nome);
+          const paramsAdic: Record<string, any> = {
+            p_cliente_id: clienteId,
+            p_cliente_nome: nome.trim(),
+            p_cliente_documento: documento.trim() || null,
+            p_cliente_telefone: telefoneCelular ? `${ddiCelular}${telefoneCelular}` : null,
+            p_cliente_endereco: endereco.trim() || null,
+            p_valor_principal: valorPrincipal,
+            p_numero_parcelas: parseInt(numeroParcelas),
+            p_taxa_juros: parseFloat(taxaJuros.replace(',', '.')) || 0,
+            p_frequencia_pagamento: frequencia,
+            p_data_primeiro_vencimento: dataPrimeiroVencimento,
+            p_dia_semana_cobranca: frequencia === 'SEMANAL' ? parseInt(diaSemanaPagamento) : null,
+            p_dia_mes_cobranca: frequencia === 'MENSAL' ? parseInt(diaMesPagamento) : null,
+            p_dias_mes_cobranca: frequencia === 'FLEXIVEL' ? diasMesFlexivel : null,
+            p_iniciar_proximo_mes: frequencia === 'FLEXIVEL' ? iniciarProximoMes : false,
+            p_tipo_emprestimo: 'ADICIONAL',
+            p_observacoes: observacoesEmprestimo.trim() || null,
+            p_microseguro_valor: microValor > 0 ? microValor : null,
+            p_empresa_id: empresaId,
+            p_rota_id: rotaId,
+            p_vendedor_id: vendedorId,
+            p_liquidacao_id: liqId,
+            p_user_id: userId,
+            p_latitude: latitude,
+            p_longitude: longitude,
+          };
+          ({ data, error } = await supabase.rpc('fn_nova_venda_completa', paramsAdic));
+        } else {
+          // RENOVAÇÃO — empréstimo quitado, usa fn_renovar_emprestimo
+          console.log('🔄 Renovação - chamando fn_renovar_emprestimo para:', clienteExistente?.nome || nome);
+          const paramsRenov: Record<string, any> = {
+            p_cliente_id: clienteId,
+            p_valor_principal: valorPrincipal,
+            p_numero_parcelas: parseInt(numeroParcelas),
+            p_taxa_juros: parseFloat(taxaJuros.replace(',', '.')) || 0,
+            p_frequencia: frequencia,
+            p_data_primeiro_vencimento: dataPrimeiroVencimento,
+            p_dia_semana_cobranca: frequencia === 'SEMANAL' ? parseInt(diaSemanaPagamento) : null,
+            p_dia_mes_cobranca: frequencia === 'MENSAL' ? parseInt(diaMesPagamento) : null,
+            p_dias_mes_cobranca: frequencia === 'FLEXIVEL' ? diasMesFlexivel : null,
+            p_iniciar_proximo_mes: frequencia === 'FLEXIVEL' ? iniciarProximoMes : false,
+            p_observacoes: observacoesEmprestimo.trim() || null,
+            p_microseguro_valor: microValor > 0 ? microValor : null,
+            p_empresa_id: empresaId,
+            p_rota_id: rotaId,
+            p_vendedor_id: vendedorId,
+            p_user_id: userId,
+            p_latitude: latitude,
+            p_longitude: longitude,
+          };
+          ({ data, error } = await supabase.rpc('fn_renovar_emprestimo', paramsRenov));
+        }
       } else {
         // VENDA NOVA - cliente novo
         const params: Record<string, any> = {
@@ -1158,6 +1312,52 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   // -----------------------------------------------------------
   return (
     <View style={styles.container}>
+
+      {/* POPUP BUSCA DOCUMENTO */}
+      <Modal visible={modalDocVisible} transparent animationType="fade" onRequestClose={() => navigation.goBack()}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalCardTitle}>
+              {lang === 'es' ? 'Nuevo préstamo' : 'Novo empréstimo'}
+            </Text>
+            <Text style={styles.modalCardDesc}>
+              {lang === 'es'
+                ? 'Informe el documento del cliente para verificar si ya tiene historial.'
+                : 'Informe o documento do cliente para verificar se já tem histórico.'}
+            </Text>
+            <TextInput
+              style={styles.modalCardInput}
+              value={docBusca}
+              onChangeText={setDocBusca}
+              placeholder={lang === 'es' ? 'CPF / Documento' : 'CPF / Documento'}
+              placeholderTextColor="#9CA3AF"
+              keyboardType="number-pad"
+              autoFocus
+            />
+            <View style={styles.modalCardButtons}>
+              <TouchableOpacity
+                style={styles.modalCardBtnCancel}
+                onPress={() => navigation.goBack()}
+              >
+                <Text style={styles.modalCardBtnCancelText}>
+                  {lang === 'es' ? 'Cancelar' : 'Cancelar'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalCardBtnConfirm, (!docBusca.trim() || buscandoDoc) && { opacity: 0.5 }]}
+                onPress={buscarClientePorDocumento}
+                disabled={!docBusca.trim() || buscandoDoc}
+              >
+                {buscandoDoc
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={styles.modalCardBtnConfirmText}>OK</Text>
+                }
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{isRenegociacao ? t.tituloRenegociacao : clienteExistente ? t.tituloRenovacao : t.tituloNovaVenda}</Text>
@@ -1194,7 +1394,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
             {clienteExpanded && (
               <View style={styles.sectionBody}>
-                {clienteExistente ? (
+                {(clienteExistente || clienteEncontradoId) ? (
                   /* Cliente existente — somente leitura */
                   <View style={styles.clienteReadOnlyBox}>
                     {nome ? (
@@ -1420,17 +1620,17 @@ export default function NovaVendaScreen({ navigation, route }: any) {
               <View style={styles.sectionBody}>
                 {/* Valor + Parcelas na mesma linha */}
                 <View style={styles.rowFields}>
-                  <View style={[styles.fieldGroup, { flex: 1 }]}>  
+                  <View style={[styles.fieldGroup, { flex: 1 }]}>
                     <Text style={styles.fieldLabel}>
                       Valor <Text style={styles.required}>*</Text>
                     </Text>
                     <TextInput
                       style={styles.input}
-                      value={valorEmprestimo ? `$ ${valorEmprestimo}` : ''}
+                      value={valorEmprestimo}
                       onChangeText={handleValorEmprestimoChange}
-                      placeholder="$ 1.000,00"
+                      placeholder="500"
                       placeholderTextColor="#9CA3AF"
-                      keyboardType="numeric"
+                      keyboardType="decimal-pad"
                     />
                   </View>
                   <View style={[styles.fieldGroup, { flex: 1 }]}>
@@ -1532,7 +1732,10 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                           styles.radioOption,
                           frequencia === freq.value && styles.radioOptionActive,
                         ]}
-                        onPress={() => setFrequencia(freq.value)}
+                        onPress={() => {
+                          setFrequencia(freq.value);
+                          if (freq.value === 'DIARIO') setDataPrimeiroVencimento(amanha());
+                        }}
                         activeOpacity={0.7}
                       >
                         <View style={[
@@ -1726,7 +1929,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                   <Text style={styles.fieldLabel}>{t.valorMicroseguro}</Text>
                   <TextInput
                     style={styles.input}
-                    value={valorMicroseguro ? `$ ${valorMicroseguro}` : ''}
+                    value={valorMicroseguro}
                     onChangeText={handleValorMicroseguroChange}
                     placeholder="$ 0,00"
                     placeholderTextColor="#9CA3AF"
@@ -2924,4 +3127,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6B7280',
   },
+
+  // Modal busca documento
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  modalCard: { backgroundColor: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 400 },
+  modalCardTitle: { fontSize: 18, fontWeight: '700', color: '#1F2937', marginBottom: 8 },
+  modalCardDesc: { fontSize: 14, color: '#6B7280', marginBottom: 20, lineHeight: 20 },
+  modalCardInput: { borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 16, color: '#1F2937', backgroundColor: '#F9FAFB', marginBottom: 20 },
+  modalCardButtons: { flexDirection: 'row', gap: 12 },
+  modalCardBtnCancel: { flex: 1, paddingVertical: 13, borderRadius: 10, borderWidth: 1, borderColor: '#E5E7EB', alignItems: 'center' },
+  modalCardBtnCancelText: { color: '#6B7280', fontWeight: '600', fontSize: 15 },
+  modalCardBtnConfirm: { flex: 1, paddingVertical: 13, borderRadius: 10, backgroundColor: '#3B82F6', alignItems: 'center' },
+  modalCardBtnConfirmText: { color: '#fff', fontWeight: '600', fontSize: 15 },
 });

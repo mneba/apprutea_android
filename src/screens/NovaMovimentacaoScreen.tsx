@@ -186,17 +186,12 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
     }
   };
 
+  // Entrada natural: digita 500 = R$ 500, digita 0.5 = R$ 0,50
   const handleValorChange = (text: string) => {
-    const numeros = text.replace(/[^\d]/g, '');
-    if (!numeros) {
-      setValor('');
-      return;
-    }
-    const numVal = parseInt(numeros, 10) / 100;
-    setValor(numVal.toFixed(2));
+    setValor(text.replace(/[^\d.,]/g, '').replace(',', '.'));
   };
 
-  const valorNumerico = parseFloat(valor) || 0;
+  const valorNumerico = parseFloat((valor || '').replace(',', '.')) || 0;
 
   const formatarValor = (v: number) =>
     v.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
@@ -370,10 +365,14 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
   const handleClose = () => {
     const temDados = valor || descricao;
     if (temDados) {
-      Alert.alert(t.cancelar, t.cancelarMsg, [
-        { text: t.nao, style: 'cancel' },
-        { text: t.simCancelar, style: 'destructive', onPress: () => navigation.goBack() },
-      ]);
+      if (Platform.OS === 'web') {
+        if (window.confirm(t.cancelarMsg)) navigation.goBack();
+      } else {
+        Alert.alert(t.cancelar, t.cancelarMsg, [
+          { text: t.nao, style: 'cancel' },
+          { text: t.simCancelar, style: 'destructive', onPress: () => navigation.goBack() },
+        ]);
+      }
     } else {
       navigation.goBack();
     }
@@ -521,14 +520,14 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
               Valor <Text style={styles.required}>*</Text>
             </Text>
             <View style={styles.valorInputRow}>
-              <Text style={styles.valorPrefix}>R$</Text>
+              <Text style={styles.valorPrefix}>$</Text>
               <TextInput
                 style={styles.valorInput}
-                value={valor ? formatarValor(valorNumerico) : ''}
+                value={valor}
                 onChangeText={handleValorChange}
-                placeholder="0,00"
+                placeholder="500"
                 placeholderTextColor="#9CA3AF"
-                keyboardType="numeric"
+                keyboardType="decimal-pad"
               />
             </View>
           </View>
