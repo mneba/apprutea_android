@@ -466,6 +466,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   const [buscandoDoc, setBuscandoDoc] = useState(false);
   const [clienteEncontradoId, setClienteEncontradoId] = useState<string | null>(null);
   const [tipoEmprestimoDetectado, setTipoEmprestimoDetectado] = useState<'RENOVACAO' | 'ADICIONAL' | null>(null);
+  const [emprestimOrigemId, setEmprestimoOrigemId] = useState<string | null>(null);
 
   const buscarClientePorDocumento = async () => {
     const doc = docBusca.replace(/\D/g, '');
@@ -473,12 +474,23 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     setBuscandoDoc(true);
     try {
       const docSemMask = docBusca.replace(/\D/g, '');
-      // Busca pelo documento com e sem formatação
-      const { data: clientes } = await supabase
+
+      // Busca exata primeiro — evita falsos positivos com ilike '%14%'
+      let { data: clientes } = await supabase
         .from('clientes')
         .select('id, nome, documento, telefone_celular, endereco, codigo_cliente, permite_emprestimo_adicional, permite_renegociacao')
-        .or(`documento.ilike.%${docSemMask}%,documento.ilike.%${docBusca}%`)
+        .or(`documento.eq.${docSemMask},documento.eq.${docBusca}`)
         .limit(1);
+
+      // Fallback ilike apenas se busca exata não encontrou e doc tem 3+ dígitos
+      if (!clientes?.length && docSemMask.length >= 3) {
+        const { data: clientesFallback } = await supabase
+          .from('clientes')
+          .select('id, nome, documento, telefone_celular, endereco, codigo_cliente, permite_emprestimo_adicional, permite_renegociacao')
+          .or(`documento.ilike.%${docSemMask}%,documento.ilike.%${docBusca}%`)
+          .limit(1);
+        clientes = clientesFallback;
+      }
 
       const cli = clientes?.[0];
       if (!cli) {
@@ -488,7 +500,21 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         return;
       }
 
-      // Cliente encontrado — verificar empréstimos
+      // Delega ao banco toda a lógica de validação
+      // fn_validar_novo_emprestimo verifica: empréstimos ativos, parcelas vencidas, restrições do vendedor
+      const { data: validacao } = await supabase.rpc('fn_validar_novo_emprestimo', {
+        p_cliente_id: cli.id,
+        p_vendedor_id: vendedor?.id || null,
+        p_rota_id: vendedor?.rota_id || null,
+        p_valor_principal: 0,       // não temos valor ainda, mas queremos a validação de situação
+        p_numero_parcelas: 1,
+        p_frequencia: 'DIARIO',
+        p_data_primeiro_vencimento: new Date().toISOString().split('T')[0],
+        p_tipo_emprestimo: 'NOVO',
+      });
+
+      const val = Array.isArray(validacao) ? validacao[0] : validacao;
+      // Buscar empréstimo ativo para usar no fluxo de renegociação se necessário
       const { data: emps } = await supabase
         .from('emprestimos')
         .select('id, status, valor_saldo')
@@ -496,10 +522,36 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         .in('status', ['ATIVO', 'VENCIDO'])
         .order('created_at', { ascending: false })
         .limit(1);
-
       const emp = emps?.[0];
 
-      if (!emp) {
+      // Determinar situação baseado no retorno da function + dados reais
+      const temEmprestimoAtivo = !!emp;
+
+      // Verificar atraso: status VENCIDO no empréstimo OU parcelas não pagas com vencimento passado
+      const hojeDate = new Date();
+      hojeDate.setHours(0, 0, 0, 0);
+      let temAtraso = emp?.status === 'VENCIDO';
+
+      if (!temAtraso && emp) {
+        // Buscar parcelas não pagas com vencimento estritamente anterior a hoje
+        const hoje = hojeDate.toISOString().split('T')[0];
+        const { data: parcAtrasadas } = await supabase
+          .from('emprestimo_parcelas')
+          .select('id')
+          .eq('emprestimo_id', emp.id)
+          .lt('data_vencimento', hoje)      // estritamente menor que hoje
+          .neq('status', 'PAGO')
+          .neq('status', 'CANCELADO')
+          .limit(1);
+
+        temAtraso = !!(parcAtrasadas && parcAtrasadas.length > 0);
+      }
+
+      const permiteAdicional = cli.permite_emprestimo_adicional === true || cli.permite_emprestimo_adicional === 'true';
+      const permiteReneg = cli.permite_renegociacao === true || cli.permite_renegociacao === 'true';
+
+
+      if (!temEmprestimoAtivo) {
         // Já teve empréstimo mas não tem ativo — renovação
         // Preenche dados do cliente e fecha popup com aviso
         setNome(cli.nome || '');
@@ -517,18 +569,6 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         return;
       }
 
-      // Tem empréstimo ativo — verificar parcelas atrasadas
-      const { data: atrasadas } = await supabase
-        .from('emprestimo_parcelas')
-        .select('id')
-        .eq('emprestimo_id', emp.id)
-        .eq('status', 'VENCIDO')
-        .limit(1);
-
-      const temAtraso = (atrasadas?.length || 0) > 0;
-      const permiteAdicional = cli.permite_emprestimo_adicional === true;
-      const permiteReneg = cli.permite_renegociacao === true;
-
       if (temAtraso) {
         if (permiteReneg) {
           // Autorizado para renegociar — preenche dados e avisa
@@ -537,6 +577,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
           setDocumento(cli.documento || docBusca);
           setEndereco(cli.endereco || '');
           setClienteEncontradoId(cli.id);
+          setEmprestimoOrigemId(emp.id); // ID do empréstimo com atraso — necessário para fn_renegociar_emprestimo
           setTipoEmprestimoDetectado('RENOVACAO');
           setModalDocVisible(false);
           const msg = lang === 'es'
@@ -608,6 +649,24 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     return d.toISOString().split('T')[0];
   };
 
+  // Para MENSAL: se o dia já passou no mês atual, avança para o mês seguinte
+  const calcularDataMensal = (dia: number): string => {
+    if (!dia || dia < 1 || dia > 31) return amanha();
+    const hoje = new Date();
+    const ano = hoje.getFullYear();
+    const mes = hoje.getMonth(); // 0-indexed
+    const diaHoje = hoje.getDate();
+    // Se o dia ainda não chegou este mês, usa este mês; caso contrário, próximo mês
+    const mesAlvo = dia > diaHoje ? mes : mes + 1;
+    // Criar data com clamp para último dia do mês
+    const dataAlvo = new Date(ano, mesAlvo, dia);
+    // Se o dia não existe no mês (ex: 31 em fevereiro), volta ao último dia válido
+    if (dataAlvo.getMonth() !== (mesAlvo % 12)) {
+      dataAlvo.setDate(0); // último dia do mês anterior
+    }
+    return dataAlvo.toISOString().split('T')[0];
+  };
+
   const [dataPrimeiroVencimento, setDataPrimeiroVencimento] = useState(amanha());
   const [observacoesEmprestimo, setObservacoesEmprestimo] = useState('');
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -641,19 +700,54 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   // CARREGAR DADOS DO EMPRÉSTIMO ORIGINAL (RENEGOCIAÇÃO)
   // -----------------------------------------------------------
   useEffect(() => {
-    if (!isRenegociacao || !renegociacao?.emprestimo_id) return;
+    // Carrega dados do empréstimo original para renegociação
+    // Funciona tanto pelo fluxo antigo (renegociacao via params) quanto pelo novo (busca documento)
+    const empIdParaCarregar = renegociacao?.emprestimo_id || 
+      (tipoEmprestimoDetectado === 'RENOVACAO' && clienteEncontradoId ? '__buscar__' : null);
+
+    if (!empIdParaCarregar) return;
+
     (async () => {
       try {
+        let empId = renegociacao?.emprestimo_id;
+
+        // Se veio pelo fluxo de busca documento, buscar empréstimo ativo do cliente
+        if (!empId && clienteEncontradoId) {
+          const { data: emps } = await supabase
+            .from('emprestimos')
+            .select('id')
+            .eq('cliente_id', clienteEncontradoId)
+            .in('status', ['ATIVO', 'VENCIDO'])
+            .order('created_at', { ascending: false })
+            .limit(1);
+          empId = emps?.[0]?.id;
+        }
+
+        if (!empId) return;
+
         const { data: emp } = await supabase
           .from('emprestimos')
           .select('valor_saldo, valor_parcela, numero_parcelas, taxa_juros, frequencia_pagamento, dia_semana_cobranca, dia_mes_cobranca, dias_mes_cobranca')
-          .eq('id', renegociacao.emprestimo_id)
+          .eq('id', empId)
           .single();
+
         if (emp) {
-          setValorEmprestimo(String(Math.round(emp.valor_saldo || 0)));
+          // Valor do saldo como string decimal natural (ex: "1200.50")
+          const saldoStr = (emp.valor_saldo || 0).toFixed(2).replace('.00', '');
+          setValorEmprestimo(saldoStr);
           setNumeroParcelas(String(emp.numero_parcelas || 12));
-          if (emp.taxa_juros != null) setTaxaJuros(String(emp.taxa_juros));
-          if (emp.frequencia_pagamento) setFrequencia(emp.frequencia_pagamento);
+          if (emp.taxa_juros != null) {
+            setTaxaJuros(String(emp.taxa_juros));
+            setTaxaJurosPersonalizada(true);
+          }
+          if (emp.frequencia_pagamento) {
+            setFrequencia(emp.frequencia_pagamento);
+            if (emp.frequencia_pagamento === 'DIARIO') {
+              setDataPrimeiroVencimento(amanha());
+            } else if (emp.frequencia_pagamento === 'MENSAL' && emp.dia_mes_cobranca) {
+              setDataPrimeiroVencimento(calcularDataMensal(emp.dia_mes_cobranca));
+            }
+          }
           if (emp.dia_semana_cobranca != null) setDiaSemanaPagamento(String(emp.dia_semana_cobranca));
           if (emp.dia_mes_cobranca != null) setDiaMesPagamento(String(emp.dia_mes_cobranca));
           if (emp.dias_mes_cobranca) setDiasMesFlexivel(emp.dias_mes_cobranca);
@@ -661,7 +755,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         }
       } catch (e) { console.error('Erro ao carregar empréstimo original:', e); }
     })();
-  }, [isRenegociacao, renegociacao?.emprestimo_id]);
+  }, [isRenegociacao, renegociacao?.emprestimo_id, tipoEmprestimoDetectado, clienteEncontradoId]);
 
   // -----------------------------------------------------------
   // CARREGAR SEGMENTOS E TAXAS PERMITIDAS
@@ -1060,20 +1154,21 @@ export default function NovaVendaScreen({ navigation, route }: any) {
       // ETAPA 5 - Montar e enviar parâmetros
       let data: any, error: any;
 
+      // Buscar liquidação aberta — necessário para renegociação e adicional
+      let liqId = liqCtx.liquidacaoAtual?.id || null;
+      if (!liqId) {
+        const { data: liqData } = await supabase
+          .from('liquidacoes_diarias')
+          .select('id')
+          .eq('rota_id', rotaId)
+          .in('status', ['ABERTO', 'REABERTO'])
+          .limit(1)
+          .single();
+        liqId = liqData?.id || null;
+      }
+
       if (isRenegociacao) {
         // RENEGOCIAÇÃO - empréstimo existente com atraso
-        // Buscar liquidação aberta da rota
-        let liqId = liqCtx.liquidacaoAtual?.id || null;
-        if (!liqId) {
-          const { data: liqData } = await supabase
-            .from('liquidacoes_diarias')
-            .select('id')
-            .eq('rota_id', rotaId)
-            .in('status', ['ABERTO', 'REABERTO'])
-            .limit(1)
-            .single();
-          liqId = liqData?.id || null;
-        }
         if (!liqId) {
           const msg = 'Não há liquidação aberta para esta rota. Inicie o dia primeiro.';
           if (Platform.OS === 'web') { window.alert(msg); } else { Alert.alert('Erro', msg); }
@@ -1118,36 +1213,50 @@ export default function NovaVendaScreen({ navigation, route }: any) {
           await supabase.from('clientes').update(updateData).eq('id', clienteId);
         }
 
-        if (isAdicional) {
-          // ADICIONAL — cliente tem empréstimo ativo, usa fn_nova_venda_completa com tipo ADICIONAL
-          console.log('➕ Adicional - chamando fn_nova_venda_completa ADICIONAL para:', nome);
-          const paramsAdic: Record<string, any> = {
-            p_cliente_id: clienteId,
-            p_cliente_nome: nome.trim(),
-            p_cliente_documento: documento.trim() || null,
-            p_cliente_telefone: telefoneCelular ? `${ddiCelular}${telefoneCelular}` : null,
-            p_cliente_endereco: endereco.trim() || null,
-            p_valor_principal: valorPrincipal,
+        const isRenegociacaoViaDoc = tipoEmprestimoDetectado === 'RENOVACAO' && !!emprestimOrigemId;
+
+        if (isRenegociacaoViaDoc) {
+          // RENEGOCIAÇÃO via busca de documento — usa fn_renegociar_emprestimo com empréstimo de origem
+          console.log('🔄 Renegociação (doc) - fn_renegociar_emprestimo, origem:', emprestimOrigemId);
+          const paramsReneg: Record<string, any> = {
+            p_emprestimo_original_id: emprestimOrigemId,
+            p_novo_valor_principal: valorPrincipal,
             p_numero_parcelas: parseInt(numeroParcelas),
             p_taxa_juros: parseFloat(taxaJuros.replace(',', '.')) || 0,
             p_frequencia_pagamento: frequencia,
             p_data_primeiro_vencimento: dataPrimeiroVencimento,
+            p_user_id: userId,
+            p_liquidacao_id: liqId,
+            p_observacoes: observacoesEmprestimo.trim() || null,
             p_dia_semana_cobranca: frequencia === 'SEMANAL' ? parseInt(diaSemanaPagamento) : null,
             p_dia_mes_cobranca: frequencia === 'MENSAL' ? parseInt(diaMesPagamento) : null,
             p_dias_mes_cobranca: frequencia === 'FLEXIVEL' ? diasMesFlexivel : null,
             p_iniciar_proximo_mes: frequencia === 'FLEXIVEL' ? iniciarProximoMes : false,
-            p_tipo_emprestimo: 'ADICIONAL',
-            p_observacoes: observacoesEmprestimo.trim() || null,
-            p_microseguro_valor: microValor > 0 ? microValor : null,
+          };
+          ({ data, error } = await supabase.rpc('fn_renegociar_emprestimo', paramsReneg));
+        } else if (isAdicional) {
+          console.log('➕ Novo empréstimo adicional - fn_nova_venda_adicional para:', nome);
+          const paramsAdic: Record<string, any> = {
+            p_cliente_id: clienteId,
+            p_valor_principal: valorPrincipal,
+            p_numero_parcelas: parseInt(numeroParcelas),
+            p_taxa_juros: parseFloat(taxaJuros.replace(',', '.')) || 0,
+            p_frequencia: frequencia,
+            p_data_primeiro_vencimento: dataPrimeiroVencimento,
             p_empresa_id: empresaId,
             p_rota_id: rotaId,
             p_vendedor_id: vendedorId,
-            p_liquidacao_id: liqId,
             p_user_id: userId,
+            p_dia_semana_cobranca: frequencia === 'SEMANAL' ? parseInt(diaSemanaPagamento) : null,
+            p_dia_mes_cobranca: frequencia === 'MENSAL' ? parseInt(diaMesPagamento) : null,
+            p_dias_mes_cobranca: frequencia === 'FLEXIVEL' ? diasMesFlexivel : null,
+            p_iniciar_proximo_mes: frequencia === 'FLEXIVEL' ? iniciarProximoMes : false,
+            p_observacoes: observacoesEmprestimo.trim() || null,
             p_latitude: latitude,
             p_longitude: longitude,
+            p_microseguro_valor: microValor > 0 ? microValor : null,
           };
-          ({ data, error } = await supabase.rpc('fn_nova_venda_completa', paramsAdic));
+          ({ data, error } = await supabase.rpc('fn_nova_venda_adicional', paramsAdic));
         } else {
           // RENOVAÇÃO — empréstimo quitado, usa fn_renovar_emprestimo
           console.log('🔄 Renovação - chamando fn_renovar_emprestimo para:', clienteExistente?.nome || nome);
@@ -1220,6 +1329,19 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         const { data: cliData } = await supabase.from('clientes').select('codigo_cliente').eq('id', renegociacao.cliente_id).single();
         codigoCliente = cliData?.codigo_cliente || null;
       }
+      // Buscar código do cliente para renegociação via busca de documento
+      if (!isRenegociacao && emprestimOrigemId && clienteEncontradoId && !codigoCliente) {
+        const { data: cliData } = await supabase.from('clientes').select('codigo_cliente').eq('id', clienteEncontradoId).single();
+        codigoCliente = cliData?.codigo_cliente || null;
+      }
+
+      const isRenegociacaoViaDoc = !isRenegociacao && !!emprestimOrigemId && !!clienteEncontradoId;
+
+      // Calcular valor_parcela para renegociação (fn_renegociar_emprestimo não retorna valor_parcela)
+      const valorParcelaReneg = parseInt(numeroParcelas) > 0
+        ? valorPrincipal / parseInt(numeroParcelas)
+        : 0;
+
       const res = isRenegociacao ? {
         sucesso: raw?.sucesso,
         mensagem: 'Renegociação registrada com sucesso',
@@ -1227,19 +1349,33 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         cliente_nome: renegociacao.cliente_nome,
         cliente_codigo: codigoCliente,
         emprestimo_id: raw?.novo_emprestimo_id,
-        valor_total: raw?.novo_valor_principal,
-        valor_parcela: parseInt(numeroParcelas) > 0 ? (raw?.novo_valor_principal || 0) / parseInt(numeroParcelas) : 0,
+        valor_total: raw?.novo_valor || valorPrincipal,
+        valor_parcela: valorParcelaReneg,
         microseguro_id: null,
         microseguro_valor: microValor > 0 ? microValor : null,
         parcelas: null,
-        saldo_anterior: raw?.saldo_anterior,
+        saldo_anterior: raw?.saldo_original,
         parcelas_canceladas: raw?.parcelas_canceladas,
-      } : clienteExistente?.id ? {
+      } : isRenegociacaoViaDoc ? {
+        sucesso: raw?.sucesso,
+        mensagem: 'Renegociação registrada com sucesso',
+        cliente_id: clienteEncontradoId,
+        cliente_nome: nome,
+        cliente_codigo: codigoCliente,
+        emprestimo_id: raw?.novo_emprestimo_id,
+        valor_total: raw?.novo_valor || valorPrincipal,
+        valor_parcela: valorParcelaReneg,
+        microseguro_id: null,
+        microseguro_valor: microValor > 0 ? microValor : null,
+        parcelas: null,
+        saldo_anterior: raw?.saldo_original,
+        parcelas_canceladas: raw?.parcelas_canceladas,
+      } : clienteExistente?.id || clienteEncontradoId ? {
         sucesso: raw?.sucesso,
         mensagem: raw?.mensagem,
-        cliente_id: raw?.out_cliente_id || raw?.cliente_id,
-        cliente_nome: raw?.out_cliente_nome || raw?.cliente_nome,
-        cliente_codigo: raw?.out_cliente_codigo || raw?.cliente_codigo || null,
+        cliente_id: raw?.out_cliente_id || raw?.cliente_id || clienteEncontradoId,
+        cliente_nome: raw?.out_cliente_nome || raw?.cliente_nome || nome,
+        cliente_codigo: raw?.out_cliente_codigo || raw?.cliente_codigo || codigoCliente || null,
         emprestimo_id: raw?.out_novo_emprestimo_id || raw?.emprestimo_id,
         valor_total: raw?.out_valor_total || raw?.valor_total,
         valor_parcela: raw?.out_valor_parcela || raw?.valor_parcela,
@@ -1256,7 +1392,22 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         return;
       }
 
-      // Sucesso — atualizar liquidação e mostrar resultado
+      // Sucesso — resetar autorização do cliente se foi adicional ou renegociação
+      const idParaReset = clienteEncontradoId || clienteExistente?.id || renegociacao?.cliente_id;
+      if (idParaReset) {
+        if (tipoEmprestimoDetectado === 'ADICIONAL') {
+          await supabase.from('clientes')
+            .update({ permite_emprestimo_adicional: false })
+            .eq('id', idParaReset);
+        } else if (isRenegociacao || (tipoEmprestimoDetectado === 'RENOVACAO' && emprestimOrigemId)) {
+          // Renegociação via fluxo antigo (aba Todos) ou novo (busca documento)
+          await supabase.from('clientes')
+            .update({ permite_renegociacao: false })
+            .eq('id', idParaReset);
+        }
+      }
+
+      // Atualizar liquidação e mostrar resultado
       liqCtx.recarregarLiquidacao();
       setResultado(res);
       setShowResultado(true);
@@ -1734,7 +1885,11 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                         ]}
                         onPress={() => {
                           setFrequencia(freq.value);
-                          if (freq.value === 'DIARIO') setDataPrimeiroVencimento(amanha());
+                          if (freq.value === 'DIARIO') {
+                            setDataPrimeiroVencimento(amanha());
+                          } else if (freq.value === 'MENSAL' && diaMesPagamento) {
+                            setDataPrimeiroVencimento(calcularDataMensal(parseInt(diaMesPagamento)));
+                          }
                         }}
                         activeOpacity={0.7}
                       >
@@ -1785,6 +1940,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                         const num = text.replace(/[^\d]/g, '');
                         const val = Math.min(31, Math.max(0, parseInt(num) || 0));
                         setDiaMesPagamento(num ? String(val) : '');
+                        if (val > 0) setDataPrimeiroVencimento(calcularDataMensal(val));
                       }}
                       placeholder="1-31"
                       placeholderTextColor="#9CA3AF"
