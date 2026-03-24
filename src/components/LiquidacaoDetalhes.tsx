@@ -949,15 +949,26 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
     try {
       // VENDAS: busca direto em emprestimos para ter todos os campos de condições
       if (tipo === 'VENDAS') {
+        // Buscar a data da liquidação para filtrar apenas empréstimos criados naquele dia
+        const { data: liqData } = await supabase
+          .from('liquidacoes_diarias')
+          .select('data_liquidacao, data_abertura')
+          .eq('id', liquidacaoId)
+          .single();
+        const dataLiq = liqData?.data_liquidacao
+          || (liqData?.data_abertura ? liqData.data_abertura.split('T')[0] : null)
+          || new Date().toISOString().split('T')[0];
+
         const { data, error } = await supabase
           .from('emprestimos')
           .select(`
             id, valor_principal, valor_total, valor_parcela, numero_parcelas,
             taxa_juros, frequencia_pagamento, data_primeiro_vencimento,
-            tipo_emprestimo, created_at,
+            tipo_emprestimo, created_at, data_emprestimo,
             cliente:cliente_id(nome, codigo_cliente)
           `)
           .eq('liquidacao_id', liquidacaoId)
+          .eq('data_emprestimo', dataLiq)
           .neq('status', 'CANCELADO')
           .order('created_at', { ascending: false });
         if (!error) setRegistros(data || []);
@@ -1014,11 +1025,12 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
               <Text style={[dStyles.finItemCategoria, { fontWeight: '700', fontSize: 14 }]}>{clienteNome}</Text>
               <Text style={[dStyles.finItemCliente, { color: '#6B7280', marginTop: 2 }]}>
                 {lang === 'es' ? '1° pago' : '1° pgto'}: {primeiroPgto}
-                {'  ·  '}{item.numero_parcelas}x {'  ·  '}{item.taxa_juros}%
+                {'  ·  '}{item.numero_parcelas}x {fmt(parseFloat(item.valor_parcela || 0))}
+                {'  ·  '}{item.taxa_juros}%
                 {'  ·  '}{fmtFrequencia(item.frequencia_pagamento)}
               </Text>
             </View>
-            <Text style={[dStyles.finItemValor, { color: config.cor }]}>{fmt(parseFloat(item.valor_total || item.valor_principal))}</Text>
+            <Text style={[dStyles.finItemValor, { color: config.cor }]}>{fmt(parseFloat(item.valor_principal || 0))}</Text>
           </View>
           <View style={dStyles.finItemBottom}>
             <Text style={dStyles.finItemHora}>{fmtHora(item.created_at)}</Text>
@@ -1047,9 +1059,10 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
     );
   };
 
-  // Calcular total e qtd dos registros reais (mais confiável que props da liquidação)
+  // Para VENDAS: total = soma de valor_principal dos empréstimos listados (igual ao total_emprestado_dia do banco)
+  // Para outros: soma dos registros filtrados
   const totalReal = tipo === 'VENDAS'
-    ? registros.reduce((s, r) => s + parseFloat(r.valor_total || r.valor_principal || 0), 0)
+    ? registros.reduce((s, r) => s + parseFloat(r.valor_principal || 0), 0)
     : registros.reduce((s, r) => s + parseFloat(r.valor || 0), 0);
   const qtdReal = registros.length;
 
