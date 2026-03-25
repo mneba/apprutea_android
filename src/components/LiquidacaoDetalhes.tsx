@@ -151,6 +151,8 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const [caixaMicroFinal, setCaixaMicroFinal] = useState(0);
   const [totalRetiroMicro, setTotalRetiroMicro] = useState(0);
   const [resumoOp, setResumoOp] = useState({ pagos: 0, naoPagos: 0, novos: 0, renovados: 0, renegociados: 0 });
+  const [vendasDia, setVendasDia] = useState<any[]>([]);
+  const [renegociacoesDia, setRenegociacoesDia] = useState<any[]>([]);
   const extratoViewRef = useRef<View>(null);
 
   useEffect(() => {
@@ -239,6 +241,24 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         console.log('✅ Pagamentos carregados:', pags?.length);
         setPagamentos(pags || []);
       }
+
+      // Busca empréstimos do dia — separando vendas de renegociações
+      const { data: empsData } = await supabase
+        .from('emprestimos')
+        .select(`
+          id, valor_principal, valor_total, valor_parcela, numero_parcelas,
+          taxa_juros, frequencia_pagamento, data_primeiro_vencimento,
+          tipo_emprestimo, created_at,
+          cliente:cliente_id(nome)
+        `)
+        .eq('liquidacao_id', liquidacaoId)
+        .gte('created_at', liqData?.data_abertura || new Date().toISOString())
+        .neq('status', 'CANCELADO')
+        .order('created_at', { ascending: true });
+
+      const emps = empsData || [];
+      setVendasDia(emps.filter((e: any) => e.tipo_emprestimo !== 'RENEGOCIACAO'));
+      setRenegociacoesDia(emps.filter((e: any) => e.tipo_emprestimo === 'RENEGOCIACAO'));
     } catch (e) {
       console.error('Erro extrato:', e);
     } finally {
@@ -465,19 +485,111 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
             </View>
             <Text style={cupom.div2}>{DDIV}</Text>
 
-            {/* ═══ MICROSEGURO ═══ */}
-            {(caixaMicroInicial > 0 || totalMicroseguros > 0) && (
+            {/* ═══ MICROSEGUROS ═══ */}
+            {entradasMicroseguro.length > 0 && (
               <>
-                <View style={cupom.linha}>
-                  <Text style={[cupom.txt, { color: '#7C3AED' }]}>{lang === 'es' ? 'Microseguro del día' : 'Microseguro do dia'}</Text>
-                  <Text style={[cupom.txtVerde, { color: '#7C3AED' }]}>{fmt(totalMicroseguros)}</Text>
-                </View>
+                <Text style={[cupom.centro, { fontSize: 11, fontWeight: '700', marginBottom: 4, color: '#7C3AED' }]}>
+                  {lang === 'es' ? 'MICROSEGUROS' : 'MICROSEGUROS'}
+                </Text>
+                <Text style={cupom.div1}>{DIV}</Text>
+                {entradasMicroseguro.map((item, idx) => (
+                  <View key={item.id}>
+                    <View style={cupom.itemRow}>
+                      <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
+                      <Text style={cupom.itemCat} numberOfLines={1}>{item.cliente_nome || item.descricao || '—'}</Text>
+                      <Text style={[cupom.itemVal, { color: '#7C3AED' }]}>+{fmt(parseFloat(item.valor))}</Text>
+                    </View>
+                    <View style={cupom.itemMeta}>
+                      <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
+                    </View>
+                    {idx < entradasMicroseguro.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
+                  </View>
+                ))}
                 <Text style={cupom.div2}>{DDIV}</Text>
                 <View style={cupom.linha}>
                   <Text style={[cupom.txtBold, { color: '#7C3AED' }]}>(=) {lang === 'es' ? 'Caja final microseguro' : 'Caixa final microseguro'}</Text>
                   <Text style={[cupom.txtBold, { color: '#7C3AED' }]}>{fmt(caixaMicroFinal)}</Text>
                 </View>
                 <Text style={cupom.div2}>{DDIV}</Text>
+              </>
+            )}
+
+            {/* ═══ VENDAS DO DIA ═══ */}
+            {vendasDia.length > 0 && (
+              <>
+                <Text style={[cupom.centro, { fontSize: 11, fontWeight: '700', marginBottom: 4, color: '#10B981' }]}>
+                  {lang === 'es' ? 'VENTAS DEL DÍA' : 'VENDAS DO DIA'}
+                </Text>
+                <Text style={cupom.div1}>{DIV}</Text>
+                {vendasDia.map((emp, idx) => {
+                  const clienteNome = (emp.cliente as any)?.nome || '—';
+                  const primeiroPgto = emp.data_primeiro_vencimento
+                    ? new Date(emp.data_primeiro_vencimento + 'T00:00:00').toLocaleDateString(lang === 'es' ? 'es-CO' : 'pt-BR')
+                    : '—';
+                  return (
+                    <View key={emp.id}>
+                      <View style={cupom.itemRow}>
+                        <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
+                        <Text style={cupom.itemCat} numberOfLines={1}>{clienteNome}</Text>
+                        <Text style={[cupom.itemVal, { color: '#10B981' }]}>+{fmt(parseFloat(emp.valor_principal))}</Text>
+                      </View>
+                      <Text style={[cupom.itemSub, { fontSize: 9 }]}>
+                        {'   '}{lang === 'es' ? '1° pago' : '1° pgto'}: {primeiroPgto}
+                        {'  '}{emp.numero_parcelas}x {fmt(parseFloat(emp.valor_parcela))}
+                        {'  '}{emp.taxa_juros}%
+                      </Text>
+                      <View style={cupom.itemMeta}>
+                        <Text style={cupom.itemHora}>   {fmtHora(emp.created_at)}</Text>
+                        <Text style={cupom.itemHora}>{emp.tipo_emprestimo}</Text>
+                      </View>
+                      {idx < vendasDia.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
+                    </View>
+                  );
+                })}
+                <View style={cupom.linha}>
+                  <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{lang === 'es' ? 'TOTAL VENTAS' : 'TOTAL VENDAS'}</Text>
+                  <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{fmt(vendasDia.reduce((s, e) => s + parseFloat(e.valor_principal), 0))}</Text>
+                </View>
+                <Text style={cupom.div1}>{DIV}</Text>
+              </>
+            )}
+
+            {/* ═══ RENEGOCIAÇÕES DO DIA ═══ */}
+            {renegociacoesDia.length > 0 && (
+              <>
+                <Text style={[cupom.centro, { fontSize: 11, fontWeight: '700', marginBottom: 4, color: '#F59E0B' }]}>
+                  {lang === 'es' ? 'RENEGOCIACIONES' : 'RENEGOCIAÇÕES'}
+                </Text>
+                <Text style={cupom.div1}>{DIV}</Text>
+                {renegociacoesDia.map((emp, idx) => {
+                  const clienteNome = (emp.cliente as any)?.nome || '—';
+                  const primeiroPgto = emp.data_primeiro_vencimento
+                    ? new Date(emp.data_primeiro_vencimento + 'T00:00:00').toLocaleDateString(lang === 'es' ? 'es-CO' : 'pt-BR')
+                    : '—';
+                  return (
+                    <View key={emp.id}>
+                      <View style={cupom.itemRow}>
+                        <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
+                        <Text style={cupom.itemCat} numberOfLines={1}>{clienteNome}</Text>
+                        <Text style={[cupom.itemVal, { color: '#F59E0B' }]}>{fmt(parseFloat(emp.valor_principal))}</Text>
+                      </View>
+                      <Text style={[cupom.itemSub, { fontSize: 9 }]}>
+                        {'   '}{lang === 'es' ? '1° pago' : '1° pgto'}: {primeiroPgto}
+                        {'  '}{emp.numero_parcelas}x {fmt(parseFloat(emp.valor_parcela))}
+                        {'  '}{emp.taxa_juros}%
+                      </Text>
+                      <View style={cupom.itemMeta}>
+                        <Text style={cupom.itemHora}>   {fmtHora(emp.created_at)}</Text>
+                      </View>
+                      {idx < renegociacoesDia.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
+                    </View>
+                  );
+                })}
+                <View style={cupom.linha}>
+                  <Text style={[cupom.txt, { fontSize: 10, color: '#F59E0B' }]}>{lang === 'es' ? 'TOTAL RENEGOCIACIONES' : 'TOTAL RENEGOCIAÇÕES'}</Text>
+                  <Text style={[cupom.txt, { fontSize: 10, color: '#F59E0B' }]}>{fmt(renegociacoesDia.reduce((s, e) => s + parseFloat(e.valor_principal), 0))}</Text>
+                </View>
+                <Text style={cupom.div1}>{DIV}</Text>
               </>
             )}
 
@@ -949,15 +1061,13 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
     try {
       // VENDAS: busca direto em emprestimos para ter todos os campos de condições
       if (tipo === 'VENDAS') {
-        // Buscar a data da liquidação para filtrar apenas empréstimos criados naquele dia
+        // Buscar data de abertura da liquidação para filtrar empréstimos criados a partir dela
         const { data: liqData } = await supabase
           .from('liquidacoes_diarias')
-          .select('data_liquidacao, data_abertura')
+          .select('data_abertura')
           .eq('id', liquidacaoId)
           .single();
-        const dataLiq = liqData?.data_liquidacao
-          || (liqData?.data_abertura ? liqData.data_abertura.split('T')[0] : null)
-          || new Date().toISOString().split('T')[0];
+        const dataAbertura = liqData?.data_abertura || new Date().toISOString();
 
         const { data, error } = await supabase
           .from('emprestimos')
@@ -968,7 +1078,7 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
             cliente:cliente_id(nome, codigo_cliente)
           `)
           .eq('liquidacao_id', liquidacaoId)
-          .eq('data_emprestimo', dataLiq)
+          .gte('created_at', dataAbertura)
           .neq('status', 'CANCELADO')
           .order('created_at', { ascending: false });
         if (!error) setRegistros(data || []);

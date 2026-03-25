@@ -173,6 +173,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const language: Language = idioma || 'pt-BR';
   const [fechando, setFechando] = useState(false);
   const [fechandoEtapa, setFechandoEtapa] = useState<'confirmar' | 'processando' | 'gerando'>('confirmar');
+  const [vendasReal, setVendasReal] = useState(0);
+  const [qtdVendasReal, setQtdVendasReal] = useState(0);
   const [modalIniciarVisible, setModalIniciarVisible] = useState(false);
   const [dataRetroativa, setDataRetroativa] = useState<string | null>(null); // 'YYYY-MM-DD'
   const [mostrarSeletorData, setMostrarSeletorData] = useState(false);
@@ -227,6 +229,23 @@ export default function LiquidacaoScreen({ navigation }: any) {
       liqCtx.setLiquidacaoAtual(null);
     }
   }, [liquidacao?.id, liquidacao?.status]);
+
+  // Recalcular vendas reais (excluindo renegociações) sempre que liquidação mudar
+  useEffect(() => {
+    if (!liquidacao?.id) { setVendasReal(0); setQtdVendasReal(0); return; }
+    (async () => {
+      const { data: empsData } = await supabase
+        .from('emprestimos')
+        .select('id, valor_principal, tipo_emprestimo')
+        .eq('liquidacao_id', liquidacao.id)
+        .gte('created_at', liquidacao.data_abertura)
+        .neq('status', 'CANCELADO')
+        .neq('tipo_emprestimo', 'RENEGOCIACAO');
+      const emps = empsData || [];
+      setVendasReal(emps.reduce((s: number, e: any) => s + parseFloat(e.valor_principal || 0), 0));
+      setQtdVendasReal(emps.length);
+    })();
+  }, [liquidacao?.id, liquidacao?.total_emprestado_dia]);
 
   // Buscar contagem de notas ativas da liquidação atual (só do vendedor)
   useEffect(() => {
@@ -1109,8 +1128,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
             <View style={styles.operacoesRow}>
               <TouchableOpacity style={[styles.operacaoCard, styles.operacaoVendas]} onPress={() => setModalVendasVisible(true)} activeOpacity={0.7}>
                 <Text style={styles.opLabelVerde}>{t.vendas}</Text>
-                <Text style={styles.opValorVerde}>{formatarMoedaCompacta(liquidacao.total_emprestado_dia)}</Text>
-                <Text style={styles.opDetalheVerde}>{liquidacao.qtd_emprestimos_dia || 0} emp.</Text>
+                <Text style={styles.opValorVerde}>{formatarMoedaCompacta(vendasReal)}</Text>
+                <Text style={styles.opDetalheVerde}>{qtdVendasReal} emp.</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.operacaoCard, styles.operacaoReceitas]} onPress={() => setModalReceitasVisible(true)} activeOpacity={0.7}>
                 <Text style={styles.opLabelAzul}>{t.receitas}</Text>
@@ -1412,8 +1431,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
             onClose={() => setModalVendasVisible(false)}
             liquidacaoId={liquidacao.id}
             tipo="VENDAS"
-            totalValor={liquidacao.total_emprestado_dia || 0}
-            totalQtd={liquidacao.qtd_emprestimos_dia || 0}
+            totalValor={vendasReal}
+            totalQtd={qtdVendasReal}
           />
           <ModalFinanceiro
             visible={modalReceitasVisible}
