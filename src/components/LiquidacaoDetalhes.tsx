@@ -37,7 +37,9 @@ const fmtData = (d: string | null) => {
 
 const fmtHora = (d: string | null) => {
   if (!d) return '';
-  const dt = new Date(d);
+  // Supabase retorna timestamps sem 'Z' mas são UTC — adicionar Z para forçar interpretação correta
+  const utcStr = d.endsWith('Z') || d.includes('+') ? d : d + 'Z';
+  const dt = new Date(utcStr);
   return dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 };
 
@@ -208,7 +210,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         .from('pagamentos_parcelas')
         .select(`
           id, numero_parcela, valor_pago_total, valor_parcela, valor_credito_gerado,
-          forma_pagamento, created_at, cliente_id,
+          forma_pagamento, created_at, cliente_id, emprestimo_parcela_id,
           clientes!pagamentos_parcelas_cliente_id_fkey(nome, consecutivo)
         `)
         .eq('liquidacao_id', liquidacaoId)
@@ -239,7 +241,15 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         }
       } else {
         console.log('✅ Pagamentos carregados:', pags?.length);
-        setPagamentos(pags || []);
+        // Deduplicar por emprestimo_parcela_id — manter apenas o mais recente por parcela
+        const seen = new Set();
+        const deduped = (pags || []).filter((p: any) => {
+          const key = p.emprestimo_parcela_id || p.id;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        setPagamentos(deduped);
       }
 
       // Busca empréstimos do dia — separando vendas de renegociações
@@ -266,11 +276,11 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
     }
   };
 
-  const totalSaidas = registros.filter(r => r.tipo === 'PAGAR' && r.categoria !== 'ESTORNO_PAGAMENTO').reduce((s, r) => s + parseFloat(r.valor), 0);
+  const totalSaidas = registros.filter(r => r.tipo === 'PAGAR' && r.categoria !== 'ESTORNO_PAGAMENTO' && r.categoria !== 'EMPRESTIMO' && !['RETIRO_MICROSEGURO', 'SAIDA_MICROSEGURO'].includes(r.categoria)).reduce((s, r) => s + parseFloat(r.valor), 0);
   const totalEntradas = registros.filter(r => r.tipo === 'RECEBER').reduce((s, r) => s + parseFloat(r.valor), 0);
   const totalPagamentos = pagamentos.reduce((s, p) => s + parseFloat(p.valor_pago_total || 0), 0);
   const registrosEntradas = registros.filter(r => r.tipo === 'RECEBER' && r.status !== 'CANCELADO');
-  const registrosSaidas = registros.filter(r => r.tipo === 'PAGAR' && r.status !== 'CANCELADO' && r.categoria !== 'ESTORNO_PAGAMENTO');
+  const registrosSaidas = registros.filter(r => r.tipo === 'PAGAR' && r.status !== 'CANCELADO' && r.categoria !== 'ESTORNO_PAGAMENTO' && r.categoria !== 'EMPRESTIMO' && !['RETIRO_MICROSEGURO', 'SAIDA_MICROSEGURO'].includes(r.categoria));
 
   // Separar entradas em 3 grupos
   const entradasCobrancas = registrosEntradas.filter(r => ['COBRANCA_PARCELAS', 'COBRANCA_CUOTAS'].includes(r.categoria));
@@ -297,10 +307,10 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
 <!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <style>
-  @page { margin: 10mm; }
+  @page { margin: 5mm; size: 80mm auto; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Courier New', Courier, monospace; font-size: 13px; color: #222; background: #FFF; display: flex; justify-content: center; }
-  .cupom { width: 72mm; margin: 0 auto; padding: 4mm 0; }
+  body { font-family: 'Courier New', Courier, monospace; font-size: 12px; color: #222; background: #FFF; }
+  .cupom { width: 72mm; max-width: 72mm; margin: 0 auto; padding: 4mm 0; }
   .c { text-align: center; }
   .cb { text-align: center; font-weight: 700; }
   .sub { text-align: center; color: #666; font-size: 10px; margin-top: 2px; }
@@ -334,7 +344,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
 
   <div class="row"><span>${lang === 'es' ? 'Caja inicial' : 'Caixa inicial'}</span><span class="r">${fmt(caixaInicial)}</span></div>
   <div class="row"><span class="verde">(+) ${lang === 'es' ? 'Cobros del día' : 'Cobrança do dia'}</span><span class="r verde">${fmt(totalCobrancas)}</span></div>
-  <div class="row"><span class="verde">(+) ${lang === 'es' ? 'Ingresos del día' : 'Ingressos do dia'}</span><span class="r verde">${fmt(totalOutrasReceitas)}</span></div>
+  <div class="row"><span class="verde">(+) ${lang === 'es' ? 'Ingresos del día' : 'Receitas do dia'}</span><span class="r verde">${fmt(totalOutrasReceitas)}</span></div>
   <div class="row"><span class="verm">(-) ${lang === 'es' ? 'Gastos del día' : 'Despesas do dia'}</span><span class="r verm">${fmt(totalSaidas)}</span></div>
   <hr class="sep2">
   <div class="row"><span class="lg">(=) ${lang === 'es' ? 'Caja final' : 'Caixa final'}</span><span class="r lg">${fmt(caixaFinal)}</span></div>
@@ -342,7 +352,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   ${totalMicroseguros > 0 ? `
   <div class="row"><span style="color:#7C3AED">(+) ${lang === 'es' ? 'Microseguro del día' : 'Microseguro do dia'}</span><span class="r" style="color:#7C3AED">${fmt(totalMicroseguros)}</span></div>
   <hr class="sep2">
-  <div class="row"><span class="lg" style="color:#7C3AED">(=) ${lang === 'es' ? 'Caja final microseguro' : 'Caixa final microseguro'}</span><span class="r lg" style="color:#7C3AED">${fmt(caixaMicroFinal)}</span></div>
+  <div class="row"><span class="lg" style="color:#7C3AED">(=) ${lang === 'es' ? 'Caja final microseguro' : 'Caixa final microseguro'}</span><span class="r lg" style="color:#7C3AED">${fmt(totalMicroseguros)}</span></div>
   <hr class="sep2">
   ` : ''}
 
@@ -361,17 +371,6 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
       }).join('')}
       <div class="row"><span class="verde" style="font-size:10px">${t.totalCobrancas}</span><span class="r verde" style="font-size:10px">${fmt(totalCobrancas)}</span></div>
     ` : ''}
-    ${entradasMicroseguro.length > 0 ? `
-      <div class="c cinza" style="font-size:10px">── ${t.microsegurosVendas} (${entradasMicroseguro.length}) ──</div>
-      ${entradasMicroseguro.map((item, idx) => {
-        const sub = item.cliente_nome || item.descricao || '';
-        return `<div class="mov">
-          <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${sub || formatarCategoria(item.categoria)}</span><span class="mov-val verde">+${fmt(parseFloat(item.valor))}</span></div>
-          <div class="mov-meta"><span>${fmtHora(item.created_at)}</span></div>
-        </div>`;
-      }).join('')}
-      <div class="row"><span class="verde" style="font-size:10px">${t.totalMicroseguros}</span><span class="r verde" style="font-size:10px">${fmt(totalMicroseguros)}</span></div>
-    ` : ''}
     ${entradasOutras.length > 0 ? `
       <div class="c cinza" style="font-size:10px">── ${t.outrasReceitas} (${entradasOutras.length}) ──</div>
       ${entradasOutras.map((item, idx) => {
@@ -386,7 +385,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
     ` : ''}
   `}
   <hr class="sep">
-  <div class="row"><span class="verde b">TOTAL ENTRADAS</span><span class="r verde b">${fmt(totalEntradas)}</span></div>
+  ${entradasOutras.length > 0 ? `<div class="row"><span class="verde b">TOTAL ENTRADAS</span><span class="r verde b">${fmt(totalCobrancas + totalOutrasReceitas)}</span></div>` : ''}
 
   <div class="secao">${t.detalheSaidas} (${registrosSaidas.length})</div>
   <hr class="sep">
@@ -403,6 +402,57 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   <hr class="sep">
   <div class="row"><span class="verm b">${t.totalSaidas}</span><span class="r verm b">${fmt(totalSaidas)}</span></div>
 
+  ${entradasMicroseguro.length > 0 ? `
+  <hr class="sep2">
+  <div class="secao" style="color:#7C3AED">MICROSEGUROS</div>
+  <hr class="sep">
+  ${entradasMicroseguro.map((item, idx) => `
+    <div class="mov">
+      <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${item.cliente_nome || item.descricao || '—'}</span><span class="mov-val" style="color:#7C3AED">+${fmt(parseFloat(item.valor))}</span></div>
+      <div class="mov-meta"><span>${fmtHora(item.created_at)}</span></div>
+    </div>`).join('')}
+  <hr class="sep">
+  <div class="row"><span class="b" style="color:#7C3AED">(=) ${lang === 'es' ? 'Caja final microseguro' : 'Caixa final microseguro'}</span><span class="r b" style="color:#7C3AED">${fmt(totalMicroseguros)}</span></div>
+  ` : ''}
+
+  ${vendasDia.length > 0 ? `
+  <hr class="sep2">
+  <div class="secao" style="color:#10B981">${lang === 'es' ? 'VENTAS DEL DÍA' : 'VENDAS DO DIA'}</div>
+  <hr class="sep">
+  ${vendasDia.map((emp, idx) => {
+    const clienteNome = emp.cliente?.nome || '—';
+    const primeiroPgto = emp.data_primeiro_vencimento
+      ? new Date(emp.data_primeiro_vencimento + 'T00:00:00').toLocaleDateString(lang === 'es' ? 'es-CO' : 'pt-BR')
+      : '—';
+    return `<div class="mov">
+      <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${clienteNome}</span><span class="mov-val verde">+${fmt(parseFloat(emp.valor_principal))}</span></div>
+      <div class="mov-sub">${lang === 'es' ? '1° pago' : '1° pgto'}: ${primeiroPgto} · ${emp.numero_parcelas}x ${fmt(parseFloat(emp.valor_parcela))} · ${emp.taxa_juros}%</div>
+      <div class="mov-meta"><span>${fmtHora(emp.created_at)}</span><span>${emp.tipo_emprestimo}</span></div>
+    </div>`;
+  }).join('')}
+  <hr class="sep">
+  <div class="row"><span class="verde b">${lang === 'es' ? 'TOTAL VENTAS' : 'TOTAL VENDAS'}</span><span class="r verde b">${fmt(vendasDia.reduce((s, e) => s + parseFloat(e.valor_principal || 0), 0))}</span></div>
+  ` : ''}
+
+  ${renegociacoesDia.length > 0 ? `
+  <hr class="sep2">
+  <div class="secao" style="color:#F59E0B">${lang === 'es' ? 'RENEGOCIACIONES' : 'RENEGOCIAÇÕES'}</div>
+  <hr class="sep">
+  ${renegociacoesDia.map((emp, idx) => {
+    const clienteNome = emp.cliente?.nome || '—';
+    const primeiroPgto = emp.data_primeiro_vencimento
+      ? new Date(emp.data_primeiro_vencimento + 'T00:00:00').toLocaleDateString(lang === 'es' ? 'es-CO' : 'pt-BR')
+      : '—';
+    return `<div class="mov">
+      <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${clienteNome}</span><span class="mov-val" style="color:#F59E0B">${fmt(parseFloat(emp.valor_principal))}</span></div>
+      <div class="mov-sub">${lang === 'es' ? '1° pago' : '1° pgto'}: ${primeiroPgto} · ${emp.numero_parcelas}x ${fmt(parseFloat(emp.valor_parcela))} · ${emp.taxa_juros}%</div>
+      <div class="mov-meta"><span>${fmtHora(emp.created_at)}</span></div>
+    </div>`;
+  }).join('')}
+  <hr class="sep">
+  <div class="row"><span class="b" style="color:#F59E0B">${lang === 'es' ? 'TOTAL RENEGOCIACIONES' : 'TOTAL RENEGOCIAÇÕES'}</span><span class="r b" style="color:#F59E0B">${fmt(renegociacoesDia.reduce((s, e) => s + parseFloat(e.valor_principal || 0), 0))}</span></div>
+  ` : ''}
+
   <hr class="sep2">
   <div class="row"><span class="lg">${t.saldoFinal}</span><span class="r lg">${fmt(caixaFinal)}</span></div>
   <hr class="sep2">
@@ -412,8 +462,16 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
 </body></html>`;
 
       if (Platform.OS === 'web') {
-        // Web: abre diálogo de impressão do browser (pode salvar como PDF)
-        await Print.printAsync({ html });
+        // Web: abre HTML em nova janela e dispara impressão
+        const win = window.open('', '_blank');
+        if (win) {
+          win.document.write(html);
+          win.document.close();
+          win.focus();
+          setTimeout(() => {
+            win.print();
+          }, 500);
+        }
       } else {
         // Mobile: gera arquivo PDF e compartilha
         const result = await Print.printToFileAsync({ html });
@@ -471,7 +529,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
               <Text style={cupom.txtVerde}>{fmt(totalCobrancas)}</Text>
             </View>
             <View style={cupom.linha}>
-              <Text style={cupom.txtVerde}>(+) {lang === 'es' ? 'Ingresos del día' : 'Ingressos do dia'}</Text>
+              <Text style={cupom.txtVerde}>(+) {lang === 'es' ? 'Ingresos del día' : 'Receitas do dia'}</Text>
               <Text style={cupom.txtVerde}>{fmt(totalOutrasReceitas)}</Text>
             </View>
             <View style={cupom.linha}>
@@ -508,7 +566,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                 <Text style={cupom.div2}>{DDIV}</Text>
                 <View style={cupom.linha}>
                   <Text style={[cupom.txtBold, { color: '#7C3AED' }]}>(=) {lang === 'es' ? 'Caja final microseguro' : 'Caixa final microseguro'}</Text>
-                  <Text style={[cupom.txtBold, { color: '#7C3AED' }]}>{fmt(caixaMicroFinal)}</Text>
+                  <Text style={[cupom.txtBold, { color: '#7C3AED' }]}>{fmt(totalMicroseguros)}</Text>
                 </View>
                 <Text style={cupom.div2}>{DDIV}</Text>
               </>
@@ -624,7 +682,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
             ) : (
               <>
                 {/* ═══ DETALHES ENTRADAS ═══ */}
-                <Text style={[cupom.centro, { marginTop: 14 }]}>{t.detalheEntradas} ({pagamentos.length + entradasMicroseguro.length + entradasOutras.length})</Text>
+                <Text style={[cupom.centro, { marginTop: 14 }]}>{t.detalheEntradas} ({pagamentos.length + entradasOutras.length})</Text>
                 <Text style={cupom.div1}>{DIV}</Text>
 
                 {registrosEntradas.length === 0 ? (
@@ -663,33 +721,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                         })}
                         <View style={cupom.linha}>
                           <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{t.totalCobrancas}</Text>
-                          <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{fmt(pagamentos.reduce((s, p) => s + parseFloat(p.valor_pago_total || 0), 0))}</Text>
-                        </View>
-                      </>
-                    )}
-
-                    {/* ── MICROSEGUROS ── */}
-                    {entradasMicroseguro.length > 0 && (
-                      <>
-                        <Text style={[cupom.centro, { fontSize: 10, marginTop: 6, color: '#6B7280' }]}>── {t.microsegurosVendas} ({entradasMicroseguro.length}) ──</Text>
-                        {entradasMicroseguro.map((item, idx) => (
-                          <View key={item.id}>
-                            <View style={cupom.itemRow}>
-                              <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
-                              <Text style={cupom.itemCat} numberOfLines={1} ellipsizeMode="tail">
-                                {item.cliente_nome || formatarCategoria(item.categoria)}
-                              </Text>
-                              <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(parseFloat(item.valor))}</Text>
-                            </View>
-                            <View style={cupom.itemMeta}>
-                              <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
-                            </View>
-                            {idx < entradasMicroseguro.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
-                          </View>
-                        ))}
-                        <View style={cupom.linha}>
-                          <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{t.totalMicroseguros}</Text>
-                          <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{fmt(totalMicroseguros)}</Text>
+                          <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{fmt(totalCobrancas)}</Text>
                         </View>
                       </>
                     )}
@@ -724,11 +756,15 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                   </>
                 )}
 
-                <Text style={cupom.div1}>{DIV}</Text>
-                <View style={cupom.linha}>
-                  <Text style={cupom.txtVerde}>TOTAL ENTRADAS</Text>
-                  <Text style={cupom.txtVerde}>{fmt(totalEntradas)}</Text>
-                </View>
+                {entradasOutras.length > 0 && (
+                  <>
+                    <Text style={cupom.div1}>{DIV}</Text>
+                    <View style={cupom.linha}>
+                      <Text style={cupom.txtVerde}>TOTAL ENTRADAS</Text>
+                      <Text style={cupom.txtVerde}>{fmt(totalCobrancas + totalOutrasReceitas)}</Text>
+                    </View>
+                  </>
+                )}
 
                 {/* ═══ DETALHES SAÍDAS ═══ */}
                 <Text style={[cupom.centro, { marginTop: 14 }]}>{t.detalheSaidas} ({registrosSaidas.length})</Text>
@@ -1080,6 +1116,7 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
           .eq('liquidacao_id', liquidacaoId)
           .gte('created_at', dataAbertura)
           .neq('status', 'CANCELADO')
+          .neq('tipo_emprestimo', 'RENEGOCIACAO')
           .order('created_at', { ascending: false });
         if (!error) setRegistros(data || []);
         setLoading(false);

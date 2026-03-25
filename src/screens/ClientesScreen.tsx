@@ -634,6 +634,34 @@ export default function ClientesScreen({ navigation, route }: any) {
     }
   }, [rotaId, listaReordenar]);
 
+  // Atualiza saldo do empréstimo localmente após pagamento — sem recarregar tudo
+  const atualizarSaldoLocal = useCallback(async (emprestimoId: string) => {
+    if (!emprestimoId) return;
+    const { data } = await supabase
+      .from('emprestimos')
+      .select('id, valor_saldo, status')
+      .eq('id', emprestimoId)
+      .single();
+    if (!data) return;
+    const novoSaldo = data.valor_saldo ?? 0;
+    const novoStatus = data.status;
+    // Atualizar aba Liquidação (raw)
+    setRaw(prev => prev.map(r =>
+      r.emprestimo_id === emprestimoId
+        ? { ...r, saldo_emprestimo: novoSaldo }
+        : r
+    ));
+    // Atualizar aba Todos (todosList)
+    setTodosList(prev => prev.map(c => ({
+      ...c,
+      emprestimos: c.emprestimos.map(e =>
+        e.id === emprestimoId
+          ? { ...e, saldo_emprestimo: novoSaldo, status: novoStatus }
+          : e
+      ),
+    })));
+  }, []);
+
   // ─────────────────────────────────────────────────────────────────────────
 
   const loadLiq = useCallback(async () => {
@@ -1196,6 +1224,7 @@ export default function ClientesScreen({ navigation, route }: any) {
           setParcelaPagamento(null);
           setDadosPagamento(null);
           setUsarCredito(false);
+          if (clienteModal?.emprestimo_id) atualizarSaldoLocal(clienteModal.emprestimo_id);
           setClienteModal(null);
           loadLiq();
           showAlert(t.sucessoGenerico || 'Sucesso', res.mensagem || t.sucesso);
@@ -1250,8 +1279,8 @@ export default function ClientesScreen({ navigation, route }: any) {
       if (res?.sucesso) {
         setModalEstornoVisible(false);
         setParcelaEstorno(null);
-        // Usa a mensagem retornada pela function que já inclui o nome do responsável
         Alert.alert(t.sucessoGenerico, res.mensagem || t.estornoSucesso);
+        if (clienteModal?.emprestimo_id) atualizarSaldoLocal(clienteModal.emprestimo_id);
         if (clienteModal) abrirParcelas(clienteModal.id, clienteModal.nome, clienteModal.emprestimo_id);
         loadLiq();
       } else { 
