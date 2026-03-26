@@ -49,6 +49,10 @@ interface Parcela {
   data_vencimento: string;
   status: string;
   dias_atraso: number;
+  // Dados do pagamento
+  data_pagamento?: string;
+  forma_pagamento?: string;
+  liquidacao_data?: string;
 }
 
 type Aba = 'pessoais' | 'emprestimo' | 'historico';
@@ -59,7 +63,7 @@ const T = {
   'pt-BR': {
     pessoais: 'Pessoais', emprestimo: 'Empréstimo', historico: 'Histórico',
     nome: 'Nome', telefone: 'Telefone', documento: 'Documento', endereco: 'Endereço',
-    codigo: 'Código', status: 'Status', dataCadastro: 'Cadastro', dataEmprestimo: 'Empréstimo',
+    codigo: 'Código', status: 'Status',
     valorPrincipal: 'Principal', valorTotal: 'Total', valorPago: 'Pago', saldo: 'Saldo',
     taxa: 'Taxa', parcelas: 'Parcelas', frequencia: 'Frequência', data: 'Data',
     proxVencimento: 'Próximo Vencimento', pagas: 'Pagas', vencidas: 'Vencidas',
@@ -73,7 +77,7 @@ const T = {
   'es': {
     pessoais: 'Personales', emprestimo: 'Préstamo', historico: 'Historial',
     nome: 'Nombre', telefone: 'Teléfono', documento: 'Documento', endereco: 'Dirección',
-    codigo: 'Código', status: 'Estado', dataCadastro: 'Registro', dataEmprestimo: 'Préstamo',
+    codigo: 'Código', status: 'Estado',
     valorPrincipal: 'Principal', valorTotal: 'Total', valorPago: 'Pagado', saldo: 'Saldo',
     taxa: 'Tasa', parcelas: 'Cuotas', frequencia: 'Frecuencia', data: 'Fecha',
     proxVencimento: 'Próximo Vencimiento', pagas: 'Pagadas', vencidas: 'Vencidas',
@@ -184,27 +188,6 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
         .order('data_emprestimo', { ascending: false });
 
       const all = (emps || []) as any[];
-
-      // Descontar crédito acumulado (saldo_excedente) do saldo de cada empréstimo
-      const empIds = all.map(e => e.id).filter(Boolean);
-      if (empIds.length > 0) {
-        const { data: excedentes } = await supabase
-          .from('emprestimo_parcelas')
-          .select('emprestimo_id, saldo_excedente')
-          .in('emprestimo_id', empIds)
-          .gt('saldo_excedente', 0);
-        if (excedentes && excedentes.length > 0) {
-          const creditoMap = new Map<string, number>();
-          (excedentes as any[]).forEach(p => {
-            creditoMap.set(p.emprestimo_id, (creditoMap.get(p.emprestimo_id) || 0) + parseFloat(p.saldo_excedente || 0));
-          });
-          all.forEach(e => {
-            const credito = creditoMap.get(e.id) || 0;
-            if (credito > 0) e.valor_saldo = Math.max(0, (e.valor_saldo || 0) - credito);
-          });
-        }
-      }
-
       setEmpAtivos(all.filter(e => e.status === 'ATIVO' || e.status === 'VENCIDO'));
       setEmpHistorico(all.filter(e => e.status !== 'ATIVO' && e.status !== 'VENCIDO'));
     } catch (e) {
@@ -229,10 +212,32 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
     try {
       const { data } = await supabase
         .from('emprestimo_parcelas')
-        .select('id, numero_parcela, valor_parcela, valor_pago, valor_saldo, data_vencimento, status, dias_atraso')
+        .select(`
+          id, numero_parcela, valor_parcela, valor_pago, valor_saldo,
+          data_vencimento, status, dias_atraso,
+          pagamentos_parcelas(
+            valor_pago_total, forma_pagamento, created_at, estornado,
+            liquidacoes_diarias(data_liquidacao, data_abertura)
+          )
+        `)
         .eq('emprestimo_id', empId)
         .order('numero_parcela', { ascending: true });
-      setParcelas(prev => new Map(prev).set(empId, (data || []) as Parcela[]));
+
+      // Enriquecer com dados do pagamento mais recente não estornado
+      const enriched = (data || []).map((p: any) => {
+        const pags = (p.pagamentos_parcelas || []).filter((pp: any) => !pp.estornado);
+        const ultimo = pags[pags.length - 1];
+        const dataLiq = ultimo?.liquidacoes_diarias?.data_liquidacao
+          || ultimo?.liquidacoes_diarias?.data_abertura?.substring(0, 10)
+          || null;
+        return {
+          ...p,
+          data_pagamento: ultimo?.created_at || null,
+          forma_pagamento: ultimo?.forma_pagamento || null,
+          liquidacao_data: dataLiq,
+        };
+      });
+      setParcelas(prev => new Map(prev).set(empId, enriched as Parcela[]));
     } catch (e) {
       console.error('Erro ao carregar parcelas:', e);
     } finally {
@@ -275,13 +280,13 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       <View style={S.dadosCard}>
         {cli.codigo_cliente && (
           <View style={S.dadoRow}>
-            <Text style={S.dadoLabel}>{t.codigo}</Text>
+            <Text style={S.dadoLabel}>🏷 {t.codigo}</Text>
             <Text style={S.dadoValue}>{cli.codigo_cliente}</Text>
           </View>
         )}
         {(cli.documento || cliente.documento) && (
           <View style={S.dadoRow}>
-            <Text style={S.dadoLabel}>{t.documento}</Text>
+            <Text style={S.dadoLabel}>📄 {t.documento}</Text>
             <Text style={S.dadoValue}>{cli.documento || cliente.documento}</Text>
           </View>
         )}
@@ -289,7 +294,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           const tel = cli.telefone_celular || cliente.telefone || '';
           return (
             <View style={S.dadoRow}>
-              <Text style={S.dadoLabel}>{t.telefone}</Text>
+              <Text style={S.dadoLabel}>📱 {t.telefone}</Text>
               <View style={S.dadoActions}>
                 <TouchableOpacity onPress={() => Linking.openURL(`tel:${tel.replace(/\D/g, '')}`)}>
                   <Text style={[S.dadoValue, { color: '#2563EB' }]}>{tel}</Text>
@@ -298,7 +303,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                   const num = fmtWhatsApp(tel);
                   Linking.openURL(`https://wa.me/${num}`);
                 }}>
-                  <Text style={S.whatsappIcon}>WhatsApp</Text>
+                  <Text style={S.whatsappIcon}>💬</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -308,22 +313,16 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           const end = cli.endereco || cliente.endereco || '';
           return (
             <View style={S.dadoRow}>
-              <Text style={S.dadoLabel}>{t.endereco}</Text>
+              <Text style={S.dadoLabel}>📍 {t.endereco}</Text>
               <View style={S.dadoActions}>
                 <Text style={S.dadoValue} numberOfLines={2}>{end}</Text>
                 <TouchableOpacity style={S.mapaBtn} onPress={() => abrirMapa(end)}>
-                  <Text style={S.mapaIcon}>{lang === 'es' ? 'Ver mapa' : 'Ver mapa'}</Text>
+                  <Text style={S.mapaIcon}>🧭</Text>
                 </TouchableOpacity>
               </View>
             </View>
           );
         })()}
-        {clienteCompleto?.created_at && (
-          <View style={S.dadoRow}>
-            <Text style={S.dadoLabel}>{t.dataCadastro}</Text>
-            <Text style={S.dadoValue}>{fmtData(clienteCompleto.created_at)}</Text>
-          </View>
-        )}
       </View>
 
       {/* Resumo rápido empréstimos */}
@@ -373,7 +372,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
 
         {/* Info compacta */}
         <View style={S.empInfoRow}>
-          <Text style={S.empInfoItem}>{t.dataEmprestimo} {fmtData(emp.data_emprestimo)}</Text>
+          <Text style={S.empInfoItem}>{fmtData(emp.data_emprestimo)}</Text>
           <Text style={S.empInfoDot}>•</Text>
           <Text style={S.empInfoItem}>{emp.parcelas_pagas}/{emp.numero_parcelas} {t.parcelas.toLowerCase()}</Text>
           <Text style={S.empInfoDot}>•</Text>
@@ -432,7 +431,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                   const isPago = p.status === 'PAGO';
                   const isVencida = p.status === 'VENCIDO' || p.status === 'VENCIDA';
                   const isParcial = p.status === 'PARCIAL';
-                  const icon = isPago ? '●' : isVencida ? '●' : isParcial ? '●' : '●';
+                  const icon = isPago ? '✅' : isVencida ? '❌' : isParcial ? '🟡' : '📅';
                   const corP = corStatus[isPago ? 'PAGO' : isVencida ? 'VENCIDO' : isParcial ? 'PARCIAL' : 'PENDENTE'];
                   return (
                     <View key={p.id} style={S.parcelaRow}>
@@ -448,6 +447,23 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                           {isParcial && <Text style={S.parcelaParcial}>{t.parcial}: {fmt(p.valor_pago)}/{fmt(p.valor_parcela)}</Text>}
                           {isVencida && p.dias_atraso > 0 && <Text style={S.parcelaAtraso}>{p.dias_atraso}d</Text>}
                         </View>
+                        {(isPago || isParcial) && p.data_pagamento && (
+                          <View style={{ marginTop: 3, gap: 1 }}>
+                            <Text style={{ fontSize: 10, color: '#6B7280' }}>
+                              {lang === 'es' ? 'Pagado' : 'Pago'}: {new Date(p.data_pagamento.endsWith('Z') ? p.data_pagamento : p.data_pagamento + 'Z').toLocaleString(lang === 'es' ? 'es-CO' : 'pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                            </Text>
+                            {p.forma_pagamento && (
+                              <Text style={{ fontSize: 10, color: '#6B7280' }}>
+                                {p.forma_pagamento === 'DINHEIRO' ? (lang === 'es' ? 'Efectivo' : 'Dinheiro') : (lang === 'es' ? 'Transferencia' : 'Transferência')}
+                              </Text>
+                            )}
+                            {p.liquidacao_data && (
+                              <Text style={{ fontSize: 10, color: '#9CA3AF' }}>
+                                {lang === 'es' ? 'Liquidación' : 'Liquidação'}: {fmtData(p.liquidacao_data)}
+                              </Text>
+                            )}
+                          </View>
+                        )}
                       </View>
                       <View style={[S.parcelaStatusBadge, { backgroundColor: corP.bg }]}>
                         <Text style={[S.parcelaStatusText, { color: corP.text }]}>
@@ -472,7 +488,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
         <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
       ) : empAtivos.length === 0 ? (
         <View style={S.emptyBox}>
-          <Text style={S.emptyIcon}>—</Text>
+          <Text style={S.emptyIcon}>📋</Text>
           <Text style={S.emptyText}>{t.semEmprestimo}</Text>
         </View>
       ) : (
@@ -488,7 +504,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
         <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
       ) : empHistorico.length === 0 ? (
         <View style={S.emptyBox}>
-          <Text style={S.emptyIcon}>—</Text>
+          <Text style={S.emptyIcon}>📂</Text>
           <Text style={S.emptyText}>{t.semHistorico}</Text>
         </View>
       ) : (
@@ -510,7 +526,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
               </View>
               <View style={S.headerTexts}>
                 <Text style={S.headerNome} numberOfLines={1}>{cliente.nome.toLowerCase()}</Text>
-                {cliente.telefone && <Text style={S.headerTel}>{cliente.telefone}</Text>}
+                {cliente.telefone && <Text style={S.headerTel}>📱 {cliente.telefone}</Text>}
               </View>
             </View>
             <TouchableOpacity onPress={onClose} style={S.closeBtn}>
@@ -527,7 +543,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                 onPress={() => setAba(a)}
               >
                 <Text style={[S.tabText, aba === a && S.tabTextAtivo]}>
-                  {} {t[a]}
+                  {a === 'pessoais' ? '👤' : a === 'emprestimo' ? '💰' : '📂'} {t[a]}
                 </Text>
                 {a === 'emprestimo' && empAtivos.length > 0 && (
                   <View style={S.tabBadge}><Text style={S.tabBadgeText}>{empAtivos.length}</Text></View>
@@ -591,10 +607,10 @@ const S = StyleSheet.create({
   dadoLabel: { fontSize: 13, color: '#6B7280', minWidth: 80 },
   dadoValue: { fontSize: 13, fontWeight: '600', color: '#1F2937', textAlign: 'right', flex: 1, marginLeft: 12 },
   dadoActions: { flexDirection: 'row', alignItems: 'center', flex: 1, justifyContent: 'flex-end', gap: 8 },
-  whatsappBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, backgroundColor: '#25D366', alignItems: 'center', justifyContent: 'center' },
-  whatsappIcon: { fontSize: 11, color: '#fff', fontWeight: '600' },
-  mapaBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' },
-  mapaIcon: { fontSize: 11, color: '#fff', fontWeight: '600' },
+  whatsappBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#25D366', alignItems: 'center', justifyContent: 'center' },
+  whatsappIcon: { fontSize: 15 },
+  mapaBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' },
+  mapaIcon: { fontSize: 15 },
 
   resumoCard: { marginTop: 16, backgroundColor: '#EFF6FF', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#BFDBFE' },
   resumoTitle: { fontSize: 13, fontWeight: '600', color: '#1E40AF', marginBottom: 8 },

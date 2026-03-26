@@ -241,14 +241,18 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         }
       } else {
         console.log('✅ Pagamentos carregados:', pags?.length);
-        // Deduplicar por emprestimo_parcela_id — manter apenas o mais recente por parcela
-        const seen = new Set();
-        const deduped = (pags || []).filter((p: any) => {
-          const key = p.emprestimo_parcela_id || p.id;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
+        // Deduplicar: por emprestimo_parcela_id se disponível, senão por cliente_id+numero_parcela
+        // Manter o registro com maior valor_pago_total (estado final da parcela)
+        const mapaDedup = new Map<string, any>();
+        for (const p of (pags || [])) {
+          const key = p.emprestimo_parcela_id || `${p.cliente_id}-${p.numero_parcela}`;
+          const existing = mapaDedup.get(key);
+          if (!existing || parseFloat(p.valor_pago_total || 0) > parseFloat(existing.valor_pago_total || 0)) {
+            mapaDedup.set(key, p);
+          }
+        }
+        const deduped = Array.from(mapaDedup.values())
+          .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
         setPagamentos(deduped);
       }
 
@@ -359,14 +363,15 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   <div class="secao">${t.detalheEntradas} (${registrosEntradas.length})</div>
   <hr class="sep">
   ${registrosEntradas.length === 0 ? `<div class="c cinza">${t.nenhumaEntrada}</div>` : `
-    ${entradasCobrancas.length > 0 ? `
-      <div class="c cinza" style="font-size:10px">── ${t.cobrancasParcelas} (${entradasCobrancas.length}) ──</div>
-      ${entradasCobrancas.map((item, idx) => {
-        const sub = item.cliente_nome || item.descricao || '';
+    ${pagamentos.length > 0 ? `
+      <div class="c cinza" style="font-size:10px">── ${t.cobrancasParcelas} (${pagamentos.length}) ──</div>
+      ${pagamentos.map((p, idx) => {
+        const nomeCliente = (p.clientes as any)?.nome || (p.cliente as any)?.nome || `Parcela ${p.numero_parcela}`;
+        const excedente = parseFloat(p.valor_credito_gerado || 0);
         return `<div class="mov">
-          <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${formatarCategoria(item.categoria)}</span><span class="mov-val verde">+${fmt(parseFloat(item.valor))}</span></div>
-          ${sub ? `<div class="mov-sub">${sub}</div>` : ''}
-          <div class="mov-meta"><span>${fmtHora(item.created_at)}</span>${item.forma_pagamento ? `<span>${item.forma_pagamento}</span>` : ''}</div>
+          <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${nomeCliente}</span><span class="mov-val verde">+${fmt(parseFloat(p.valor_pago_total || 0))}</span></div>
+          ${excedente > 0 ? `<div class="mov-sub" style="color:#2563EB">${lang === 'es' ? 'Pagado de más' : 'Pago além'} ${fmt(excedente)}</div>` : ''}
+          <div class="mov-meta"><span>${fmtHora(p.created_at)}</span>${p.forma_pagamento ? `<span>${p.forma_pagamento}</span>` : ''}</div>
         </div>`;
       }).join('')}
       <div class="row"><span class="verde" style="font-size:10px">${t.totalCobrancas}</span><span class="r verde" style="font-size:10px">${fmt(totalCobrancas)}</span></div>

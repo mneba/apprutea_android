@@ -1583,7 +1583,17 @@ export default function ClientesScreen({ navigation, route }: any) {
     // Filtro por tipo de empréstimo
     if (filtroTipo !== 'todos') { r = r.filter(c => c.emprestimos.some(e => e.tipo_emprestimo === filtroTipo)); }
     // Filtro por status do empréstimo
-    if (filtroStatus !== 'todos') { r = r.filter(c => c.emprestimos.some(e => e.status === filtroStatus)); }
+    if (filtroStatus !== 'todos') {
+      if (filtroStatus === 'QUITADO') {
+        // Cliente quitado = tem empréstimo QUITADO e NÃO tem nenhum ATIVO ou VENCIDO
+        r = r.filter(c =>
+          c.emprestimos.some(e => e.status === 'QUITADO') &&
+          !c.emprestimos.some(e => e.status === 'ATIVO' || e.status === 'VENCIDO')
+        );
+      } else {
+        r = r.filter(c => c.emprestimos.some(e => e.status === filtroStatus));
+      }
+    }
     // Ordenação: por ordem da rota se disponível, senão A-Z
     r.sort((a, b) => {
       const oa = ordemRotaMap.get(a.id) ?? 9999;
@@ -2307,7 +2317,8 @@ export default function ClientesScreen({ navigation, route }: any) {
         clienteNome={notasClienteNome}
         lang={lang}
         coords={coords}
-        permitirCriar={true}
+        permitirCriar={!!liqId}
+        mensagemSemLiq={lang === 'es' ? 'Abra una liquidación para crear notas' : 'Abra uma liquidação para criar notas'}
         obsLocalPadrao="Cliente"
       />
 
