@@ -210,7 +210,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         .from('pagamentos_parcelas')
         .select(`
           id, numero_parcela, valor_pago_total, valor_parcela, valor_credito_gerado,
-          forma_pagamento, created_at, cliente_id, emprestimo_parcela_id,
+          forma_pagamento, created_at, cliente_id, parcela_id, emprestimo_id,
           clientes!pagamentos_parcelas_cliente_id_fkey(nome, consecutivo)
         `)
         .eq('liquidacao_id', liquidacaoId)
@@ -241,13 +241,15 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         }
       } else {
         console.log('✅ Pagamentos carregados:', pags?.length);
-        // Deduplicar: por emprestimo_parcela_id se disponível, senão por cliente_id+numero_parcela
-        // Manter o registro com maior valor_pago_total (estado final da parcela)
+        // Deduplicar: chave = emprestimo_parcela_id > emprestimo_id+numero_parcela > cliente_id+numero_parcela
+        // Manter o registro com maior valor total real (valor_pago_total + valor_credito_gerado)
         const mapaDedup = new Map<string, any>();
         for (const p of (pags || [])) {
-          const key = p.emprestimo_parcela_id || `${p.cliente_id}-${p.numero_parcela}`;
+          const key = p.parcela_id || `${p.emprestimo_id}-${p.numero_parcela}` || `${p.cliente_id}-${p.numero_parcela}`;
           const existing = mapaDedup.get(key);
-          if (!existing || parseFloat(p.valor_pago_total || 0) > parseFloat(existing.valor_pago_total || 0)) {
+          const totalAtual = parseFloat(p.valor_pago_total || 0);
+          const totalExistente = existing ? parseFloat(existing.valor_pago_total || 0) : -1;
+          if (!existing || totalAtual > totalExistente) {
             mapaDedup.set(key, p);
           }
         }
@@ -368,9 +370,11 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
       ${pagamentos.map((p, idx) => {
         const nomeCliente = (p.clientes as any)?.nome || (p.cliente as any)?.nome || `Parcela ${p.numero_parcela}`;
         const excedente = parseFloat(p.valor_credito_gerado || 0);
+        const valorParcela = parseFloat(p.valor_parcela || 0);
+        const totalRealPago = parseFloat(p.valor_pago_total || 0);
         return `<div class="mov">
-          <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${nomeCliente}</span><span class="mov-val verde">+${fmt(parseFloat(p.valor_pago_total || 0))}</span></div>
-          ${excedente > 0 ? `<div class="mov-sub" style="color:#2563EB">${lang === 'es' ? 'Pagado de más' : 'Pago além'} ${fmt(excedente)}</div>` : ''}
+          <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${nomeCliente}</span><span class="mov-val verde">+${fmt(totalRealPago)}</span></div>
+          ${excedente > 0 ? `<div class="mov-sub" style="color:#6B7280">${lang === 'es' ? 'Cuota' : 'Parcela'}: ${fmt(valorParcela)} · ${lang === 'es' ? 'Excedente' : 'Excedente'}: ${fmt(excedente)}</div>` : ''}
           <div class="mov-meta"><span>${fmtHora(p.created_at)}</span>${p.forma_pagamento ? `<span>${p.forma_pagamento}</span>` : ''}</div>
         </div>`;
       }).join('')}
@@ -702,18 +706,20 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                         {pagamentos.map((p, idx) => {
                           const nomeCliente = (p.clientes as any)?.nome || (p.cliente as any)?.nome || `Parcela ${p.numero_parcela}`;
                           const excedente = parseFloat(p.valor_credito_gerado || 0);
+                          const valorParcela = parseFloat(p.valor_parcela || 0);
+                          const totalRealPago = parseFloat(p.valor_pago_total || 0);
                           const temExcedente = excedente > 0;
                           return (
                             <View key={p.id}>
                               <View style={cupom.itemRow}>
                                 <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
                                 <Text style={cupom.itemCat} numberOfLines={1}>{nomeCliente}</Text>
-                                <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(parseFloat(p.valor_pago_total || 0))}</Text>
+                                <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(totalRealPago)}</Text>
                               </View>
                               {temExcedente && (
-                                <Text style={[cupom.itemSub, { color: '#2563EB', fontSize: 9 }]}>
+                                <Text style={[cupom.itemSub, { color: '#6B7280', fontSize: 9 }]}>
                                   {'   '}
-                                  {lang === 'es' ? 'Pagado de más' : 'Pago além'} {fmt(excedente)}
+                                  {lang === 'es' ? 'Cuota' : 'Parcela'}: {fmt(valorParcela)} · {lang === 'es' ? 'Excedente' : 'Excedente'}: {fmt(excedente)}
                                 </Text>
                               )}
                               <View style={cupom.itemMeta}>
@@ -923,7 +929,7 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
     }
   };
 
-  // Agrupar por cliente
+  // Agrupar por cliente — deduplicar parcelas pelo maior valor_pago_total
   const clientesAgrupados: ClienteGrupo[] = React.useMemo(() => {
     const map = new Map<string, ClienteGrupo>();
     registros.forEach(r => {
@@ -938,8 +944,17 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
         });
       }
       const grupo = map.get(cId)!;
-      grupo.totalPago += parseFloat(r.valor_pago_total || 0);
-      grupo.parcelas.push(r);
+      // Deduplicar por numero_parcela — manter o de maior valor_pago_total
+      const existIdx = grupo.parcelas.findIndex((p: any) => p.numero_parcela === r.numero_parcela);
+      if (existIdx === -1) {
+        grupo.parcelas.push(r);
+      } else if (parseFloat(r.valor_pago_total || 0) > parseFloat(grupo.parcelas[existIdx].valor_pago_total || 0)) {
+        grupo.parcelas[existIdx] = r;
+      }
+    });
+    // Recalcular totalPago após deduplicação
+    map.forEach(grupo => {
+      grupo.totalPago = grupo.parcelas.reduce((s: number, p: any) => s + parseFloat(p.valor_pago_total || 0), 0);
     });
     return Array.from(map.values());
   }, [registros]);
