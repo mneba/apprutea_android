@@ -53,6 +53,8 @@ interface Parcela {
   data_pagamento?: string;
   forma_pagamento?: string;
   liquidacao_data?: string;
+  valor_pago_total?: number;
+  valor_credito_gerado?: number;
 }
 
 type Aba = 'pessoais' | 'emprestimo' | 'historico';
@@ -216,7 +218,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           id, numero_parcela, valor_parcela, valor_pago, valor_saldo,
           data_vencimento, status, dias_atraso,
           pagamentos_parcelas(
-            valor_pago_total, forma_pagamento, created_at, estornado,
+            valor_pago_total, valor_credito_gerado, forma_pagamento, created_at, estornado,
             liquidacoes_diarias(data_liquidacao, data_abertura)
           )
         `)
@@ -226,7 +228,9 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       // Enriquecer com dados do pagamento mais recente não estornado
       const enriched = (data || []).map((p: any) => {
         const pags = (p.pagamentos_parcelas || []).filter((pp: any) => !pp.estornado);
-        const ultimo = pags[pags.length - 1];
+        const ultimo = pags.sort((a: any, b: any) =>
+          parseFloat(b.valor_pago_total || 0) - parseFloat(a.valor_pago_total || 0)
+        )[0];
         const dataLiq = ultimo?.liquidacoes_diarias?.data_liquidacao
           || ultimo?.liquidacoes_diarias?.data_abertura?.substring(0, 10)
           || null;
@@ -235,6 +239,8 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           data_pagamento: ultimo?.created_at || null,
           forma_pagamento: ultimo?.forma_pagamento || null,
           liquidacao_data: dataLiq,
+          valor_pago_total: ultimo ? parseFloat(ultimo.valor_pago_total || 0) : null,
+          valor_credito_gerado: ultimo ? parseFloat(ultimo.valor_credito_gerado || 0) : null,
         };
       });
       setParcelas(prev => new Map(prev).set(empId, enriched as Parcela[]));
@@ -431,45 +437,87 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                   const isPago = p.status === 'PAGO';
                   const isVencida = p.status === 'VENCIDO' || p.status === 'VENCIDA';
                   const isParcial = p.status === 'PARCIAL';
-                  const icon = isPago ? '✅' : isVencida ? '❌' : isParcial ? '🟡' : '📅';
                   const corP = corStatus[isPago ? 'PAGO' : isVencida ? 'VENCIDO' : isParcial ? 'PARCIAL' : 'PENDENTE'];
+                  const valorPagoReal = p.valor_pago_total ?? p.valor_pago;
+                  const temCredito = (p.valor_credito_gerado ?? 0) > 0;
+
+                  const fmtTs = (ts: string) => {
+                    try {
+                      const s = ts.replace(' ', 'T').replace(/\+00(:00)?$/, 'Z');
+                      const dt = new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z');
+                      if (isNaN(dt.getTime())) return '—';
+                      return dt.toLocaleString(lang === 'es' ? 'es-CO' : 'pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+                    } catch { return '—'; }
+                  };
+
                   return (
-                    <View key={p.id} style={S.parcelaRow}>
-                      <Text style={S.parcelaIcon}>{icon}</Text>
-                      <View style={S.parcelaInfo}>
-                        <View style={S.parcelaTopRow}>
-                          <Text style={S.parcelaNum}>#{p.numero_parcela}</Text>
-                          <Text style={S.parcelaData}>{fmtData(p.data_vencimento)}</Text>
+                    <View key={p.id} style={{
+                      paddingVertical: 10,
+                      paddingHorizontal: 12,
+                      marginBottom: 6,
+                      backgroundColor: isPago ? '#F0FDF4' : isVencida ? '#FEF2F2' : '#FAFAFA',
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: isPago ? '#BBF7D0' : isVencida ? '#FECACA' : '#E5E7EB',
+                    }}>
+                      {/* Linha 1: número + vencimento + valor + status */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#374151', minWidth: 24 }}>#{p.numero_parcela}</Text>
+                          <Text style={{ fontSize: 11, color: '#9CA3AF' }}>{fmtData(p.data_vencimento)}</Text>
                         </View>
-                        <View style={S.parcelaValRow}>
-                          <Text style={S.parcelaValor}>{fmt(p.valor_parcela)}</Text>
-                          {isPago && <Text style={S.parcelaPago}>{t.pago.toLowerCase()}: {fmt(p.valor_pago)}</Text>}
-                          {isParcial && <Text style={S.parcelaParcial}>{t.parcial}: {fmt(p.valor_pago)}/{fmt(p.valor_parcela)}</Text>}
-                          {isVencida && p.dias_atraso > 0 && <Text style={S.parcelaAtraso}>{p.dias_atraso}d</Text>}
-                        </View>
-                        {(isPago || isParcial) && p.data_pagamento && (
-                          <View style={{ marginTop: 3, gap: 1 }}>
-                            <Text style={{ fontSize: 10, color: '#6B7280' }}>
-                              {lang === 'es' ? 'Pagado' : 'Pago'}: {new Date(p.data_pagamento.endsWith('Z') ? p.data_pagamento : p.data_pagamento + 'Z').toLocaleString(lang === 'es' ? 'es-CO' : 'pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <Text style={{
+                            fontSize: 15, fontWeight: '700',
+                            color: isPago ? '#10B981' : isVencida ? '#EF4444' : '#374151'
+                          }}>
+                            {(isPago || isParcial) ? fmt(valorPagoReal) : fmt(p.valor_parcela)}
+                          </Text>
+                          <View style={{ backgroundColor: corP.bg, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                            <Text style={{ fontSize: 10, fontWeight: '600', color: corP.text }}>
+                              {isPago ? t.pago : isVencida ? t.vencido : isParcial ? t.parcial : t.pendente}
                             </Text>
-                            {p.forma_pagamento && (
-                              <Text style={{ fontSize: 10, color: '#6B7280' }}>
-                                {p.forma_pagamento === 'DINHEIRO' ? (lang === 'es' ? 'Efectivo' : 'Dinheiro') : (lang === 'es' ? 'Transferencia' : 'Transferência')}
-                              </Text>
-                            )}
-                            {p.liquidacao_data && (
-                              <Text style={{ fontSize: 10, color: '#9CA3AF' }}>
-                                {lang === 'es' ? 'Liquidación' : 'Liquidação'}: {fmtData(p.liquidacao_data)}
-                              </Text>
-                            )}
                           </View>
-                        )}
+                        </View>
                       </View>
-                      <View style={[S.parcelaStatusBadge, { backgroundColor: corP.bg }]}>
-                        <Text style={[S.parcelaStatusText, { color: corP.text }]}>
-                          {isPago ? t.pago : isVencida ? t.vencido : isParcial ? t.parcial : t.pendente}
+
+                      {/* Linha 2 (pago/parcial): detalhes do pagamento */}
+                      {(isPago || isParcial) && (
+                        <View style={{ marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#D1FAE5', flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                          {parseFloat(String(valorPagoReal)) !== p.valor_parcela && (
+                            <Text style={{ fontSize: 11, color: '#6B7280' }}>
+                              Parcela: {fmt(p.valor_parcela)}
+                            </Text>
+                          )}
+                          {p.data_pagamento && (
+                            <Text style={{ fontSize: 11, color: '#6B7280' }}>
+                              {fmtTs(p.data_pagamento)}
+                            </Text>
+                          )}
+                          {p.forma_pagamento && (
+                            <Text style={{ fontSize: 11, color: '#6B7280' }}>
+                              {p.forma_pagamento === 'DINHEIRO' ? (lang === 'es' ? 'Efectivo' : 'Dinheiro') : (lang === 'es' ? 'Transferencia' : 'Transferência')}
+                            </Text>
+                          )}
+                          {temCredito && (
+                            <Text style={{ fontSize: 11, color: '#2563EB', fontWeight: '600' }}>
+                              +{fmt(p.valor_credito_gerado!)} {lang === 'es' ? 'crédito' : 'crédito'}
+                            </Text>
+                          )}
+                          {p.liquidacao_data && (
+                            <Text style={{ fontSize: 11, color: '#9CA3AF' }}>
+                              Liq. {fmtData(p.liquidacao_data)}
+                            </Text>
+                          )}
+                        </View>
+                      )}
+
+                      {/* Linha extra: atraso */}
+                      {isVencida && p.dias_atraso > 0 && (
+                        <Text style={{ fontSize: 11, color: '#EF4444', marginTop: 4 }}>
+                          {p.dias_atraso} {lang === 'es' ? 'días de atraso' : 'dias de atraso'}
                         </Text>
-                      </View>
+                      )}
                     </View>
                   );
                 })}
@@ -480,8 +528,6 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       </View>
     );
   };
-
-  // ==================== ABA EMPRÉSTIMO ====================
   const renderEmprestimo = () => (
     <ScrollView style={S.abaContent} showsVerticalScrollIndicator={false}>
       {loading ? (
@@ -543,7 +589,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                 onPress={() => setAba(a)}
               >
                 <Text style={[S.tabText, aba === a && S.tabTextAtivo]}>
-                  {a === 'pessoais' ? '👤' : a === 'emprestimo' ? '💰' : '📂'} {t[a]}
+                  {t[a]}
                 </Text>
                 {a === 'emprestimo' && empAtivos.length > 0 && (
                   <View style={S.tabBadge}><Text style={S.tabBadgeText}>{empAtivos.length}</Text></View>
