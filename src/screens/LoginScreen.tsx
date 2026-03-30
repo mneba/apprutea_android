@@ -1,18 +1,25 @@
 import React, { useState } from 'react';
 import {
-  View,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
-  Alert,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Image,
+  View
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { Language } from '../types';
+
+const showAlert = (title: string, msg?: string) => {
+  if (typeof window !== 'undefined' && window.alert) {
+    window.alert(msg ? `${title}\n${msg}` : title);
+  } else {
+    Alert.alert(title, msg);
+  }
+};
 
 const loginTexts = {
   'pt-BR': {
@@ -62,12 +69,12 @@ export default function LoginScreen() {
   const handleLogin = async () => {
     // Validações
     if (!codigo.trim()) {
-      Alert.alert(t.errorTitle, t.errorEmptyCode);
+      showAlert(t.errorTitle, t.errorEmptyCode);
       return;
     }
 
     if (!/^\d+$/.test(codigo)) {
-      Alert.alert(t.errorTitle, t.errorOnlyNumbers);
+      showAlert(t.errorTitle, t.errorOnlyNumbers);
       return;
     }
 
@@ -77,8 +84,9 @@ export default function LoginScreen() {
 
     setLoading(false);
 
+
     if (!result.success) {
-      Alert.alert(t.errorTitle, result.error);
+      showAlert(t.errorTitle, result.error);
     }
     // Se sucesso, o AuthContext vai atualizar e a navegação muda automaticamente
   };

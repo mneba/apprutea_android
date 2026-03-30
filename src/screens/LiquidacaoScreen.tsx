@@ -678,13 +678,11 @@ export default function LiquidacaoScreen({ navigation }: any) {
         p_rota_id: vendedor.rota_id,
         p_caixa_inicial: valorCaixaInicial,
         p_user_id: vendedor.user_id,
-        p_latitude: coords?.lat || null,
-        p_longitude: coords?.lng || null,
-        p_precisao_gps: coords?.acc || null,
+        p_latitude: null,
+        p_longitude: null,
+        p_precisao_gps: null,
         p_data_liquidacao: dataRetroativa || null,
       });
-      console.log('RPC data:', JSON.stringify(data));
-      console.log('RPC error:', JSON.stringify(error));
 
       if (error) throw error;
 

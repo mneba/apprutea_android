@@ -95,7 +95,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const t = errorTexts[idioma];
     
     try {
-      // Buscar vendedor pelo código
+      // 1. Fazer login no Supabase primeiro (email = codigo@apprutea.internal)
+      const authEmail = `${codigo}@apprutea.internal`;
+      const { error: authError } = await supabase.auth.signInWithPassword({
+        email: authEmail,
+        password: codigo,
+      });
+
+      if (authError) {
+        return { success: false, error: t.invalidCode };
+      }
+
+      // 2. Agora autenticado — buscar dados do vendedor
       const { data: vendedorData, error: vendedorError } = await supabase
         .from('vendedores')
         .select('*')
@@ -103,15 +114,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .single();
 
       if (vendedorError || !vendedorData) {
+        await supabase.auth.signOut();
         return { success: false, error: t.invalidCode };
       }
 
-      // Verificar se está ativo
       if (vendedorData.status && vendedorData.status.toLowerCase() === 'inativo') {
+        await supabase.auth.signOut();
         return { success: false, error: t.inactive };
       }
 
-      // Buscar rota do vendedor
+      // 3. Buscar rota do vendedor
       const { data: rotaData, error: rotaError } = await supabase
         .from('rotas')
         .select('id, nome')
@@ -119,10 +131,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .single();
 
       if (rotaError || !rotaData) {
+        await supabase.auth.signOut();
         return { success: false, error: t.noRoute };
       }
 
-      // Montar objeto do vendedor autenticado
+      // 4. Montar objeto do vendedor autenticado
       const vendedorAuth: VendedorAuth = {
         id: vendedorData.id,
         codigo: codigo,
@@ -135,22 +148,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         rota_nome: rotaData.nome,
       };
 
-      // Salvar no AsyncStorage (e localStorage no web)
+      // 5. Salvar no AsyncStorage e localStorage
       await AsyncStorage.setItem('vendedor_data', JSON.stringify(vendedorAuth));
       if (typeof window !== 'undefined' && window.localStorage) {
         window.localStorage.setItem('vendedor_data', JSON.stringify(vendedorAuth));
       }
       setVendedor(vendedorAuth);
-
-      // Login real no Supabase usando padrão codigo@apprutea.internal
-      const authEmail = `${codigo}@apprutea.internal`;
-      const { error: authError } = await supabase.auth.signInWithPassword({
-        email: authEmail,
-        password: codigo,
-      });
-      if (authError) {
-        console.warn('Aviso: login Supabase falhou:', authError.message);
-      }
 
       return { success: true };
     } catch (error: any) {
