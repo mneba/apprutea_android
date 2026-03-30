@@ -163,6 +163,14 @@ const textos = {
   }
 };
 
+const showAlert = (title: string, msg?: string) => {
+  if (typeof window !== 'undefined' && window.alert) {
+    window.alert(msg ? `${title}\n${msg}` : title);
+  } else {
+    Alert.alert(title, msg);
+  }
+};
+
 export default function LiquidacaoScreen({ navigation }: any) {
   const { vendedor, idioma } = useAuth();
   const liqCtx = useLiquidacaoContext();
@@ -490,6 +498,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
       setDataRetroativa(null);
       setMostrarSeletorData(false);
       carregarDatasOcupadas();
+      setSalvando(false);
       setModalIniciarVisible(true);
     } else {
       // Dia passado sem liquidação → oferece abrir retroativamente
@@ -506,12 +515,12 @@ export default function LiquidacaoScreen({ navigation }: any) {
       setDataRetroativa(dataStr);
       setMostrarSeletorData(false);
       carregarDatasOcupadas();
+      setSalvando(false);
       setModalIniciarVisible(true);
     }
   };
 
   const handleAbrirCalendario = () => {
-    console.log('Abrindo calendário...');
     setMostrarCalendario(true);
   };
 
@@ -656,11 +665,15 @@ export default function LiquidacaoScreen({ navigation }: any) {
   };
 
   const handleIniciarDia = async () => {
-    if (!vendedor) return;
+    if (!vendedor) {
+      showAlert('Erro', 'Dados do vendedor não carregados. Feche e reabra o app.');
+      return;
+    }
+    if (salvando) return;
     const valorCaixaInicial = contaRota?.saldo_atual || 0;
     setSalvando(true);
     try {
-      const params = {
+      const { data, error } = await supabase.rpc('fn_abrir_liquidacao_diaria', {
         p_vendedor_id: vendedor.id,
         p_rota_id: vendedor.rota_id,
         p_caixa_inicial: valorCaixaInicial,
@@ -669,22 +682,16 @@ export default function LiquidacaoScreen({ navigation }: any) {
         p_longitude: coords?.lng || null,
         p_precisao_gps: coords?.acc || null,
         p_data_liquidacao: dataRetroativa || null,
-      };
-      Alert.alert('DEBUG params', JSON.stringify(params, null, 2));
+      });
+      console.log('RPC data:', JSON.stringify(data));
+      console.log('RPC error:', JSON.stringify(error));
 
-      const { data, error } = await supabase.rpc('fn_abrir_liquidacao_diaria', params);
-
-      if (error) {
-        Alert.alert('DEBUG error', JSON.stringify(error, null, 2));
-        throw error;
-      }
-
-      Alert.alert('DEBUG data', JSON.stringify(data, null, 2));
+      if (error) throw error;
 
       const resultado = Array.isArray(data) ? data[0] : data;
 
       if (!resultado?.success) {
-        Alert.alert('Não foi possível abrir', resultado?.message || 'Erro desconhecido');
+        showAlert('Não foi possível abrir', resultado?.message || 'Erro desconhecido');
         return;
       }
 
@@ -693,7 +700,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
       setModoVisualizacao(false);
       setDataRetroativa(null);
       await carregarLiquidacoes();
-      Alert.alert('Sucesso', 'Dia iniciado com sucesso!');
+      showAlert('Sucesso', 'Dia iniciado com sucesso!');
     } catch (error: any) {
       Alert.alert('Erro catch', error.message || 'Não foi possível iniciar o dia');
     } finally {
@@ -1211,7 +1218,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
           <View style={styles.semLiquidacao}>
             <Text style={styles.semLiquidacaoIcon}>📅</Text>
             <Text style={styles.semLiquidacaoText}>{t.nenhumaLiquidacao}</Text>
-            <TouchableOpacity style={styles.iniciarButton} onPress={() => setModalIniciarVisible(true)}>
+            <TouchableOpacity style={styles.iniciarButton} onPress={() => { setSalvando(false); setModalIniciarVisible(true); }}>
               <Text style={styles.iniciarText}>{t.iniciarDia}</Text>
             </TouchableOpacity>
           </View>

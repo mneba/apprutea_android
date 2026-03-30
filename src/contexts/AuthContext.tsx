@@ -56,13 +56,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         AsyncStorage.getItem('vendedor_data'),
         AsyncStorage.getItem('app_idioma'),
       ]);
-      
-      if (storedVendedor) {
-        setVendedor(JSON.parse(storedVendedor));
+
+      // Fallback para localStorage no web
+      const vendedorRaw = storedVendedor
+        || (typeof window !== 'undefined' ? window.localStorage?.getItem('vendedor_data') : null);
+      const idiomaRaw = storedIdioma
+        || (typeof window !== 'undefined' ? window.localStorage?.getItem('app_idioma') : null);
+
+      if (vendedorRaw) {
+        setVendedor(JSON.parse(vendedorRaw));
+        // Verificar se já há sessão ativa (Supabase persiste automaticamente)
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (!sessionData?.session) {
+          console.warn('Sessão Supabase expirada — usuário precisará relogar para operações avançadas');
+        }
       }
-      
-      if (storedIdioma === 'pt-BR' || storedIdioma === 'es') {
-        setIdiomaState(storedIdioma);
+
+      if (idiomaRaw === 'pt-BR' || idiomaRaw === 'es') {
+        setIdiomaState(idiomaRaw);
       }
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
@@ -124,9 +135,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         rota_nome: rotaData.nome,
       };
 
-      // Salvar no AsyncStorage
+      // Salvar no AsyncStorage (e localStorage no web)
       await AsyncStorage.setItem('vendedor_data', JSON.stringify(vendedorAuth));
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem('vendedor_data', JSON.stringify(vendedorAuth));
+      }
       setVendedor(vendedorAuth);
+
+      // Login real no Supabase usando padrão codigo@apprutea.internal
+      const authEmail = `${codigo}@apprutea.internal`;
+      const { error: authError } = await supabase.auth.signInWithPassword({
+        email: authEmail,
+        password: codigo,
+      });
+      if (authError) {
+        console.warn('Aviso: login Supabase falhou:', authError.message);
+      }
 
       return { success: true };
     } catch (error: any) {
@@ -138,6 +162,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     try {
       await AsyncStorage.removeItem('vendedor_data');
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.removeItem('vendedor_data');
+      }
+      await supabase.auth.signOut();
       setVendedor(null);
     } catch (error) {
       console.error('Erro no logout:', error);
