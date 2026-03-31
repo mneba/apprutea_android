@@ -10,6 +10,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
@@ -98,6 +99,15 @@ const textos = {
     fecharCalendario: 'Voltar à Liquidação',
     meses: ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'],
     diasSemana: ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'],
+    // Validação de abertura
+    validacaoTitulo: 'Autorização Necessária',
+    validacaoDiasFaltantes: 'Existem dias sem liquidação',
+    validacaoRetroativa: 'Abertura de dia anterior',
+    validacaoMotivo: 'Informe o motivo da solicitação:',
+    validacaoEnviar: 'Solicitar Autorização',
+    validacaoAguardando: 'Solicitação Enviada',
+    validacaoAguardandoMsg: 'Aguarde a aprovação do supervisor. Você será notificado quando aprovado.',
+    validacaoMotivoPlaceholder: 'Ex: Esqueci de abrir ontem, preciso lançar cobranças...',
   },
   'es': {
     titulo: 'Liquidación Diaria',
@@ -160,6 +170,15 @@ const textos = {
     fecharCalendario: 'Volver a Liquidación',
     meses: ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'],
     diasSemana: ['D', 'L', 'M', 'M', 'J', 'V', 'S'],
+    // Validación de apertura
+    validacaoTitulo: 'Autorización Necesaria',
+    validacaoDiasFaltantes: 'Existen días sin liquidación',
+    validacaoRetroativa: 'Apertura de día anterior',
+    validacaoMotivo: 'Informe el motivo de la solicitud:',
+    validacaoEnviar: 'Solicitar Autorización',
+    validacaoAguardando: 'Solicitud Enviada',
+    validacaoAguardandoMsg: 'Espere la aprobación del supervisor. Será notificado cuando sea aprobado.',
+    validacaoMotivoPlaceholder: 'Ej: Olvidé abrir ayer, necesito registrar cobros...',
   }
 };
 
@@ -204,6 +223,17 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const [notasCount, setNotasCount] = useState(0);
   const [contaRota, setContaRota] = useState<ContaRota | null>(null);
   const [salvando, setSalvando] = useState(false);
+  
+  // Estados para validação de abertura
+  const [modalValidacaoVisible, setModalValidacaoVisible] = useState(false);
+  const [validacaoInfo, setValidacaoInfo] = useState<{
+    tipo: string;
+    mensagem: string;
+    diasFaltantes: string[];
+    dataSolicitada: string | null;
+  } | null>(null);
+  const [motivoSolicitacao, setMotivoSolicitacao] = useState('');
+  const [enviandoSolicitacao, setEnviandoSolicitacao] = useState(false);
   
   // Totais calculados do financeiro (mais confiáveis que campos da liquidação)
   const [receitasFinanceiras, setReceitasFinanceiras] = useState({ total: 0, qtd: 0 });
@@ -452,20 +482,26 @@ export default function LiquidacaoScreen({ navigation }: any) {
     else { setMesAtual(mesAtual + 1); }
   };
 
-  const handleClickDia = (dia: DiaCalendario) => {
-    if (!dia.mesAtual || dia.ehFuturo) return;
+  const handleClickDia = async (dia: DiaCalendario) => {
+    console.log('handleClickDia chamada:', dia.diaNumero, dia.mesAtual, dia.ehFuturo, dia.liquidacao?.status);
+    
+    if (!dia.mesAtual || dia.ehFuturo) {
+      console.log('Retornando: dia não é do mês atual ou é futuro');
+      return;
+    }
     
     if (dia.liquidacao) {
       const status = dia.liquidacao.status?.toUpperCase();
+      console.log('Dia tem liquidação, status:', status);
       
       // REABERTO: apenas visualização, sem movimentos (reabertura só via webapp)
       if (status === 'REABERTO' || status === 'REABERTA') {
         setLiquidacao(dia.liquidacao);
-        setModoVisualizacao(true); // SEMPRE visualização - não permite movimentos
+        setModoVisualizacao(true);
         setDataVisualizacao(dia.data);
-        setDadosVisualizacao(null); // Tem liquidação, não precisa de dados dinâmicos
+        setDadosVisualizacao(null);
         setMostrarCalendario(false);
-        Alert.alert('Dia Reaberto', 'Esta liquidação foi reaberta pelo administrador. Visualização apenas - novos movimentos vão para a liquidação aberta atual.');
+        Alert.alert('Dia Reaberto', 'Esta liquidação foi reaberta pelo administrador. Visualização apenas.');
         return;
       }
       
@@ -483,40 +519,27 @@ export default function LiquidacaoScreen({ navigation }: any) {
       setLiquidacao(dia.liquidacao);
       setModoVisualizacao(true);
       setDataVisualizacao(dia.data);
-      setDadosVisualizacao(null); // Tem liquidação, dados vêm dela
+      setDadosVisualizacao(null);
       setMostrarCalendario(false);
-    } else if (dia.ehHoje) {
-      // Hoje sem liquidação - verificar se já existe ABERTA em outro dia
-      const temAberta = todasLiquidacoes.some(l => {
-        const s = l.status?.toUpperCase();
-        return s === 'ABERTO' || s === 'ABERTA';
-      });
-      if (temAberta) {
-        Alert.alert('Atenção', 'Já existe uma liquidação aberta. Feche-a antes de abrir outra.');
-        return;
-      }
-      setDataRetroativa(null);
-      setMostrarSeletorData(false);
-      carregarDatasOcupadas();
-      setSalvando(false);
-      setModalIniciarVisible(true);
     } else {
-      // Dia passado sem liquidação → oferece abrir retroativamente
-      const temAberta = todasLiquidacoes.some(l => {
-        const s = l.status?.toUpperCase();
-        return s === 'ABERTO' || s === 'ABERTA';
-      });
-      if (temAberta) {
-        Alert.alert('Atenção', 'Já existe uma liquidação aberta. Feche-a antes de abrir outra.');
-        return;
-      }
-      // Pré-selecionar a data clicada
+      console.log('Dia SEM liquidação, validando abertura...');
+      // Dia sem liquidação - preparar data para validação
       const dataStr = `${dia.data.getFullYear()}-${String(dia.data.getMonth()+1).padStart(2,'0')}-${String(dia.data.getDate()).padStart(2,'0')}`;
-      setDataRetroativa(dataStr);
-      setMostrarSeletorData(false);
-      carregarDatasOcupadas();
-      setSalvando(false);
-      setModalIniciarVisible(true);
+      console.log('Data formatada:', dataStr, 'ehHoje:', dia.ehHoje);
+      
+      // Validar abertura (hoje ou retroativa)
+      const podeAbrir = await validarAbertura(dia.ehHoje ? null : dataStr);
+      console.log('Resultado validarAbertura:', podeAbrir);
+      
+      if (podeAbrir) {
+        // Pode abrir - mostrar modal de iniciar
+        setDataRetroativa(dia.ehHoje ? null : dataStr);
+        setMostrarSeletorData(false);
+        carregarDatasOcupadas();
+        setSalvando(false);
+        setModalIniciarVisible(true);
+      }
+      // Se não pode abrir, a função validarAbertura já mostrou o modal/alert apropriado
     }
   };
 
@@ -662,6 +685,180 @@ export default function LiquidacaoScreen({ navigation }: any) {
       });
       setDatasOcupadas(ocupadas);
     } catch {}
+  };
+
+  // ==================== VALIDAÇÃO DE ABERTURA ====================
+  const validarAbertura = async (dataLiquidacao: string | null): Promise<boolean> => {
+    console.log('validarAbertura chamada, vendedor:', vendedor?.id, 'data:', dataLiquidacao);
+    
+    if (!vendedor) {
+      console.log('Vendedor não disponível!');
+      return false;
+    }
+    
+    try {
+      console.log('Chamando RPC fn_validar_abertura_liquidacao...');
+      const { data, error } = await supabase.rpc('fn_validar_abertura_liquidacao', {
+        p_vendedor_id: vendedor.id,
+        p_rota_id: vendedor.rota_id,
+        p_data_abertura: dataLiquidacao,
+      });
+
+      console.log('Resposta RPC:', { data, error });
+
+      if (error) {
+        console.error('Erro na validação:', error);
+        showAlert('Erro', 'Não foi possível validar a abertura: ' + error.message);
+        return false;
+      }
+
+      const resultado = Array.isArray(data) ? data[0] : data;
+      console.log('Resultado processado:', resultado);
+
+      if (!resultado) {
+        showAlert('Erro', 'Resposta inválida da validação');
+        return false;
+      }
+
+      // Pode abrir sem restrições
+      if (resultado.pode_abrir) {
+        console.log('Pode abrir!');
+        return true;
+      }
+
+      // Requer autorização - verificar se já existe solicitação pendente
+      if (resultado.requer_autorizacao) {
+        console.log('Requer autorização, verificando se já existe solicitação pendente...');
+        
+        const tipoSolicitacao = resultado.tipo_bloqueio === 'ABERTURA_RETROATIVA' 
+          ? 'ABERTURA_RETROATIVA' 
+          : 'DIAS_FALTANTES';
+        
+        const dataSolicitada = dataLiquidacao || new Date().toISOString().split('T')[0];
+
+        // Verificar se já existe solicitação PENDENTE
+        const { data: solicitacaoExistente, error: erroBusca } = await supabase
+          .from('solicitacoes_autorizacao')
+          .select('id, created_at')
+          .eq('vendedor_id', vendedor.id)
+          .eq('tipo_solicitacao', tipoSolicitacao)
+          .eq('data_solicitada', dataSolicitada)
+          .eq('status', 'PENDENTE')
+          .maybeSingle();
+
+        if (erroBusca) {
+          console.error('Erro ao verificar solicitação existente:', erroBusca);
+        }
+
+        if (solicitacaoExistente) {
+          console.log('Já existe solicitação pendente:', solicitacaoExistente);
+          showAlert(
+            language === 'pt-BR' ? 'Solicitação já enviada' : 'Solicitud ya enviada',
+            language === 'pt-BR' 
+              ? 'Já existe uma solicitação pendente para esta data. Aguarde a resposta do supervisor.'
+              : 'Ya existe una solicitud pendiente para esta fecha. Espere la respuesta del supervisor.'
+          );
+          return false;
+        }
+
+        // Não existe pendente - abrir modal para criar
+        console.log('Abrindo modal de solicitação...');
+        setValidacaoInfo({
+          tipo: resultado.tipo_bloqueio,
+          mensagem: resultado.mensagem,
+          diasFaltantes: resultado.dias_faltantes || [],
+          dataSolicitada: dataLiquidacao,
+        });
+        setMotivoSolicitacao('');
+        setModalValidacaoVisible(true);
+        return false;
+      }
+
+      // Bloqueio sem opção de solicitar (já existe, domingo, feriado, liquidação aberta)
+      console.log('Bloqueio definitivo:', resultado.mensagem);
+      showAlert('Não permitido', resultado.mensagem);
+      return false;
+
+    } catch (error: any) {
+      console.error('Erro catch na validação:', error);
+      showAlert('Erro', error.message || 'Erro ao validar abertura');
+      return false;
+    }
+  };
+
+  const handleEnviarSolicitacao = async () => {
+    if (!vendedor || !validacaoInfo) return;
+    
+    if (!motivoSolicitacao.trim()) {
+      showAlert('Atenção', language === 'pt-BR' ? 'Informe o motivo da solicitação' : 'Informe el motivo de la solicitud');
+      return;
+    }
+
+    setEnviandoSolicitacao(true);
+    try {
+      const tipoSolicitacao = validacaoInfo.tipo === 'ABERTURA_RETROATIVA' 
+        ? 'ABERTURA_RETROATIVA' 
+        : 'DIAS_FALTANTES';
+
+      const dataSolicitada = validacaoInfo.dataSolicitada || new Date().toISOString().split('T')[0];
+
+      // Verificar se já existe solicitação PENDENTE para este tipo e data
+      const { data: solicitacaoExistente, error: erroBusca } = await supabase
+        .from('solicitacoes_autorizacao')
+        .select('id, created_at')
+        .eq('vendedor_id', vendedor.id)
+        .eq('tipo_solicitacao', tipoSolicitacao)
+        .eq('data_solicitada', dataSolicitada)
+        .eq('status', 'PENDENTE')
+        .maybeSingle();
+
+      if (erroBusca) {
+        console.error('Erro ao verificar solicitação existente:', erroBusca);
+      }
+
+      if (solicitacaoExistente) {
+        showAlert(
+          language === 'pt-BR' ? 'Solicitação já enviada' : 'Solicitud ya enviada',
+          language === 'pt-BR' 
+            ? 'Já existe uma solicitação pendente para esta data. Aguarde a resposta do supervisor.'
+            : 'Ya existe una solicitud pendiente para esta fecha. Espere la respuesta del supervisor.'
+        );
+        setModalValidacaoVisible(false);
+        setValidacaoInfo(null);
+        setMotivoSolicitacao('');
+        return;
+      }
+
+      const { data, error } = await supabase.rpc('fn_criar_solicitacao_autorizacao', {
+        p_vendedor_id: vendedor.id,
+        p_rota_id: vendedor.rota_id,
+        p_tipo_solicitacao: tipoSolicitacao,
+        p_motivo: motivoSolicitacao.trim(),
+        p_data_solicitada: dataSolicitada,
+      });
+
+      if (error) throw error;
+
+      const resultado = Array.isArray(data) ? data[0] : data;
+
+      if (!resultado?.sucesso) {
+        showAlert('Erro', resultado?.mensagem || 'Não foi possível criar solicitação');
+        return;
+      }
+
+      // Sucesso - fechar modal e mostrar mensagem
+      setModalValidacaoVisible(false);
+      setValidacaoInfo(null);
+      setMotivoSolicitacao('');
+      
+      showAlert(t.validacaoAguardando, t.validacaoAguardandoMsg);
+
+    } catch (error: any) {
+      console.error('Erro ao criar solicitação:', error);
+      showAlert('Erro', error.message || 'Não foi possível enviar solicitação');
+    } finally {
+      setEnviandoSolicitacao(false);
+    }
   };
 
   const handleIniciarDia = async () => {
@@ -864,10 +1061,6 @@ export default function LiquidacaoScreen({ navigation }: any) {
                   <Text style={styles.legendaTexto}>{t.legendaFechado}</Text>
                 </View>
                 <View style={styles.legendaItem}>
-                  <View style={[styles.legendaCor, styles.legendaCorAprovado]} />
-                  <Text style={styles.legendaTexto}>{t.legendaAprovado}</Text>
-                </View>
-                <View style={styles.legendaItem}>
                   <View style={[styles.legendaCor, styles.legendaCorReaberto]} />
                   <Text style={styles.legendaTexto}>{language === 'pt-BR' ? 'Reaberto' : 'Reabierto'}</Text>
                 </View>
@@ -922,6 +1115,96 @@ export default function LiquidacaoScreen({ navigation }: any) {
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.modalButtonConfirm} onPress={handleIniciarDia} disabled={salvando}>
                   {salvando ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.modalButtonConfirmText}>{t.confirmar}</Text>}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Modal de Solicitação de Autorização (também no calendário) */}
+        <Modal
+          visible={modalValidacaoVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setModalValidacaoVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>🔒 {t.validacaoTitulo}</Text>
+              
+              {/* Tipo de bloqueio */}
+              <View style={[styles.modalAtencao, { marginBottom: 16 }]}>
+                <Text style={styles.modalAtencaoText}>
+                  {validacaoInfo?.tipo === 'ABERTURA_RETROATIVA' 
+                    ? t.validacaoRetroativa 
+                    : t.validacaoDiasFaltantes}
+                </Text>
+              </View>
+              
+              {/* Dias faltantes (se houver) */}
+              {validacaoInfo?.diasFaltantes && validacaoInfo.diasFaltantes.length > 0 && (
+                <View style={{ backgroundColor: '#FEF3C7', padding: 12, borderRadius: 8, marginBottom: 16 }}>
+                  {validacaoInfo.diasFaltantes.map((dataStr, idx) => {
+                    const [ano, mes, dia] = dataStr.split('-');
+                    const dataObj = new Date(parseInt(ano), parseInt(mes) - 1, parseInt(dia));
+                    const diasSemanaFull = language === 'pt-BR' 
+                      ? ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
+                      : ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+                    const diaSemana = diasSemanaFull[dataObj.getDay()];
+                    const anoShort = ano.slice(-2);
+                    return (
+                      <Text key={idx} style={{ fontSize: 13, color: '#92400E', marginBottom: 2 }}>
+                        {dia}/{mes}/{anoShort} {diaSemana}
+                      </Text>
+                    );
+                  })}
+                </View>
+              )}
+              
+              {/* Campo de motivo */}
+              <Text style={styles.modalLabel}>{t.validacaoMotivo}</Text>
+              <TextInput
+                style={{
+                  backgroundColor: '#F3F4F6',
+                  borderRadius: 8,
+                  padding: 12,
+                  fontSize: 14,
+                  color: '#1F2937',
+                  minHeight: 80,
+                  textAlignVertical: 'top',
+                  marginBottom: 20,
+                }}
+                placeholder={t.validacaoMotivoPlaceholder}
+                placeholderTextColor="#9CA3AF"
+                value={motivoSolicitacao}
+                onChangeText={setMotivoSolicitacao}
+                multiline
+                numberOfLines={3}
+              />
+              
+              {/* Botões */}
+              <View style={styles.modalButtons}>
+                <TouchableOpacity 
+                  style={styles.modalButtonCancel}
+                  onPress={() => {
+                    setModalValidacaoVisible(false);
+                    setValidacaoInfo(null);
+                    setMotivoSolicitacao('');
+                  }}
+                >
+                  <Text style={styles.modalButtonCancelText}>{t.cancelar}</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={[styles.modalButtonConfirm, styles.modalButtonAmber, enviandoSolicitacao && { opacity: 0.6 }]}
+                  onPress={handleEnviarSolicitacao}
+                  disabled={enviandoSolicitacao}
+                >
+                  {enviandoSolicitacao ? (
+                    <ActivityIndicator size="small" color="#FFF" />
+                  ) : (
+                    <Text style={styles.modalButtonConfirmText}>{t.validacaoEnviar}</Text>
+                  )}
                 </TouchableOpacity>
               </View>
             </View>
@@ -1389,6 +1672,96 @@ export default function LiquidacaoScreen({ navigation }: any) {
           />
         </>
       )}
+
+      {/* Modal de Solicitação de Autorização */}
+      <Modal
+        visible={modalValidacaoVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setModalValidacaoVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>🔒 {t.validacaoTitulo}</Text>
+            
+            {/* Tipo de bloqueio */}
+            <View style={[styles.modalAtencao, { marginBottom: 16 }]}>
+              <Text style={styles.modalAtencaoText}>
+                {validacaoInfo?.tipo === 'ABERTURA_RETROATIVA' 
+                  ? t.validacaoRetroativa 
+                  : t.validacaoDiasFaltantes}
+              </Text>
+            </View>
+            
+            {/* Dias faltantes (se houver) */}
+            {validacaoInfo?.diasFaltantes && validacaoInfo.diasFaltantes.length > 0 && (
+              <View style={{ backgroundColor: '#FEF3C7', padding: 12, borderRadius: 8, marginBottom: 16 }}>
+                {validacaoInfo.diasFaltantes.map((dataStr, idx) => {
+                  const [ano, mes, dia] = dataStr.split('-');
+                  const dataObj = new Date(parseInt(ano), parseInt(mes) - 1, parseInt(dia));
+                  const diasSemanaFull = language === 'pt-BR' 
+                    ? ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
+                    : ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+                  const diaSemana = diasSemanaFull[dataObj.getDay()];
+                  const anoShort = ano.slice(-2);
+                  return (
+                    <Text key={idx} style={{ fontSize: 13, color: '#92400E', marginBottom: 2 }}>
+                      {dia}/{mes}/{anoShort} {diaSemana}
+                    </Text>
+                  );
+                })}
+              </View>
+            )}
+            
+            {/* Campo de motivo */}
+            <Text style={styles.modalLabel}>{t.validacaoMotivo}</Text>
+            <TextInput
+              style={{
+                backgroundColor: '#F3F4F6',
+                borderRadius: 8,
+                padding: 12,
+                fontSize: 14,
+                color: '#1F2937',
+                minHeight: 80,
+                textAlignVertical: 'top',
+                marginBottom: 20,
+              }}
+              placeholder={t.validacaoMotivoPlaceholder}
+              placeholderTextColor="#9CA3AF"
+              value={motivoSolicitacao}
+              onChangeText={setMotivoSolicitacao}
+              multiline
+              numberOfLines={3}
+            />
+            
+            {/* Botões */}
+            <View style={styles.modalButtons}>
+              <TouchableOpacity 
+                style={styles.modalButtonCancel}
+                onPress={() => {
+                  setModalValidacaoVisible(false);
+                  setValidacaoInfo(null);
+                  setMotivoSolicitacao('');
+                }}
+              >
+                <Text style={styles.modalButtonCancelText}>{t.cancelar}</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.modalButtonConfirm, styles.modalButtonAmber, enviandoSolicitacao && { opacity: 0.6 }]}
+                onPress={handleEnviarSolicitacao}
+                disabled={enviandoSolicitacao}
+              >
+                {enviandoSolicitacao ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Text style={styles.modalButtonConfirmText}>{t.validacaoEnviar}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
