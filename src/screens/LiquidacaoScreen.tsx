@@ -235,6 +235,17 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const [motivoSolicitacao, setMotivoSolicitacao] = useState('');
   const [enviandoSolicitacao, setEnviandoSolicitacao] = useState(false);
   
+  // Estados para modal de confirmação de substituição de solicitação
+  const [modalSubstituirVisible, setModalSubstituirVisible] = useState(false);
+  const [substituirInfo, setSubstituirInfo] = useState<{
+    solicitacaoAnteriorId: string;
+    dataAnterior: string;
+    dataNova: string;
+    resultadoValidacao: any;
+    dataLiquidacao: string | null;
+  } | null>(null);
+  const [processandoSubstituicao, setProcessandoSubstituicao] = useState(false);
+  
   // Totais calculados do financeiro (mais confiáveis que campos da liquidação)
   const [receitasFinanceiras, setReceitasFinanceiras] = useState({ total: 0, qtd: 0 });
   const [totalParcelasPagas, setTotalParcelasPagas] = useState(0);
@@ -726,23 +737,18 @@ export default function LiquidacaoScreen({ navigation }: any) {
         return true;
       }
 
-      // Requer autorização - verificar se já existe solicitação pendente
+      // Requer autorização - verificar se já existe QUALQUER solicitação de abertura pendente
       if (resultado.requer_autorizacao) {
-        console.log('Requer autorização, verificando se já existe solicitação pendente...');
+        console.log('Requer autorização, verificando se já existe solicitação de abertura pendente...');
         
-        const tipoSolicitacao = resultado.tipo_bloqueio === 'ABERTURA_RETROATIVA' 
-          ? 'ABERTURA_RETROATIVA' 
-          : 'DIAS_FALTANTES';
-        
-        const dataSolicitada = dataLiquidacao || new Date().toISOString().split('T')[0];
+        const dataSolicitadaNova = dataLiquidacao || new Date().toISOString().split('T')[0];
 
-        // Verificar se já existe solicitação PENDENTE
+        // Verificar se já existe QUALQUER solicitação de ABERTURA pendente (retroativa ou dias faltantes)
         const { data: solicitacaoExistente, error: erroBusca } = await supabase
           .from('solicitacoes_autorizacao')
-          .select('id, created_at')
+          .select('id, data_solicitada, tipo_solicitacao, created_at')
           .eq('vendedor_id', vendedor.id)
-          .eq('tipo_solicitacao', tipoSolicitacao)
-          .eq('data_solicitada', dataSolicitada)
+          .in('tipo_solicitacao', ['ABERTURA_RETROATIVA', 'ABERTURA_DIAS_FALTANTES'])
           .eq('status', 'PENDENTE')
           .maybeSingle();
 
@@ -751,13 +757,25 @@ export default function LiquidacaoScreen({ navigation }: any) {
         }
 
         if (solicitacaoExistente) {
-          console.log('Já existe solicitação pendente:', solicitacaoExistente);
-          showAlert(
-            language === 'pt-BR' ? 'Solicitação já enviada' : 'Solicitud ya enviada',
-            language === 'pt-BR' 
-              ? 'Já existe uma solicitação pendente para esta data. Aguarde a resposta do supervisor.'
-              : 'Ya existe una solicitud pendiente para esta fecha. Espere la respuesta del supervisor.'
-          );
+          console.log('Já existe solicitação de abertura pendente:', solicitacaoExistente);
+          
+          // Formatar a data da solicitação existente
+          const [ano, mes, dia] = solicitacaoExistente.data_solicitada.split('-');
+          const dataExistenteFormatada = `${dia}/${mes}/${ano.slice(-2)}`;
+          
+          // Formatar a data nova
+          const [anoNovo, mesNovo, diaNovo] = dataSolicitadaNova.split('-');
+          const dataNovaFormatada = `${diaNovo}/${mesNovo}/${anoNovo.slice(-2)}`;
+
+          // Abrir modal de confirmação de substituição
+          setSubstituirInfo({
+            solicitacaoAnteriorId: solicitacaoExistente.id,
+            dataAnterior: dataExistenteFormatada,
+            dataNova: dataNovaFormatada,
+            resultadoValidacao: resultado,
+            dataLiquidacao: dataLiquidacao,
+          });
+          setModalSubstituirVisible(true);
           return false;
         }
 
@@ -798,36 +816,9 @@ export default function LiquidacaoScreen({ navigation }: any) {
     try {
       const tipoSolicitacao = validacaoInfo.tipo === 'ABERTURA_RETROATIVA' 
         ? 'ABERTURA_RETROATIVA' 
-        : 'DIAS_FALTANTES';
+        : 'ABERTURA_DIAS_FALTANTES';
 
       const dataSolicitada = validacaoInfo.dataSolicitada || new Date().toISOString().split('T')[0];
-
-      // Verificar se já existe solicitação PENDENTE para este tipo e data
-      const { data: solicitacaoExistente, error: erroBusca } = await supabase
-        .from('solicitacoes_autorizacao')
-        .select('id, created_at')
-        .eq('vendedor_id', vendedor.id)
-        .eq('tipo_solicitacao', tipoSolicitacao)
-        .eq('data_solicitada', dataSolicitada)
-        .eq('status', 'PENDENTE')
-        .maybeSingle();
-
-      if (erroBusca) {
-        console.error('Erro ao verificar solicitação existente:', erroBusca);
-      }
-
-      if (solicitacaoExistente) {
-        showAlert(
-          language === 'pt-BR' ? 'Solicitação já enviada' : 'Solicitud ya enviada',
-          language === 'pt-BR' 
-            ? 'Já existe uma solicitação pendente para esta data. Aguarde a resposta do supervisor.'
-            : 'Ya existe una solicitud pendiente para esta fecha. Espere la respuesta del supervisor.'
-        );
-        setModalValidacaoVisible(false);
-        setValidacaoInfo(null);
-        setMotivoSolicitacao('');
-        return;
-      }
 
       const { data, error } = await supabase.rpc('fn_criar_solicitacao_autorizacao', {
         p_vendedor_id: vendedor.id,
@@ -858,6 +849,45 @@ export default function LiquidacaoScreen({ navigation }: any) {
       showAlert('Erro', error.message || 'Não foi possível enviar solicitação');
     } finally {
       setEnviandoSolicitacao(false);
+    }
+  };
+
+  const handleConfirmarSubstituicao = async () => {
+    if (!substituirInfo) return;
+
+    setProcessandoSubstituicao(true);
+    try {
+      // Cancelar a solicitação anterior
+      const { error: erroCancelar } = await supabase
+        .from('solicitacoes_autorizacao')
+        .update({ status: 'CANCELADO' })
+        .eq('id', substituirInfo.solicitacaoAnteriorId);
+
+      if (erroCancelar) {
+        console.error('Erro ao cancelar solicitação anterior:', erroCancelar);
+        showAlert('Erro', 'Não foi possível cancelar a solicitação anterior');
+        return;
+      }
+
+      // Fechar modal de substituição
+      setModalSubstituirVisible(false);
+
+      // Abrir modal para criar nova solicitação
+      setValidacaoInfo({
+        tipo: substituirInfo.resultadoValidacao.tipo_bloqueio,
+        mensagem: substituirInfo.resultadoValidacao.mensagem,
+        diasFaltantes: substituirInfo.resultadoValidacao.dias_faltantes || [],
+        dataSolicitada: substituirInfo.dataLiquidacao,
+      });
+      setMotivoSolicitacao('');
+      setModalValidacaoVisible(true);
+      setSubstituirInfo(null);
+
+    } catch (error: any) {
+      console.error('Erro ao substituir solicitação:', error);
+      showAlert('Erro', error.message || 'Não foi possível substituir a solicitação');
+    } finally {
+      setProcessandoSubstituicao(false);
     }
   };
 
@@ -1204,6 +1234,61 @@ export default function LiquidacaoScreen({ navigation }: any) {
                     <ActivityIndicator size="small" color="#FFF" />
                   ) : (
                     <Text style={styles.modalButtonConfirmText}>{t.validacaoEnviar}</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Modal de Confirmação de Substituição de Solicitação (também no calendário) */}
+        <Modal
+          visible={modalSubstituirVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setModalSubstituirVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>⚠️ {language === 'pt-BR' ? 'Solicitação Pendente' : 'Solicitud Pendiente'}</Text>
+              
+              <Text style={[styles.modalDescricao, { marginBottom: 16, textAlign: 'center' }]}>
+                {language === 'pt-BR' 
+                  ? `Já existe uma solicitação pendente para o dia ${substituirInfo?.dataAnterior}.`
+                  : `Ya existe una solicitud pendiente para el día ${substituirInfo?.dataAnterior}.`}
+              </Text>
+              
+              <Text style={[styles.modalDescricao, { marginBottom: 20, textAlign: 'center', fontWeight: '600' }]}>
+                {language === 'pt-BR' 
+                  ? `Deseja cancelar a anterior e criar uma nova para o dia ${substituirInfo?.dataNova}?`
+                  : `¿Desea cancelar la anterior y crear una nueva para el día ${substituirInfo?.dataNova}?`}
+              </Text>
+              
+              {/* Botões */}
+              <View style={styles.modalButtons}>
+                <TouchableOpacity 
+                  style={styles.modalButtonCancel}
+                  onPress={() => {
+                    setModalSubstituirVisible(false);
+                    setSubstituirInfo(null);
+                  }}
+                >
+                  <Text style={styles.modalButtonCancelText}>
+                    {language === 'pt-BR' ? 'Não, manter' : 'No, mantener'}
+                  </Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={[styles.modalButtonConfirm, { backgroundColor: '#DC2626' }, processandoSubstituicao && { opacity: 0.6 }]}
+                  onPress={handleConfirmarSubstituicao}
+                  disabled={processandoSubstituicao}
+                >
+                  {processandoSubstituicao ? (
+                    <ActivityIndicator size="small" color="#FFF" />
+                  ) : (
+                    <Text style={styles.modalButtonConfirmText}>
+                      {language === 'pt-BR' ? 'Sim, substituir' : 'Sí, reemplazar'}
+                    </Text>
                   )}
                 </TouchableOpacity>
               </View>
@@ -1756,6 +1841,61 @@ export default function LiquidacaoScreen({ navigation }: any) {
                   <ActivityIndicator size="small" color="#FFF" />
                 ) : (
                   <Text style={styles.modalButtonConfirmText}>{t.validacaoEnviar}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal de Confirmação de Substituição de Solicitação */}
+      <Modal
+        visible={modalSubstituirVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setModalSubstituirVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>⚠️ {language === 'pt-BR' ? 'Solicitação Pendente' : 'Solicitud Pendiente'}</Text>
+            
+            <Text style={[styles.modalDescricao, { marginBottom: 16, textAlign: 'center' }]}>
+              {language === 'pt-BR' 
+                ? `Já existe uma solicitação pendente para o dia ${substituirInfo?.dataAnterior}.`
+                : `Ya existe una solicitud pendiente para el día ${substituirInfo?.dataAnterior}.`}
+            </Text>
+            
+            <Text style={[styles.modalDescricao, { marginBottom: 20, textAlign: 'center', fontWeight: '600' }]}>
+              {language === 'pt-BR' 
+                ? `Deseja cancelar a anterior e criar uma nova para o dia ${substituirInfo?.dataNova}?`
+                : `¿Desea cancelar la anterior y crear una nueva para el día ${substituirInfo?.dataNova}?`}
+            </Text>
+            
+            {/* Botões */}
+            <View style={styles.modalButtons}>
+              <TouchableOpacity 
+                style={styles.modalButtonCancel}
+                onPress={() => {
+                  setModalSubstituirVisible(false);
+                  setSubstituirInfo(null);
+                }}
+              >
+                <Text style={styles.modalButtonCancelText}>
+                  {language === 'pt-BR' ? 'Não, manter' : 'No, mantener'}
+                </Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.modalButtonConfirm, { backgroundColor: '#DC2626' }, processandoSubstituicao && { opacity: 0.6 }]}
+                onPress={handleConfirmarSubstituicao}
+                disabled={processandoSubstituicao}
+              >
+                {processandoSubstituicao ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Text style={styles.modalButtonConfirmText}>
+                    {language === 'pt-BR' ? 'Sim, substituir' : 'Sí, reemplazar'}
+                  </Text>
                 )}
               </TouchableOpacity>
             </View>
