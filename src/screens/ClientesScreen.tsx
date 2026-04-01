@@ -515,7 +515,23 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [parcelaEstorno, setParcelaEstorno] = useState<ParcelaModal | null>(null);
   const [motivoEstorno, setMotivoEstorno] = useState('');
 
+  // Configurações do vendedor e autorização de estorno
+  const [configVendedor, setConfigVendedor] = useState<{ permitir_exclusao_parcelas: boolean } | null>(null);
+  const [modalAutorizacaoEstornoVisible, setModalAutorizacaoEstornoVisible] = useState(false);
+  const [motivoSolicitacaoEstorno, setMotivoSolicitacaoEstorno] = useState('');
+  const [enviandoSolicitacaoEstorno, setEnviandoSolicitacaoEstorno] = useState(false);
+  const [parcelaAguardandoAutorizacao, setParcelaAguardandoAutorizacao] = useState<ParcelaModal | null>(null);
+
   const t = textos[lang];
+
+  // Helper para alertas que funciona no web e mobile
+  const showAlert = useCallback((titulo: string, mensagem: string) => {
+    if (Platform.OS === 'web') {
+      window.alert(`${titulo}\n\n${mensagem}`);
+    } else {
+      Alert.alert(titulo, mensagem);
+    }
+  }, []);
 
   const carregarGPS = useCallback(async () => {
     setGpsStatus('carregando');
@@ -560,6 +576,39 @@ export default function ClientesScreen({ navigation, route }: any) {
       }
     } catch { setGpsStatus('erro'); }
   }, []);
+
+  // Carregar configurações do vendedor (permitir_exclusao_parcelas)
+  useEffect(() => {
+    const carregarConfigVendedor = async () => {
+      if (!vendedor?.id) {
+        console.log('[CONFIG] Vendedor não disponível ainda');
+        return;
+      }
+      console.log('[CONFIG] Carregando config para vendedor:', vendedor.id);
+      try {
+        const { data, error } = await supabase
+          .from('configuracoes_vendedor')
+          .select('permitir_exclusao_parcelas')
+          .eq('vendedor_id', vendedor.id)
+          .maybeSingle();
+        
+        console.log('[CONFIG] Resposta:', { data, error });
+        
+        if (!error && data) {
+          console.log('[CONFIG] permitir_exclusao_parcelas =', data.permitir_exclusao_parcelas);
+          setConfigVendedor({ permitir_exclusao_parcelas: data.permitir_exclusao_parcelas ?? true });
+        } else {
+          // Se não existir configuração, permitir por padrão
+          console.log('[CONFIG] Sem config, usando default true');
+          setConfigVendedor({ permitir_exclusao_parcelas: true });
+        }
+      } catch (e) {
+        console.log('[CONFIG] Erro ao carregar config vendedor:', e);
+        setConfigVendedor({ permitir_exclusao_parcelas: true });
+      }
+    };
+    carregarConfigVendedor();
+  }, [vendedor?.id]);
 
   // Iniciar GPS ao montar a tela (não esperar abrir modal)
   const gpsInicializado = useRef(false);
@@ -1255,12 +1304,136 @@ export default function ClientesScreen({ navigation, route }: any) {
     }
   }, [parcelaPagamento, dadosPagamento, valorPagamento, usarCredito, formaPagamento, coords, liqId, t, clienteModal, abrirParcelas, loadLiq, processando]);
 
-  const abrirEstorno = useCallback((parcela: ParcelaModal) => {
-    if (!liqId) { Alert.alert(t.atencao, t.liquidacaoNecessaria); return; }
-    setParcelaEstorno(parcela);
-    setMotivoEstorno('');
-    setModalEstornoVisible(true);
-  }, [liqId, t]);
+  const abrirEstorno = useCallback(async (parcela: ParcelaModal) => {
+    console.log('[ESTORNO] abrirEstorno chamada, parcela:', parcela.parcela_id);
+    console.log('[ESTORNO] configVendedor:', configVendedor);
+    
+    if (!liqId) { showAlert(t.atencao, t.liquidacaoNecessaria); return; }
+    if (!vendedor?.id || !vendedor?.rota_id) { showAlert(t.atencao, 'Vendedor não identificado'); return; }
+
+    // Se permitir_exclusao_parcelas = true, abre direto
+    console.log('[ESTORNO] permitir_exclusao_parcelas =', configVendedor?.permitir_exclusao_parcelas);
+    if (configVendedor?.permitir_exclusao_parcelas === true) {
+      console.log('[ESTORNO] Permitido, abrindo modal direto');
+      setParcelaEstorno(parcela);
+      setMotivoEstorno('');
+      setModalEstornoVisible(true);
+      return;
+    }
+
+    // Se permitir_exclusao_parcelas = false, verificar autorização
+    console.log('[ESTORNO] Não permitido, verificando autorização...');
+    try {
+      const { data, error } = await supabase.rpc('fn_verificar_autorizacao', {
+        p_vendedor_id: vendedor.id,
+        p_rota_id: vendedor.rota_id,
+        p_tipo: 'ESTORNO_PAGAMENTO',
+        p_emprestimo_id: clienteModal?.emprestimo_id || null,
+      });
+
+      console.log('[ESTORNO] Resposta fn_verificar_autorizacao:', { data, error });
+
+      if (error) {
+        console.error('[ESTORNO] Erro ao verificar autorização:', error);
+        showAlert(t.erroGenerico, 'Não foi possível verificar autorização');
+        return;
+      }
+
+      const resultado = Array.isArray(data) ? data[0] : data;
+      console.log('[ESTORNO] Resultado processado:', resultado);
+
+      // Se autorizado, abre modal de estorno direto
+      if (resultado?.autorizado) {
+        console.log('[ESTORNO] Autorizado, abrindo modal de estorno');
+        setParcelaEstorno(parcela);
+        setMotivoEstorno('');
+        setModalEstornoVisible(true);
+        return;
+      }
+
+      // Se requer solicitação, abrir modal de solicitação de autorização
+      if (resultado?.requer_solicitacao) {
+        console.log('[ESTORNO] Requer solicitação');
+        // Verificar se já existe solicitação pendente
+        if (resultado.solicitacao_pendente_id) {
+          console.log('[ESTORNO] Já existe solicitação pendente:', resultado.solicitacao_pendente_id);
+          showAlert(
+            lang === 'pt-BR' ? 'Solicitação Pendente' : 'Solicitud Pendiente',
+            lang === 'pt-BR' 
+              ? 'Já existe uma solicitação de estorno pendente. Aguarde a aprovação do supervisor.'
+              : 'Ya existe una solicitud de estorno pendiente. Espere la aprobación del supervisor.'
+          );
+          return;
+        }
+
+        // Abrir modal para criar solicitação
+        console.log('[ESTORNO] Abrindo modal de solicitação de autorização...');
+        setParcelaAguardandoAutorizacao(parcela);
+        setMotivoSolicitacaoEstorno('');
+        setModalAutorizacaoEstornoVisible(true);
+        console.log('[ESTORNO] Modal deveria estar visível agora');
+        return;
+      }
+
+      // Bloqueio sem opção de solicitar
+      showAlert(
+        lang === 'pt-BR' ? 'Não permitido' : 'No permitido',
+        resultado?.motivo || (lang === 'pt-BR' ? 'Estorno não permitido' : 'Estorno no permitido')
+      );
+
+    } catch (e: any) {
+      console.error('Erro ao verificar autorização estorno:', e);
+      showAlert(t.erroGenerico, e.message || 'Erro ao verificar autorização');
+    }
+  }, [liqId, t, vendedor, configVendedor, clienteModal, lang, showAlert]);
+
+  // Função para enviar solicitação de autorização de estorno
+  const enviarSolicitacaoEstorno = useCallback(async () => {
+    if (!vendedor?.id || !vendedor?.rota_id || !parcelaAguardandoAutorizacao) return;
+    
+    if (!motivoSolicitacaoEstorno.trim()) {
+      showAlert(t.atencao, lang === 'pt-BR' ? 'Informe o motivo da solicitação' : 'Informe el motivo de la solicitud');
+      return;
+    }
+
+    setEnviandoSolicitacaoEstorno(true);
+    try {
+      const { data, error } = await supabase.rpc('fn_criar_solicitacao_autorizacao', {
+        p_vendedor_id: vendedor.id,
+        p_rota_id: vendedor.rota_id,
+        p_tipo_solicitacao: 'ESTORNO_PAGAMENTO',
+        p_motivo: motivoSolicitacaoEstorno.trim(),
+        p_emprestimo_id: clienteModal?.emprestimo_id || null,
+      });
+
+      if (error) throw error;
+
+      const resultado = Array.isArray(data) ? data[0] : data;
+
+      if (!resultado?.sucesso) {
+        showAlert(t.erroGenerico, resultado?.mensagem || 'Não foi possível criar solicitação');
+        return;
+      }
+
+      // Sucesso
+      setModalAutorizacaoEstornoVisible(false);
+      setParcelaAguardandoAutorizacao(null);
+      setMotivoSolicitacaoEstorno('');
+      
+      showAlert(
+        lang === 'pt-BR' ? 'Solicitação Enviada' : 'Solicitud Enviada',
+        lang === 'pt-BR' 
+          ? 'Sua solicitação foi enviada. Aguarde a aprovação do supervisor.'
+          : 'Su solicitud ha sido enviada. Espere la aprobación del supervisor.'
+      );
+
+    } catch (e: any) {
+      console.error('Erro ao criar solicitação:', e);
+      showAlert(t.erroGenerico, e.message || 'Erro ao enviar solicitação');
+    } finally {
+      setEnviandoSolicitacaoEstorno(false);
+    }
+  }, [vendedor, parcelaAguardandoAutorizacao, motivoSolicitacaoEstorno, clienteModal, t, lang, showAlert]);
 
   const confirmarEstorno = useCallback(async () => {
     if (!parcelaEstorno || !motivoEstorno.trim() || processando) return;
@@ -2272,6 +2445,75 @@ export default function ClientesScreen({ navigation, route }: any) {
             <View style={S.estBtns}><TouchableOpacity style={S.estBtnCancel} onPress={() => setModalEstornoVisible(false)}><Text style={S.estBtnCancelTx}>{t.cancelar}</Text></TouchableOpacity><TouchableOpacity style={[S.estBtnConfirm, (!motivoEstorno.trim() || processando) && S.estBtnDisabled]} onPress={confirmarEstorno} disabled={!motivoEstorno.trim() || processando}>{processando ? (<ActivityIndicator color="#fff" />) : (<Text style={S.estBtnConfirmTx}>{t.confirmarEstorno}</Text>)}</TouchableOpacity></View>
           </>)}
         </View></View>
+      </Modal>
+
+      {/* Modal Solicitação de Autorização de Estorno */}
+      <Modal visible={modalAutorizacaoEstornoVisible} animationType="fade" transparent={true} onRequestClose={() => setModalAutorizacaoEstornoVisible(false)}>
+        <View style={S.modalOverlay}>
+          <View style={S.modalEstorno}>
+            <View style={S.estHeader}>
+              <Text style={S.estHeaderIcon}>🔒</Text>
+              <Text style={S.estHeaderTitle}>{lang === 'pt-BR' ? 'Autorização Necessária' : 'Autorización Necesaria'}</Text>
+              <TouchableOpacity onPress={() => { setModalAutorizacaoEstornoVisible(false); setParcelaAguardandoAutorizacao(null); }} style={S.modalClose}>
+                <Text style={S.modalCloseX}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            {parcelaAguardandoAutorizacao && (
+              <>
+                {/* Aviso */}
+                <View style={{ backgroundColor: '#FEF3C7', padding: 12, borderRadius: 8, marginBottom: 16 }}>
+                  <Text style={{ color: '#92400E', fontSize: 14, textAlign: 'center' }}>
+                    {lang === 'pt-BR' 
+                      ? 'Estorno de pagamento requer autorização do supervisor.'
+                      : 'Reversión de pago requiere autorización del supervisor.'}
+                  </Text>
+                </View>
+
+                {/* Info da parcela */}
+                <View style={S.estInfo}>
+                  <Text style={S.estInfoParcela}>{t.parcela} {parcelaAguardandoAutorizacao.numero_parcela}</Text>
+                  <Text style={S.estInfoCliente}>{clienteModal?.nome || ''}</Text>
+                  <Text style={S.estInfoValor}>{t.pago} {fmt(parcelaAguardandoAutorizacao.valor_pago || parcelaAguardandoAutorizacao.valor_parcela)}</Text>
+                </View>
+
+                {/* Campo de motivo */}
+                <View style={S.estInputBox}>
+                  <Text style={S.estInputLabel}>{lang === 'pt-BR' ? 'Motivo da solicitação' : 'Motivo de la solicitud'}</Text>
+                  <TextInput 
+                    style={S.estInput} 
+                    value={motivoSolicitacaoEstorno} 
+                    onChangeText={setMotivoSolicitacaoEstorno} 
+                    placeholder={lang === 'pt-BR' ? 'Explique por que precisa estornar...' : 'Explique por qué necesita reversar...'} 
+                    multiline 
+                    numberOfLines={3} 
+                  />
+                </View>
+
+                {/* Botões */}
+                <View style={S.estBtns}>
+                  <TouchableOpacity 
+                    style={S.estBtnCancel} 
+                    onPress={() => { setModalAutorizacaoEstornoVisible(false); setParcelaAguardandoAutorizacao(null); }}
+                  >
+                    <Text style={S.estBtnCancelTx}>{t.cancelar}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[S.estBtnConfirm, { backgroundColor: '#F59E0B' }, (!motivoSolicitacaoEstorno.trim() || enviandoSolicitacaoEstorno) && S.estBtnDisabled]} 
+                    onPress={enviarSolicitacaoEstorno} 
+                    disabled={!motivoSolicitacaoEstorno.trim() || enviandoSolicitacaoEstorno}
+                  >
+                    {enviandoSolicitacaoEstorno ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={S.estBtnConfirmTx}>{lang === 'pt-BR' ? 'Solicitar Autorização' : 'Solicitar Autorización'}</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
       </Modal>
 
       {/* Modal Criar Nota via Long Press */}
