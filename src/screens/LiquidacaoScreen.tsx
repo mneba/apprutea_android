@@ -368,6 +368,11 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const ehMesAtualOuFuturo = anoAtual > hoje.getFullYear() ||
     (anoAtual === hoje.getFullYear() && mesAtual >= hoje.getMonth());
 
+  // Bloqueia navegação para mais de 2 meses atrás
+  const limiteAnterior = new Date(hoje.getFullYear(), hoje.getMonth() - 2, 1);
+  const ehMuitoAntigo = anoAtual < limiteAnterior.getFullYear() ||
+    (anoAtual === limiteAnterior.getFullYear() && mesAtual < limiteAnterior.getMonth());
+
   useFocusEffect(useCallback(() => {
     carregarLiquidacoes();
   }, []));
@@ -483,11 +488,14 @@ export default function LiquidacaoScreen({ navigation }: any) {
   };
 
   const irMesAnterior = () => {
+    console.log('irMesAnterior - ehMuitoAntigo:', ehMuitoAntigo, 'mesAtual:', mesAtual, 'anoAtual:', anoAtual);
+    if (ehMuitoAntigo) return;
     if (mesAtual === 0) { setMesAtual(11); setAnoAtual(anoAtual - 1); }
     else { setMesAtual(mesAtual - 1); }
   };
 
   const irProximoMes = () => {
+    console.log('irProximoMes - ehMesAtualOuFuturo:', ehMesAtualOuFuturo, 'mesAtual:', mesAtual, 'anoAtual:', anoAtual);
     if (ehMesAtualOuFuturo) return;
     if (mesAtual === 11) { setMesAtual(0); setAnoAtual(anoAtual + 1); }
     else { setMesAtual(mesAtual + 1); }
@@ -657,8 +665,20 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
   const formatarData = (data: string | Date | null) => {
     if (!data) return '-';
-    const d = typeof data === 'string' ? new Date(data) : data;
-    return d.toLocaleDateString('pt-BR');
+    
+    // Se for string no formato YYYY-MM-DD, extrair partes manualmente para evitar problema de timezone
+    if (typeof data === 'string') {
+      const match = data.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (match) {
+        const [, ano, mes, dia] = match;
+        return `${dia}/${mes}/${ano}`;
+      }
+      // Fallback para outros formatos
+      const d = new Date(data);
+      return d.toLocaleDateString('pt-BR');
+    }
+    
+    return data.toLocaleDateString('pt-BR');
   };
 
   const calcularEfetividade = () => {
@@ -759,8 +779,26 @@ export default function LiquidacaoScreen({ navigation }: any) {
         if (solicitacaoExistente) {
           console.log('Já existe solicitação de abertura pendente:', solicitacaoExistente);
           
+          // Verificar se é o MESMO dia
+          const dataExistenteStr = solicitacaoExistente.data_solicitada; // "2026-03-25"
+          
+          if (dataExistenteStr === dataSolicitadaNova) {
+            // MESMO DIA - apenas avisar que já existe, sem opção de substituir
+            const [ano, mes, dia] = dataExistenteStr.split('-');
+            const dataFormatada = `${dia}/${mes}/${ano.slice(-2)}`;
+            
+            showAlert(
+              language === 'pt-BR' ? 'Solicitação Pendente' : 'Solicitud Pendiente',
+              language === 'pt-BR' 
+                ? `Já existe uma solicitação de abertura pendente para o dia ${dataFormatada}. Aguarde a aprovação do supervisor.`
+                : `Ya existe una solicitud de apertura pendiente para el día ${dataFormatada}. Espere la aprobación del supervisor.`
+            );
+            return false;
+          }
+          
+          // DIAS DIFERENTES - oferecer substituição
           // Formatar a data da solicitação existente
-          const [ano, mes, dia] = solicitacaoExistente.data_solicitada.split('-');
+          const [ano, mes, dia] = dataExistenteStr.split('-');
           const dataExistenteFormatada = `${dia}/${mes}/${ano.slice(-2)}`;
           
           // Formatar a data nova
@@ -1024,8 +1062,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
           {/* Calendário */}
           <View style={styles.calendarioCard}>
             <View style={styles.mesHeader}>
-              <TouchableOpacity onPress={irMesAnterior} style={styles.mesNavBtn}>
-                <Text style={styles.mesNavText}>‹</Text>
+              <TouchableOpacity onPress={irMesAnterior} style={styles.mesNavBtn} disabled={ehMuitoAntigo}>
+                <Text style={[styles.mesNavText, ehMuitoAntigo && { color: '#D1D5DB' }]}>‹</Text>
               </TouchableOpacity>
               <Text style={styles.mesTitulo}>{t.meses[mesAtual]} {anoAtual}</Text>
               <TouchableOpacity onPress={irProximoMes} style={styles.mesNavBtn} disabled={ehMesAtualOuFuturo}>
@@ -1342,7 +1380,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
               <View style={styles.statusRow}>
                 <View style={styles.dataContainer}>
                   <Text style={styles.statusIcon}>{isAberto ? '🔓' : isReaberto ? '🔄' : '🔒'}</Text>
-                  <Text style={styles.dataText}>{formatarData(liquidacao.data_abertura)}</Text>
+                  <Text style={styles.dataText}>{formatarData(liquidacao.data_liquidacao || liquidacao.data_abertura)}</Text>
                 </View>
                 <View style={[styles.statusBadge, { backgroundColor: isReaberto ? '#FEF3C7' : isAberto ? '#D1FAE5' : '#FEE2E2' }]}>
                   <Text style={[styles.statusText, { color: isReaberto ? '#D97706' : isAberto ? '#047857' : '#DC2626' }]}>
