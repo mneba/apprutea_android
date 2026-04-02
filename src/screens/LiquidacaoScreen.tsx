@@ -488,14 +488,12 @@ export default function LiquidacaoScreen({ navigation }: any) {
   };
 
   const irMesAnterior = () => {
-    console.log('irMesAnterior - ehMuitoAntigo:', ehMuitoAntigo, 'mesAtual:', mesAtual, 'anoAtual:', anoAtual);
     if (ehMuitoAntigo) return;
     if (mesAtual === 0) { setMesAtual(11); setAnoAtual(anoAtual - 1); }
     else { setMesAtual(mesAtual - 1); }
   };
 
   const irProximoMes = () => {
-    console.log('irProximoMes - ehMesAtualOuFuturo:', ehMesAtualOuFuturo, 'mesAtual:', mesAtual, 'anoAtual:', anoAtual);
     if (ehMesAtualOuFuturo) return;
     if (mesAtual === 11) { setMesAtual(0); setAnoAtual(anoAtual + 1); }
     else { setMesAtual(mesAtual + 1); }
@@ -665,20 +663,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
   const formatarData = (data: string | Date | null) => {
     if (!data) return '-';
-    
-    // Se for string no formato YYYY-MM-DD, extrair partes manualmente para evitar problema de timezone
-    if (typeof data === 'string') {
-      const match = data.match(/^(\d{4})-(\d{2})-(\d{2})/);
-      if (match) {
-        const [, ano, mes, dia] = match;
-        return `${dia}/${mes}/${ano}`;
-      }
-      // Fallback para outros formatos
-      const d = new Date(data);
-      return d.toLocaleDateString('pt-BR');
-    }
-    
-    return data.toLocaleDateString('pt-BR');
+    const d = typeof data === 'string' ? new Date(data) : data;
+    return d.toLocaleDateString('pt-BR');
   };
 
   const calcularEfetividade = () => {
@@ -728,15 +714,11 @@ export default function LiquidacaoScreen({ navigation }: any) {
     }
     
     try {
-      // Determinar o tipo de verificação
-      const tipoVerificacao = dataLiquidacao ? 'ABERTURA_RETROATIVA' : 'ABERTURA_DIAS_FALTANTES';
-      
-      console.log('Chamando RPC fn_verificar_autorizacao, tipo:', tipoVerificacao);
-      const { data, error } = await supabase.rpc('fn_verificar_autorizacao', {
+      console.log('Chamando RPC fn_validar_abertura_liquidacao...');
+      const { data, error } = await supabase.rpc('fn_validar_abertura_liquidacao', {
         p_vendedor_id: vendedor.id,
         p_rota_id: vendedor.rota_id,
-        p_tipo: tipoVerificacao,
-        p_data: dataLiquidacao,
+        p_data_abertura: dataLiquidacao,
       });
 
       console.log('Resposta RPC:', { data, error });
@@ -756,79 +738,38 @@ export default function LiquidacaoScreen({ navigation }: any) {
       }
 
       // Pode abrir sem restrições
-      if (resultado.autorizado) {
-        console.log('Autorizado! Pode abrir.');
+      if (resultado.pode_abrir) {
+        console.log('Pode abrir!');
         return true;
       }
 
-      // Requer solicitação de autorização
-      if (resultado.requer_solicitacao) {
-        console.log('Requer solicitação, tipo_bloqueio:', resultado.tipo_bloqueio);
+      // Requer autorização - verificar se já existe QUALQUER solicitação de abertura pendente
+      if (resultado.requer_autorizacao) {
+        console.log('Requer autorização, verificando se já existe solicitação de abertura pendente...');
         
         const dataSolicitadaNova = dataLiquidacao || new Date().toISOString().split('T')[0];
 
-        // Verificar se já existe solicitação pendente (retornada pela function)
-        if (resultado.solicitacao_pendente_id) {
-          console.log('Já existe solicitação pendente:', resultado.solicitacao_pendente_id);
-          
-          // Buscar dados da solicitação pendente para saber a data
-          const { data: solicitacaoExistente } = await supabase
-            .from('solicitacoes_autorizacao')
-            .select('id, data_solicitada, tipo_solicitacao')
-            .eq('id', resultado.solicitacao_pendente_id)
-            .single();
-
-          if (solicitacaoExistente) {
-            const dataExistenteStr = solicitacaoExistente.data_solicitada;
-            
-            if (dataExistenteStr === dataSolicitadaNova) {
-              // MESMO DIA - apenas avisar que já existe
-              const [ano, mes, dia] = dataExistenteStr.split('-');
-              const dataFormatada = `${dia}/${mes}/${ano.slice(-2)}`;
-              
-              showAlert(
-                language === 'pt-BR' ? 'Solicitação Pendente' : 'Solicitud Pendiente',
-                language === 'pt-BR' 
-                  ? `Já existe uma solicitação de abertura pendente para o dia ${dataFormatada}. Aguarde a aprovação do supervisor.`
-                  : `Ya existe una solicitud de apertura pendiente para el día ${dataFormatada}. Espere la aprobación del supervisor.`
-              );
-              return false;
-            }
-            
-            // DIAS DIFERENTES - oferecer substituição
-            const [ano, mes, dia] = dataExistenteStr.split('-');
-            const dataExistenteFormatada = `${dia}/${mes}/${ano.slice(-2)}`;
-            
-            const [anoNovo, mesNovo, diaNovo] = dataSolicitadaNova.split('-');
-            const dataNovaFormatada = `${diaNovo}/${mesNovo}/${anoNovo.slice(-2)}`;
-
-            // Abrir modal de confirmação de substituição
-            setSubstituirInfo({
-              solicitacaoAnteriorId: solicitacaoExistente.id,
-              dataAnterior: dataExistenteFormatada,
-              dataNova: dataNovaFormatada,
-              resultadoValidacao: resultado,
-              dataLiquidacao: dataLiquidacao,
-            });
-            setModalSubstituirVisible(true);
-            return false;
-          }
-        }
-
-        // Verificar se existe QUALQUER outra solicitação de ABERTURA pendente
-        // (caso a function não tenha retornado porque o tipo era diferente)
-        const { data: outraSolicitacao } = await supabase
+        // Verificar se já existe QUALQUER solicitação de ABERTURA pendente (retroativa ou dias faltantes)
+        const { data: solicitacaoExistente, error: erroBusca } = await supabase
           .from('solicitacoes_autorizacao')
-          .select('id, data_solicitada, tipo_solicitacao')
+          .select('id, data_solicitada, tipo_solicitacao, created_at')
           .eq('vendedor_id', vendedor.id)
           .in('tipo_solicitacao', ['ABERTURA_RETROATIVA', 'ABERTURA_DIAS_FALTANTES'])
           .eq('status', 'PENDENTE')
           .maybeSingle();
 
-        if (outraSolicitacao) {
-          const dataExistenteStr = outraSolicitacao.data_solicitada;
+        if (erroBusca) {
+          console.error('Erro ao verificar solicitação existente:', erroBusca);
+        }
+
+        if (solicitacaoExistente) {
+          console.log('Já existe solicitação de abertura pendente:', solicitacaoExistente);
+          
+          // Verificar se é o MESMO dia
+          const dataExistenteStr = solicitacaoExistente.data_solicitada; // "2026-03-25"
           
           if (dataExistenteStr === dataSolicitadaNova) {
+            // MESMO DIA - apenas avisar que já existe, sem opção de substituir
             const [ano, mes, dia] = dataExistenteStr.split('-');
             const dataFormatada = `${dia}/${mes}/${ano.slice(-2)}`;
             
@@ -842,14 +783,17 @@ export default function LiquidacaoScreen({ navigation }: any) {
           }
           
           // DIAS DIFERENTES - oferecer substituição
+          // Formatar a data da solicitação existente
           const [ano, mes, dia] = dataExistenteStr.split('-');
           const dataExistenteFormatada = `${dia}/${mes}/${ano.slice(-2)}`;
           
+          // Formatar a data nova
           const [anoNovo, mesNovo, diaNovo] = dataSolicitadaNova.split('-');
           const dataNovaFormatada = `${diaNovo}/${mesNovo}/${anoNovo.slice(-2)}`;
 
+          // Abrir modal de confirmação de substituição
           setSubstituirInfo({
-            solicitacaoAnteriorId: outraSolicitacao.id,
+            solicitacaoAnteriorId: solicitacaoExistente.id,
             dataAnterior: dataExistenteFormatada,
             dataNova: dataNovaFormatada,
             resultadoValidacao: resultado,
@@ -863,7 +807,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
         console.log('Abrindo modal de solicitação...');
         setValidacaoInfo({
           tipo: resultado.tipo_bloqueio,
-          mensagem: resultado.motivo,
+          mensagem: resultado.mensagem,
           diasFaltantes: resultado.dias_faltantes || [],
           dataSolicitada: dataLiquidacao,
         });
@@ -872,12 +816,9 @@ export default function LiquidacaoScreen({ navigation }: any) {
         return false;
       }
 
-      // Bloqueio sem opção de solicitar (já existe liquidação, domingo, feriado, etc.)
-      console.log('Bloqueio definitivo:', resultado.motivo);
-      showAlert(
-        language === 'pt-BR' ? 'Não permitido' : 'No permitido', 
-        resultado.motivo
-      );
+      // Bloqueio sem opção de solicitar (já existe, domingo, feriado, liquidação aberta)
+      console.log('Bloqueio definitivo:', resultado.mensagem);
+      showAlert('Não permitido', resultado.mensagem);
       return false;
 
     } catch (error: any) {
@@ -1425,7 +1366,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
               <View style={styles.statusRow}>
                 <View style={styles.dataContainer}>
                   <Text style={styles.statusIcon}>{isAberto ? '🔓' : isReaberto ? '🔄' : '🔒'}</Text>
-                  <Text style={styles.dataText}>{formatarData(liquidacao.data_liquidacao || liquidacao.data_abertura)}</Text>
+                  <Text style={styles.dataText}>{formatarData(liquidacao.data_abertura)}</Text>
                 </View>
                 <View style={[styles.statusBadge, { backgroundColor: isReaberto ? '#FEF3C7' : isAberto ? '#D1FAE5' : '#FEE2E2' }]}>
                   <Text style={[styles.statusText, { color: isReaberto ? '#D97706' : isAberto ? '#047857' : '#DC2626' }]}>

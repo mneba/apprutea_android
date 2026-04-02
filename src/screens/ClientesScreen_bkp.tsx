@@ -1,18 +1,14 @@
-import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Animated,
-  Dimensions,
   FlatList,
   Modal,
   Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -23,9 +19,6 @@ import { ModalCriarNota, ModalNotasLista, buscarNotasCountPorClientes } from '..
 import { useAuth } from '../contexts/AuthContext';
 import { Language, useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const DRAWER_WIDTH = SCREEN_WIDTH * 0.75;
 
 // Language importado do LiquidacaoContext
 type TabAtiva = 'liquidacao' | 'todos';
@@ -375,19 +368,6 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busca, setBusca] = useState('');
-
-  // Drawer de filtros
-  const [drawerVisible, setDrawerVisible] = useState(false);
-  const drawerAnim = useRef(new Animated.Value(SCREEN_WIDTH)).current;
-
-  const openDrawer = useCallback(() => {
-    setDrawerVisible(true);
-    Animated.timing(drawerAnim, { toValue: SCREEN_WIDTH - DRAWER_WIDTH, duration: 250, useNativeDriver: true }).start();
-  }, [drawerAnim]);
-
-  const closeDrawer = useCallback(() => {
-    Animated.timing(drawerAnim, { toValue: SCREEN_WIDTH, duration: 200, useNativeDriver: true }).start(() => setDrawerVisible(false));
-  }, [drawerAnim]);
 
   const [raw, setRaw] = useState<ClienteRotaDia[]>([]);
   const [pagasSet, setPagasSet] = useState<Set<string>>(new Set());  const [pagMap, setPagMap] = useState<Map<string, PagamentoParcela>>(new Map());
@@ -2152,261 +2132,96 @@ export default function ClientesScreen({ navigation, route }: any) {
         </View>
       )}
       
-      {/* ═══════════════════════════════════════════════════════════════════════
-          NOVO HEADER REDESENHADO
-          ═══════════════════════════════════════════════════════════════════════ */}
-      
-      {/* Linha 1: Título + Toggle Todos */}
-      <View style={S.newHeader}>
-        <Text style={S.newTitle}>{t.titulo || 'Clientes'}</Text>
-        <View style={S.toggleContainer}>
-          <Switch
-            value={tab === 'todos'}
-            onValueChange={(v) => {
-              if (v) setTab('todos');
-              else if (liqId) setTab('liquidacao');
-            }}
-            trackColor={{ false: '#D1D5DB', true: '#3B82F6' }}
-            thumbColor="#FFF"
-            disabled={!liqId && tab === 'liquidacao'}
-          />
-          <Text style={S.toggleLabel}>{t.todosList || 'Todos'}</Text>
-        </View>
+      {/* Tabs - Liquidação desabilitada se não há liqId */}
+      <View style={S.tabs}>
+        <TouchableOpacity 
+          style={[S.tb, tab === 'liquidacao' && S.tbOn, !liqId && S.tbDisabled]} 
+          onPress={() => liqId && setTab('liquidacao')}
+          disabled={!liqId}
+        >
+          <Text style={S.tbI}>{liqId ? '📅' : '🔒'}</Text>
+          <Text style={[S.tbTx, tab === 'liquidacao' && S.tbTxOn, !liqId && S.tbTxDisabled]}>
+            {t.liquidacao} {liqId ? `(${cntTotal})` : ''}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[S.tb, tab === 'todos' && S.tbOn]} 
+          onPress={() => setTab('todos')}
+        >
+          <Text style={S.tbI}>👥</Text>
+          <Text style={[S.tbTx, tab === 'todos' && S.tbTxOn]}>{t.todosList} ({todosList.length > 0 ? todosList.length : todosCount ?? '...'})</Text>
+        </TouchableOpacity>
       </View>
-
-      {/* Linha 2: Barra de Busca */}
-      <View style={S.searchRow}>
-        <View style={S.searchBox}>
-          <Ionicons name="search-outline" size={18} color="#9CA3AF" />
-          <TextInput 
-            style={S.searchInput} 
-            placeholder={t.buscar} 
-            placeholderTextColor="#9CA3AF" 
-            value={busca} 
-            onChangeText={setBusca}
-          />
-          {busca.length > 0 && (
-            <TouchableOpacity onPress={() => setBusca('')} activeOpacity={0.7}>
-              <Ionicons name="close-circle" size={18} color="#9CA3AF" />
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-
-      {/* Linha 3: Contador + Badge Pagas + Botão Filtro */}
-      <View style={S.filterRow}>
-        <View style={S.filterLeft}>
-          {tab === 'liquidacao' ? (
-            <Text style={S.counterText}>
-              {t.liquidacao} {cntTotal - cntPagas}/{cntTotal}
-            </Text>
-          ) : (
-            <Text style={S.counterText}>
-              {t.todosList} {todosFilt.length}
-            </Text>
-          )}
-          {tab === 'liquidacao' && cntPagas > 0 && (
-            <TouchableOpacity 
-              style={[S.badgePagas, filtro === 'pagas' && S.badgePagasActive]} 
-              onPress={() => setFiltro(filtro === 'pagas' ? 'todos' : 'pagas')}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="checkmark-circle" size={14} color={filtro === 'pagas' ? '#FFF' : '#10B981'} />
-              <Text style={[S.badgePagasText, filtro === 'pagas' && S.badgePagasTextActive]}>
-                {t.filtroPagas} {cntPagas}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-        <View style={S.filterRight}>
-          <TouchableOpacity style={S.filterBtn} onPress={openDrawer} activeOpacity={0.7}>
-            <Ionicons name="options-outline" size={20} color="#374151" />
+      <View style={S.srR}><View style={S.srB}><Text style={S.srI}>🔍</Text><TextInput style={S.srIn} placeholder={t.buscar} placeholderTextColor="#9CA3AF" value={busca} onChangeText={setBusca} /></View>{tab === 'liquidacao' && <TouchableOpacity style={S.orB} onPress={() => setShowOrd(!showOrd)}><Text style={S.orI}>↕️</Text><Text style={S.orTx}>{ord === 'rota' ? t.ordemRota : t.ordemNome}</Text><Text style={S.orCh}>▼</Text></TouchableOpacity>}<TouchableOpacity style={S.hdHelp} onPress={() => setModalLegendaVisible(true)}><Text style={S.hdHelpText}>?</Text></TouchableOpacity></View>
+      {showOrd && tab === 'liquidacao' && <View style={S.orDr}>{(['rota', 'nome'] as OrdenacaoLiquidacao[]).map(o => (<TouchableOpacity key={o} style={[S.orOp, ord === o && S.orOpOn]} onPress={() => { setOrd(o); setShowOrd(false); }}><Text style={[S.orOpTx, ord === o && S.orOpTxOn]}>{o === 'rota' ? t.ordemRota : t.ordemNome}</Text></TouchableOpacity>))}</View>}
+      {tab === 'liquidacao' && (<View style={S.chs}><TouchableOpacity style={[S.ch, filtro === 'todos' && S.chOn]} onPress={() => setFiltro('todos')}><Text style={[S.chTx, filtro === 'todos' && S.chTxOn]}>{t.filtroTodos} {cntTotal}</Text></TouchableOpacity><TouchableOpacity style={[S.ch, filtro === 'atrasados' && S.chOn]} onPress={() => setFiltro('atrasados')}><Text style={[S.chTx, filtro === 'atrasados' && S.chTxOn]}>{t.filtroAtrasados} {cntAtraso}</Text></TouchableOpacity><TouchableOpacity style={[S.ch, filtro === 'pagas' && S.chPOn, filtro !== 'pagas' && S.chPOff]} onPress={() => setFiltro(filtro === 'pagas' ? 'todos' : 'pagas')}><Text style={[S.chTx, filtro === 'pagas' ? S.chPTxOn : S.chPTxOff]}>{t.filtroPagas} {cntPagas}</Text></TouchableOpacity><Text style={S.chCh}>▼</Text></View>)}
+      {tab === 'todos' && (<View style={S.tF}>
+        <View style={{ position: 'relative' as const }}>
+          <TouchableOpacity style={[S.tFB, filtroTipo !== 'todos' && { borderColor: '#3B82F6', backgroundColor: '#EFF6FF' }]} onPress={() => { setShowFiltroTipo(!showFiltroTipo); setShowFiltroStatus(false); }}>
+            <Text style={[S.tFBT, filtroTipo !== 'todos' && { color: '#3B82F6' }]}>{filtroTipo === 'todos' ? t.tipoFiltro : filtroTipo === 'NOVO' ? t.tipoNovo : filtroTipo === 'RENOVACAO' ? t.tipoRenovacao : t.tipoRenegociacao}</Text><Text style={S.tFC}>▼</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={S.helpBtn} onPress={() => setModalLegendaVisible(true)} activeOpacity={0.7}>
-            <Ionicons name="help-circle-outline" size={20} color="#9CA3AF" />
-          </TouchableOpacity>
+          {showFiltroTipo && (<View style={S.tDD}>{[
+            { k: 'todos', l: t.tipoTodos }, { k: 'NOVO', l: t.tipoNovo }, { k: 'RENOVACAO', l: t.tipoRenovacao }, { k: 'RENEGOCIACAO', l: t.tipoRenegociacao }
+          ].map(o => (<TouchableOpacity key={o.k} style={[S.tDDI, filtroTipo === o.k && S.tDDISel]} onPress={() => { setFiltroTipo(o.k); setShowFiltroTipo(false); }}><Text style={[S.tDDIT, filtroTipo === o.k && S.tDDITSel]}>{o.l}</Text></TouchableOpacity>))}</View>)}
         </View>
-      </View>
-
-      {/* ═══════════════════════════════════════════════════════════════════════
-          DRAWER LATERAL DE FILTROS
-          ═══════════════════════════════════════════════════════════════════════ */}
-      {drawerVisible && (
-        <>
+        <View style={{ position: 'relative' as const }}>
+          <TouchableOpacity style={[S.tFB, filtroStatus !== 'todos' && { borderColor: '#3B82F6', backgroundColor: '#EFF6FF' }]} onPress={() => { setShowFiltroStatus(!showFiltroStatus); setShowFiltroTipo(false); }}>
+            <Text style={[S.tFBT, filtroStatus !== 'todos' && { color: '#3B82F6' }]}>{filtroStatus === 'todos' ? t.statusFiltro : filtroStatus === 'ATIVO' ? t.stAtivo : filtroStatus === 'VENCIDO' ? t.stVencido : filtroStatus === 'QUITADO' ? t.stQuitado : t.stRenegociado}</Text><Text style={S.tFC}>▼</Text>
+          </TouchableOpacity>
+          {showFiltroStatus && (<View style={S.tDD}>{[
+            { k: 'todos', l: t.stTodos }, { k: 'ATIVO', l: t.stAtivo }, { k: 'VENCIDO', l: t.stVencido }, { k: 'QUITADO', l: t.stQuitado }, { k: 'RENEGOCIADO', l: t.stRenegociado }
+          ].map(o => (<TouchableOpacity key={o.k} style={[S.tDDI, filtroStatus === o.k && S.tDDISel]} onPress={() => { setFiltroStatus(o.k); setShowFiltroStatus(false); }}><Text style={[S.tDDIT, filtroStatus === o.k && S.tDDITSel]}>{o.l}</Text></TouchableOpacity>))}</View>)}
+        </View>
+        <Text style={S.tCnt}>{todosFilt.length} {t.clientes}</Text>
+        <TouchableOpacity
+          style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 6, backgroundColor: '#F3F4F6', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', gap: 4 }}
+          onPress={() => {
+            const lista = [...todosList].sort((a, b) => {
+              const oa = ordemRotaMap.get(a.id) ?? 9999;
+              const ob = ordemRotaMap.get(b.id) ?? 9999;
+              if (oa !== ob) return oa - ob;
+              return a.nome.localeCompare(b.nome);
+            });
+            setListaReordenar(lista);
+            setModoReordenar(true);
+          }}
+          activeOpacity={0.7}
+        >
+          <Text style={{ fontSize: 14 }}>⇅</Text>
+          <Text style={{ fontSize: 12, color: '#374151', fontWeight: '500' }}>{lang === 'es' ? 'Ordenar' : 'Ordenar'}</Text>
+        </TouchableOpacity>
+      </View>)}
+      {tab === 'todos' && liqId && (
+        <View style={{ paddingHorizontal: 16, paddingBottom: 10 }}>
           <TouchableOpacity 
-            style={S.drawerOverlay} 
-            activeOpacity={1} 
-            onPress={closeDrawer}
-          />
-          <Animated.View style={[S.drawer, { transform: [{ translateX: drawerAnim }] }]}>
-            <View style={S.drawerHeader}>
-              <Text style={S.drawerTitle}>{lang === 'es' ? 'Filtros' : 'Filtros'}</Text>
-              <TouchableOpacity onPress={closeDrawer} activeOpacity={0.7}>
-                <Ionicons name="close" size={24} color="#374151" />
-              </TouchableOpacity>
+            style={{ 
+              flexDirection: 'row', alignItems: 'center', 
+              paddingVertical: 8, paddingHorizontal: 12,
+              backgroundColor: ocultarLiquidacao ? '#EFF6FF' : '#F9FAFB',
+              borderRadius: 8, borderWidth: 1,
+              borderColor: ocultarLiquidacao ? '#3B82F6' : '#E5E7EB',
+            }} 
+            onPress={() => setOcultarLiquidacao(!ocultarLiquidacao)}
+            activeOpacity={0.7}
+          >
+            <View style={{ 
+              width: 18, height: 18, borderRadius: 4, borderWidth: 2, 
+              borderColor: ocultarLiquidacao ? '#3B82F6' : '#9CA3AF', 
+              backgroundColor: ocultarLiquidacao ? '#3B82F6' : 'transparent', 
+              alignItems: 'center', justifyContent: 'center', marginRight: 8 
+            }}>
+              {ocultarLiquidacao && <Text style={{ color: '#FFF', fontSize: 11, fontWeight: '700', marginTop: -1 }}>✓</Text>}
             </View>
-
-            <ScrollView style={S.drawerContent} showsVerticalScrollIndicator={false}>
-              {/* Seção: Ordenação (apenas no modo Liquidação) */}
-              {tab === 'liquidacao' && (
-                <View style={S.drawerSection}>
-                  <Text style={S.drawerSectionTitle}>
-                    <Ionicons name="swap-vertical-outline" size={16} color="#6B7280" /> {lang === 'es' ? 'Ordenar por' : 'Ordenar por'}
-                  </Text>
-                  {(['rota', 'nome'] as OrdenacaoLiquidacao[]).map(o => (
-                    <TouchableOpacity 
-                      key={o} 
-                      style={[S.drawerOption, ord === o && S.drawerOptionActive]}
-                      onPress={() => { setOrd(o); closeDrawer(); }}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons 
-                        name={o === 'rota' ? 'map-outline' : 'person-outline'} 
-                        size={18} 
-                        color={ord === o ? '#2563EB' : '#6B7280'} 
-                      />
-                      <Text style={[S.drawerOptionText, ord === o && S.drawerOptionTextActive]}>
-                        {o === 'rota' ? (lang === 'es' ? 'Orden de ruta' : 'Ordem da rota') : (lang === 'es' ? 'Nombre' : 'Nome')}
-                      </Text>
-                      {ord === o && <Ionicons name="checkmark" size={18} color="#2563EB" style={{ marginLeft: 'auto' }} />}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-
-              {/* Seção: Filtros de Status (modo Liquidação) */}
-              {tab === 'liquidacao' && (
-                <View style={S.drawerSection}>
-                  <Text style={S.drawerSectionTitle}>
-                    <Ionicons name="funnel-outline" size={16} color="#6B7280" /> {lang === 'es' ? 'Filtrar por' : 'Filtrar por'}
-                  </Text>
-                  {[
-                    { k: 'todos' as FiltroLiquidacao, l: t.filtroTodos, cnt: cntTotal, icon: 'people-outline' as const },
-                    { k: 'atrasados' as FiltroLiquidacao, l: t.filtroAtrasados, cnt: cntAtraso, icon: 'alert-circle-outline' as const },
-                    { k: 'pagas' as FiltroLiquidacao, l: t.filtroPagas, cnt: cntPagas, icon: 'checkmark-circle-outline' as const },
-                  ].map(f => (
-                    <TouchableOpacity 
-                      key={f.k} 
-                      style={[S.drawerOption, filtro === f.k && S.drawerOptionActive]}
-                      onPress={() => { setFiltro(f.k); closeDrawer(); }}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons name={f.icon} size={18} color={filtro === f.k ? '#2563EB' : '#6B7280'} />
-                      <Text style={[S.drawerOptionText, filtro === f.k && S.drawerOptionTextActive]}>
-                        {f.l}
-                      </Text>
-                      <View style={[S.drawerBadge, filtro === f.k && S.drawerBadgeActive]}>
-                        <Text style={[S.drawerBadgeText, filtro === f.k && S.drawerBadgeTextActive]}>{f.cnt}</Text>
-                      </View>
-                      {filtro === f.k && <Ionicons name="checkmark" size={18} color="#2563EB" />}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-
-              {/* Seção: Filtros (modo Todos) */}
-              {tab === 'todos' && (
-                <>
-                  <View style={S.drawerSection}>
-                    <Text style={S.drawerSectionTitle}>
-                      <Ionicons name="pricetag-outline" size={16} color="#6B7280" /> {t.tipoFiltro || 'Tipo'}
-                    </Text>
-                    {[
-                      { k: 'todos', l: t.tipoTodos },
-                      { k: 'NOVO', l: t.tipoNovo },
-                      { k: 'RENOVACAO', l: t.tipoRenovacao },
-                      { k: 'RENEGOCIACAO', l: t.tipoRenegociacao },
-                    ].map(o => (
-                      <TouchableOpacity 
-                        key={o.k} 
-                        style={[S.drawerOption, filtroTipo === o.k && S.drawerOptionActive]}
-                        onPress={() => { setFiltroTipo(o.k); }}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={[S.drawerOptionText, filtroTipo === o.k && S.drawerOptionTextActive]}>{o.l}</Text>
-                        {filtroTipo === o.k && <Ionicons name="checkmark" size={18} color="#2563EB" style={{ marginLeft: 'auto' }} />}
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-
-                  <View style={S.drawerSection}>
-                    <Text style={S.drawerSectionTitle}>
-                      <Ionicons name="flag-outline" size={16} color="#6B7280" /> {t.statusFiltro || 'Status'}
-                    </Text>
-                    {[
-                      { k: 'todos', l: t.stTodos },
-                      { k: 'ATIVO', l: t.stAtivo },
-                      { k: 'VENCIDO', l: t.stVencido },
-                      { k: 'QUITADO', l: t.stQuitado },
-                      { k: 'RENEGOCIADO', l: t.stRenegociado },
-                    ].map(o => (
-                      <TouchableOpacity 
-                        key={o.k} 
-                        style={[S.drawerOption, filtroStatus === o.k && S.drawerOptionActive]}
-                        onPress={() => { setFiltroStatus(o.k); }}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={[S.drawerOptionText, filtroStatus === o.k && S.drawerOptionTextActive]}>{o.l}</Text>
-                        {filtroStatus === o.k && <Ionicons name="checkmark" size={18} color="#2563EB" style={{ marginLeft: 'auto' }} />}
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-
-                  {/* Ocultar da liquidação */}
-                  {liqId && (
-                    <View style={S.drawerSection}>
-                      <TouchableOpacity 
-                        style={S.drawerToggleRow}
-                        onPress={() => setOcultarLiquidacao(!ocultarLiquidacao)}
-                        activeOpacity={0.7}
-                      >
-                        <View style={{ flex: 1 }}>
-                          <Text style={S.drawerToggleLabel}>{t.ocultarLiquidacao || 'Ocultar clientes da liquidação'}</Text>
-                          {ocultarLiquidacao && clientesLiqIds.size > 0 && (
-                            <Text style={S.drawerToggleSub}>-{clientesLiqIds.size} clientes</Text>
-                          )}
-                        </View>
-                        <Switch
-                          value={ocultarLiquidacao}
-                          onValueChange={setOcultarLiquidacao}
-                          trackColor={{ false: '#D1D5DB', true: '#3B82F6' }}
-                          thumbColor="#FFF"
-                        />
-                      </TouchableOpacity>
-                    </View>
-                  )}
-
-                  {/* Botão Reordenar */}
-                  <View style={S.drawerSection}>
-                    <TouchableOpacity 
-                      style={S.drawerReorderBtn}
-                      onPress={() => {
-                        const lista = [...todosList].sort((a, b) => {
-                          const oa = ordemRotaMap.get(a.id) ?? 9999;
-                          const ob = ordemRotaMap.get(b.id) ?? 9999;
-                          if (oa !== ob) return oa - ob;
-                          return a.nome.localeCompare(b.nome);
-                        });
-                        setListaReordenar(lista);
-                        setModoReordenar(true);
-                        closeDrawer();
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons name="reorder-four-outline" size={20} color="#2563EB" />
-                      <Text style={S.drawerReorderText}>{lang === 'es' ? 'Reordenar clientes' : 'Reordenar clientes'}</Text>
-                    </TouchableOpacity>
-                  </View>
-                </>
-              )}
-
-              {/* Botão Aplicar/Fechar */}
-              <TouchableOpacity style={S.drawerApplyBtn} onPress={closeDrawer} activeOpacity={0.8}>
-                <Text style={S.drawerApplyText}>{lang === 'es' ? 'Aplicar' : 'Aplicar'}</Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </Animated.View>
-        </>
+            <Text style={{ fontSize: 12, color: ocultarLiquidacao ? '#2563EB' : '#6B7280', fontWeight: ocultarLiquidacao ? '600' : '400', flex: 1 }}>
+              {t.ocultarLiquidacao || 'Ocultar clientes da liquidação'}
+            </Text>
+            {ocultarLiquidacao && clientesLiqIds.size > 0 && (
+              <View style={{ backgroundColor: '#3B82F6', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2, marginLeft: 6 }}>
+                <Text style={{ color: '#FFF', fontSize: 10, fontWeight: '700' }}>-{clientesLiqIds.size}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
       )}
       {tab === 'liquidacao' ? (
         filtered.length === 0 ? (
@@ -2807,262 +2622,6 @@ const S = StyleSheet.create({
   c: { flex: 1, backgroundColor: '#EEF2FF' },
   lW: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EEF2FF' },
   lT: { marginTop: 12, color: '#6B7280', fontSize: 14 },
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // NOVO HEADER REDESENHADO
-  // ═══════════════════════════════════════════════════════════════════════
-  newHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 12,
-  },
-  newTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  toggleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  toggleLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#6B7280',
-  },
-  searchRow: {
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-  },
-  searchBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    height: 44,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    gap: 10,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 15,
-    color: '#1F2937',
-    padding: 0,
-  },
-  filterRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-  },
-  filterLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  counterText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#6B7280',
-  },
-  badgePagas: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#D1FAE5',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 16,
-    gap: 5,
-  },
-  badgePagasActive: {
-    backgroundColor: '#10B981',
-  },
-  badgePagasText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#10B981',
-  },
-  badgePagasTextActive: {
-    color: '#FFF',
-  },
-  filterRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  filterBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: '#FFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  helpBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: '#FFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // DRAWER LATERAL
-  // ═══════════════════════════════════════════════════════════════════════
-  drawerOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    zIndex: 998,
-  },
-  drawer: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    width: DRAWER_WIDTH,
-    backgroundColor: '#FFF',
-    zIndex: 999,
-    shadowColor: '#000',
-    shadowOffset: { width: -4, height: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 20,
-  },
-  drawerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'ios' ? 60 : 20,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  drawerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  drawerContent: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 16,
-  },
-  drawerSection: {
-    marginBottom: 24,
-  },
-  drawerSectionTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#9CA3AF',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 10,
-  },
-  drawerOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    marginBottom: 4,
-    gap: 12,
-  },
-  drawerOptionActive: {
-    backgroundColor: '#EFF6FF',
-  },
-  drawerOptionText: {
-    fontSize: 15,
-    color: '#374151',
-    flex: 1,
-  },
-  drawerOptionTextActive: {
-    color: '#2563EB',
-    fontWeight: '600',
-  },
-  drawerBadge: {
-    backgroundColor: '#F3F4F6',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  drawerBadgeActive: {
-    backgroundColor: '#DBEAFE',
-  },
-  drawerBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#6B7280',
-  },
-  drawerBadgeTextActive: {
-    color: '#2563EB',
-  },
-  drawerToggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    backgroundColor: '#F9FAFB',
-    borderRadius: 10,
-  },
-  drawerToggleLabel: {
-    fontSize: 14,
-    color: '#374151',
-    fontWeight: '500',
-  },
-  drawerToggleSub: {
-    fontSize: 12,
-    color: '#3B82F6',
-    marginTop: 2,
-  },
-  drawerReorderBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    backgroundColor: '#EFF6FF',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#BFDBFE',
-    gap: 8,
-  },
-  drawerReorderText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#2563EB',
-  },
-  drawerApplyBtn: {
-    backgroundColor: '#3B82F6',
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
-    marginTop: 10,
-    marginBottom: 40,
-  },
-  drawerApplyText: {
-    color: '#FFF',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // ESTILOS ANTIGOS (mantidos para compatibilidade)
-  // ═══════════════════════════════════════════════════════════════════════
   hd: { backgroundColor: '#3B82F6', paddingTop: 48, paddingBottom: 14, paddingHorizontal: 16, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   hdHelp: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#EFF6FF', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#BFDBFE' },
   hdHelpText: { color: '#2563EB', fontSize: 14, fontWeight: '700', lineHeight: 18 },

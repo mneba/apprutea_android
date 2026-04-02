@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import NetInfo from '@react-native-community/netinfo';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer, useNavigationState } from '@react-navigation/native';
@@ -5,6 +6,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SolicitacoesWidget } from '../components/SolicitacoesWidget';
 import { useAuth } from '../contexts/AuthContext';
 import { LiquidacaoProvider, useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 
@@ -53,7 +55,7 @@ function AcoesRapidasModal({ visible, onClose, navigation }: { visible: boolean;
   const acoes = [
     {
       key: 'novo_cliente',
-      icon: '👤',
+      iconName: 'person-add-outline' as const,
       badge: '+',
       iconBg: '#10B981',
       badgeBorder: '#10B981',
@@ -64,7 +66,7 @@ function AcoesRapidasModal({ visible, onClose, navigation }: { visible: boolean;
     },
     {
       key: 'nova_movimentacao',
-      icon: '💰',
+      iconName: 'wallet-outline' as const,
       badge: null,
       iconBg: '#F59E0B',
       badgeBorder: null,
@@ -103,7 +105,7 @@ function AcoesRapidasModal({ visible, onClose, navigation }: { visible: boolean;
                   >
                     <View style={styles.optionIconWrapper}>
                       <View style={[styles.optionIcon, { backgroundColor: bloqueado ? '#D1D5DB' : acao.iconBg }]}>  
-                        <Text style={styles.optionIconText}>{acao.icon}</Text>
+                        <Ionicons name={acao.iconName} size={22} color="#fff" />
                         {acao.badge && (
                           <View style={[styles.optionIconBadge, { borderColor: bloqueado ? '#D1D5DB' : acao.badgeBorder }]}>
                             <Text style={[styles.optionIconBadgeText, { color: bloqueado ? '#D1D5DB' : acao.badgeBorder }]}>{acao.badge}</Text>
@@ -119,7 +121,7 @@ function AcoesRapidasModal({ visible, onClose, navigation }: { visible: boolean;
                         {acao.desc}
                       </Text>
                     </View>
-                    {bloqueado && <Text style={styles.optionLock}>🔒</Text>}
+                    {bloqueado && <Ionicons name="lock-closed" size={16} color="#9CA3AF" style={{ marginLeft: 8 }} />}
                   </TouchableOpacity>
                 </React.Fragment>
               );
@@ -172,22 +174,31 @@ function SharedHeader({ navigation }: { navigation: any }) {
         ) : null}
       </View>
 
-      {/* Direita: indicador, foto, engrenagem */}
+      {/* Direita: indicador, sino, foto, engrenagem */}
       <View style={sharedHeaderStyles.actions}>
         <View style={[sharedHeaderStyles.dot, { backgroundColor: isConnected ? '#10B981' : '#EF4444' }]} />
+
+        {/* Sino de Solicitações */}
+        {vendedor?.id && (vendedor as any)?.rota_id && (
+          <SolicitacoesWidget 
+            vendedorId={vendedor.id} 
+            rotaId={(vendedor as any).rota_id} 
+            lang={idioma || 'pt-BR'} 
+          />
+        )}
 
         <TouchableOpacity onPress={() => navigation.navigate('Perfil')} activeOpacity={0.8}>
           {vendedor?.foto_url ? (
             <Image source={{ uri: (vendedor as any).foto_url }} style={sharedHeaderStyles.avatar} />
           ) : (
             <View style={sharedHeaderStyles.avatarPlaceholder}>
-              <Text style={{ fontSize: 18 }}>👤</Text>
+              <Ionicons name="person" size={18} color="rgba(255,255,255,0.8)" />
             </View>
           )}
         </TouchableOpacity>
 
         <TouchableOpacity onPress={() => navigation.navigate('Configuracoes')} style={sharedHeaderStyles.gearBtn}>
-          <Text style={{ fontSize: 18 }}>⚙️</Text>
+          <Ionicons name="settings-outline" size={20} color="rgba(255,255,255,0.9)" />
         </TouchableOpacity>
       </View>
     </View>
@@ -248,7 +259,7 @@ function MainTabsContent({ navigation }: any) {
           options={{
             tabBarLabel: 'Home',
             tabBarIcon: ({ color, size }) => (
-              <Text style={{ fontSize: 24 }}>🏠</Text>
+              <Ionicons name="home-outline" size={24} color={color} />
             ),
           }}
         />
@@ -268,12 +279,11 @@ function MainTabsContent({ navigation }: any) {
                 styles.fabButton,
                 modalVisible && styles.fabButtonActive
               ]}>
-                <Text style={[
-                  styles.fabButtonText,
-                  modalVisible && styles.fabButtonTextActive
-                ]}>
-                  {modalVisible ? '✕' : '+'}
-                </Text>
+                {modalVisible ? (
+                  <Ionicons name="close" size={24} color="#fff" />
+                ) : (
+                  <Ionicons name="add" size={28} color="#fff" />
+                )}
               </View>
             ),
           }}
@@ -284,7 +294,7 @@ function MainTabsContent({ navigation }: any) {
           options={{
             tabBarLabel: 'Clientes',
             tabBarIcon: ({ color, size }) => (
-              <Text style={{ fontSize: 24 }}>👥</Text>
+              <Ionicons name="people-outline" size={24} color={color} />
             ),
           }}
         />
