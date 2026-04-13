@@ -18,12 +18,14 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import ClienteCardLiquidacao from '../components/ClienteCardLiquidacao';
+import ClienteCardTodos from '../components/ClienteCardTodos';
 import ClienteDetalhesModal from '../components/ClienteDetalhesModal';
+import FiltrosDrawer from '../components/FiltrosDrawer';
 import { ModalCriarNota, ModalNotasLista, buscarNotasCountPorClientes } from '../components/NotasComponent';
 import { useAuth } from '../contexts/AuthContext';
 import { Language, useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
-
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DRAWER_WIDTH = SCREEN_WIDTH * 0.75;
 
@@ -1722,91 +1724,26 @@ export default function ClientesScreen({ navigation, route }: any) {
     );
   };
 
-  const renderCard = (c: ClienteAgrupado) => {
-    const e = eAtual(c); const ex = expanded === c.cliente_id; const ei = eIdx(c.cliente_id);
-    const pg = isPaga(e.parcela_id, e.status_dia, pagasSet); const bc = borderOf(e, pg); const bg = bgOf(e, pg);
-    const pi = e.pagamento_info;
-    const valorAPagar = e.valor_pago_parcela > 0 && !pg ? e.saldo_parcela : e.valor_parcela;
-    const notasCli = notasCountMap.get(c.cliente_id) || 0;
+ const renderCard = (c: ClienteAgrupado) => {
+    const e = eAtual(c);
     return (
-      <TouchableOpacity key={c.cliente_id} activeOpacity={0.7} 
-        onPress={() => setExpanded(p => p === c.cliente_id ? null : c.cliente_id)} 
-        style={[S.card, { borderLeftColor: bc, backgroundColor: bg }]}>
-        {/* === LINHA 1: Avatar + Nome + Badges === */}
-        <View style={S.cardRow}>
-          <View style={[S.av, { backgroundColor: pg ? '#10B981' : e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 ? '#EF4444' : '#3B82F6' }]}>
-            <Text style={S.avTx}>{getIni(c.nome)}</Text>
-          </View>
-          <View style={S.cardInfo}>
-            <View style={S.nameRow}>
-              <Text style={S.nome} numberOfLines={1}>{c.nome}</Text>
-              {e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && (
-                <View style={S.bWarnNew}><Text style={S.bWarnNewI}>⚠</Text><Text style={S.bWarnNewT}>{e.total_parcelas_vencidas}</Text></View>
-              )}
-            </View>
-            <Text style={S.sub} numberOfLines={1}>
-              {c.telefone_celular ? `📞 ${fmtTel(c.telefone_celular)}` : ''}{c.telefone_celular && c.endereco ? '  ◦  ' : ''}{c.endereco ? `📍 ${c.endereco}` : ''}
-            </Text>
-          </View>
-        </View>
-
-        {/* === LINHA 2: Parcela + Frequência + Valor === */}
-        <View style={S.pRow}>
-          <View>
-            <View style={S.pLblR}>
-              <Text style={S.pLbl}>{t.parcela} {e.numero_parcela}/{e.numero_parcelas}</Text>
-              <View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento}</Text></View>
-            </View>
-            {e.data_emprestimo ? <Text style={S.dataEmpLbl}>{lang === 'es' ? 'Préstamo:' : 'Empréstimo:'} {fmtData(e.data_emprestimo)}</Text> : null}
-          </View>
-          <View style={S.sCol}>
-            {pg && pi ? (
-              <Text style={[S.pValBig, { color: '#10B981' }]}>{fmt(pi.valorPago)}</Text>
-            ) : (
-              <Text style={S.pValBig}>{fmt(valorAPagar)}</Text>
-            )}
-            <Text style={S.sLbl}>{t.saldoEmprestimo} {fmt(e.saldo_emprestimo)}</Text>
-          </View>
-        </View>
-
-        {/* === EXPANDIDO (1 clique) === */}
-        {ex && (
-          <View style={S.exp}>
-            {/* Pagar (flex) + Parcelas + Notas na mesma linha */}
-            <View style={S.expActRow}>
-              <TouchableOpacity 
-                style={[S.btPagarGrande, (pg || !liqId || isViz) && S.btPagarDisabled]}
-                onPress={() => { 
-                  if (liqId && !isViz && !pg) abrirPagamento(
-                    { parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0, valor_pago: e.valor_pago_parcela || 0, valor_saldo: e.saldo_parcela || e.valor_parcela },
-                    { id: c.cliente_id, nome: c.nome, emprestimo_id: e.emprestimo_id, saldo_emprestimo: e.saldo_emprestimo, emprestimo_status: e.status_emprestimo }
-                  ); 
-                }} 
-                disabled={pg || !liqId || isViz}
-              >
-                <Text style={S.btPagarIcon}>$</Text>
-                <Text style={S.btPagarText}>{t.pagar}</Text>
-                {!pg && <View style={S.btPagarValor}><Text style={S.btPagarValorText}>${Math.round(valorAPagar)}</Text></View>}
-              </TouchableOpacity>
-              <TouchableOpacity style={S.btSecVerde} onPress={() => abrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}>
-                <View style={S.btSecIconBox}><Text style={S.btSecIconTx}>☰</Text></View>
-              </TouchableOpacity>
-              <TouchableOpacity style={S.btSecAmarelo} onPress={() => { setNotasClienteId(c.cliente_id); setNotasClienteNome(c.nome); setModalNotasClienteVisible(true); }}>
-                <View style={S.btSecIconBox}><Text style={S.btSecIconTx}>✎</Text></View>
-                {notasCli > 0 && <View style={S.btSecBadge}><Text style={S.btSecBadgeT}>{notasCli}</Text></View>}
-              </TouchableOpacity>
-            </View>
-
-            {/* Link para detalhes */}
-            <TouchableOpacity style={S.linkDetalhes} onPress={() => {
-              setDetalhesCliente({ id: c.cliente_id, nome: c.nome, telefone: c.telefone_celular, endereco: c.endereco, codigo_cliente: c.codigo_cliente });
-              setModalDetalhesVisible(true);
-            }}>
-              <Text style={S.linkDetalhesTx}>{t.toqueDetalhes} ▽</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </TouchableOpacity>
+      <ClienteCardLiquidacao
+        key={c.cliente_id}
+        cliente={c}
+        emprestimo={e}
+        expanded={expanded === c.cliente_id}
+        pagasSet={pagasSet}
+        liqId={liqId}
+        isViz={isViz}
+        lang={lang}
+        notasCount={notasCountMap.get(c.cliente_id) || 0}
+        t={t}
+        onToggleExpand={() => setExpanded(p => p === c.cliente_id ? null : c.cliente_id)}
+        onPagar={abrirPagamento}
+        onAbrirParcelas={abrirParcelas}
+        onAbrirNotas={(id, nome) => { setNotasClienteId(id); setNotasClienteNome(nome); setModalNotasClienteVisible(true); }}
+        onAbrirDetalhes={(cli) => { setDetalhesCliente(cli); setModalDetalhesVisible(true); }}
+      />
     );
   };
 
@@ -1841,17 +1778,21 @@ export default function ClientesScreen({ navigation, route }: any) {
   }, [todosList, busca, filtroTipo, filtroStatus, ocultarLiquidacao, clientesLiqIds, ordemRotaMap]);
 
   const renderTodos = (c: ClienteTodos) => {
-    const a = c.tem_atraso; 
     const ei = empIdxTodos[c.id] || 0;
     const emp = c.emprestimos[Math.min(ei, c.emprestimos.length - 1)];
-    const vencidas = emp?.total_parcelas_vencidas || 0;
-    const cor = a ? corAtraso(vencidas) : '#D1D5DB';
-    const ex = expandedTodos === c.id;
-    const notasCli = notasCountMap.get(c.id) || 0;
     return (
-      <TouchableOpacity key={c.id} activeOpacity={0.7} 
-        onPress={() => { if (!modoReordenar) setExpandedTodos(p => p === c.id ? null : c.id); }} 
-        onPressIn={() => {
+      <ClienteCardTodos
+        key={c.id}
+        cliente={c}
+        emprestimo={emp}
+        empIdx={ei}
+        expanded={expandedTodos === c.id}
+        modoReordenar={modoReordenar}
+        lang={lang}
+        notasCount={notasCountMap.get(c.id) || 0}
+        t={t}
+        onToggleExpand={() => setExpandedTodos(p => p === c.id ? null : c.id)}
+        onLongPressStart={() => {
           longPressTimer.current = setTimeout(() => {
             longPressTimer.current = null;
             const lista = [...todosList].sort((a, b) => {
@@ -1864,88 +1805,22 @@ export default function ClientesScreen({ navigation, route }: any) {
             setModoReordenar(true);
           }, 600);
         }}
-        onPressOut={() => { if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; } }}
-        style={[S.card, { borderLeftColor: cor }]}>
-
-        {/* === LINHA 1: Avatar + Nome + Badges === */}
-        <View style={S.cardRow}>
-          <View style={[S.av, { backgroundColor: a ? '#EF4444' : '#64748B' }]}>
-            <Text style={S.avTx}>{getIni(c.nome)}</Text>
-          </View>
-          <View style={S.cardInfo}>
-            <View style={S.nameRow}>
-              <Text style={S.nome} numberOfLines={1}>{c.nome}</Text>
-              {vencidas > 0 && <View style={S.bWarnNew}><Text style={S.bWarnNewI}>⚠</Text><Text style={S.bWarnNewT}>{vencidas}</Text></View>}
-            </View>
-            {c.telefone_celular && <Text style={S.sub} numberOfLines={1}>📞 {fmtTel(c.telefone_celular)}</Text>}
-          </View>
-        </View>
-
-        {/* === LINHA 2: Info empréstimo === */}
-        {emp && (
-          <View style={S.pRow}>
-            <View>
-              <View style={S.pLblR}>
-                <Text style={S.pLbl}>{t.parcela} {emp.numero_parcela_atual}/{emp.numero_parcelas}</Text>
-                <View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[lang][emp.frequencia_pagamento] || emp.frequencia_pagamento}</Text></View>
-              </View>
-              {emp.data_emprestimo ? <Text style={S.dataEmpLbl}>{lang === 'es' ? 'Préstamo:' : 'Empréstimo:'} {fmtData(emp.data_emprestimo)}</Text> : null}
-            </View>
-            <View style={S.sCol}>
-              <Text style={S.pValBig}>{fmt(emp.valor_parcela)}</Text>
-              <Text style={S.sLbl}>{t.saldoEmprestimo} {fmt(emp.saldo_emprestimo)}</Text>
-            </View>
-          </View>
-        )}
-
-        {/* === EXPANDIDO (1 clique) === */}
-        {ex && emp && (
-          <View style={S.exp}>
-            {/* Alerta vencidas */}
-            {emp.total_parcelas_vencidas > 0 && <View style={S.aR}><Text style={S.aRT}>⚠ {emp.total_parcelas_vencidas} {t.parcelasVencidas}</Text><Text style={S.aRS}>{t.totalAtraso} {fmt(emp.valor_total_vencido)}</Text></View>}
-
-            {/* Navegação múltiplos empréstimos */}
-            {c.emprestimos.length > 1 && (<View style={S.eNav}><TouchableOpacity onPress={() => setEmpIdxTodos(p => ({ ...p, [c.id]: Math.max(0, ei - 1) }))} disabled={ei === 0} style={[S.eNBtn, ei === 0 && S.eNOff]}><Text style={S.eNBTx}>◀</Text></TouchableOpacity>{c.emprestimos.map((_, i) => <View key={i} style={[S.eDot, i === ei && S.eDotOn]} />)}<TouchableOpacity onPress={() => setEmpIdxTodos(p => ({ ...p, [c.id]: Math.min(c.emprestimos.length - 1, ei + 1) }))} disabled={ei >= c.emprestimos.length - 1} style={[S.eNBtn, ei >= c.emprestimos.length - 1 && S.eNOff]}><Text style={S.eNBTx}>▶</Text></TouchableOpacity><Text style={S.eNLbl}> {t.emprestimo} {ei + 1}/{c.emprestimos.length}</Text></View>)}
-
-            {/* Ações: Renovação / Renegociação */}
-            {(() => {
-              const temAtivo = c.emprestimos.some(e => e.status === 'ATIVO' || e.status === 'VENCIDO');
-              const temAtraso = c.tem_atraso;
-              if (!temAtivo) {
-                return (<TouchableOpacity style={S.tAddRowActive} onPress={() => {
-                  const confirmar = () => { const nav = navigation.getParent() || navigation; nav.navigate('NovoCliente', { clienteExistente: { id: c.id, nome: c.nome, telefone_celular: c.telefone_celular, documento: c.codigo_cliente?.toString() || '' } }); };
-                  if (Platform.OS === 'web') { if (window.confirm(t.confirmarNovoEmprestimo)) confirmar(); }
-                  else { Alert.alert(t.novoEmprestimo, t.confirmarNovoEmprestimo, [{ text: t.nao, style: 'cancel' }, { text: t.sim, onPress: confirmar }]); }
-                }}><Text style={S.tAddIconActive}>＋</Text><Text style={S.tAddTextActive}>{t.novoEmprestimo}</Text></TouchableOpacity>);
-              }
-              if (temAtivo && temAtraso) {
-                if (!c.permite_renegociacao) return (<View style={[S.btReneg, { opacity: 0.4 }]}><Text style={S.btRenegI}>🔄</Text><Text style={S.btRenegT}>{t.renegociar}</Text></View>);
-                return (<TouchableOpacity style={S.btReneg} onPress={() => { const nav = navigation.getParent() || navigation; nav.navigate('NovoCliente', { renegociacao: { emprestimo_id: emp.id, cliente_id: c.id, cliente_nome: c.nome, saldo_devedor: emp.saldo_emprestimo, telefone_celular: c.telefone_celular, codigo_cliente: c.codigo_cliente } }); }}><Text style={S.btRenegI}>🔄</Text><Text style={S.btRenegT}>{t.renegociar}</Text></TouchableOpacity>);
-              }
-              return null;
-            })()}
-
-            {/* Parcelas + Notas na mesma linha */}
-            <View style={S.expActRow}>
-              <TouchableOpacity style={S.btSecVerde} onPress={() => abrirParcelas(c.id, c.nome, emp.id, emp.status)}>
-                <View style={S.btSecIconBox}><Text style={S.btSecIconTx}>☰</Text></View>
-              </TouchableOpacity>
-              <TouchableOpacity style={S.btSecAmarelo} onPress={() => { setNotasClienteId(c.id); setNotasClienteNome(c.nome); setModalNotasClienteVisible(true); }}>
-                <View style={S.btSecIconBox}><Text style={S.btSecIconTx}>✎</Text></View>
-                {notasCli > 0 && <View style={S.btSecBadge}><Text style={S.btSecBadgeT}>{notasCli}</Text></View>}
-              </TouchableOpacity>
-            </View>
-
-            {/* Link detalhes */}
-            <TouchableOpacity style={S.linkDetalhes} onPress={() => {
-              setDetalhesCliente({ id: c.id, nome: c.nome, telefone: c.telefone_celular, codigo_cliente: c.codigo_cliente });
-              setModalDetalhesVisible(true);
-            }}>
-              <Text style={S.linkDetalhesTx}>{t.toqueDetalhes} ▽</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </TouchableOpacity>);
+        onLongPressEnd={() => { if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; } }}
+        onChangeEmpIdx={(newIdx) => setEmpIdxTodos(p => ({ ...p, [c.id]: newIdx }))}
+        onAbrirParcelas={abrirParcelas}
+        onAbrirNotas={(id, nome) => { setNotasClienteId(id); setNotasClienteNome(nome); setModalNotasClienteVisible(true); }}
+        onAbrirDetalhes={(cli) => { setDetalhesCliente(cli); setModalDetalhesVisible(true); }}
+        onNovoEmprestimo={(cli) => {
+          const confirmar = () => { const nav = navigation.getParent() || navigation; nav.navigate('NovoCliente', { clienteExistente: { id: cli.id, nome: cli.nome, telefone_celular: cli.telefone_celular, documento: cli.codigo_cliente?.toString() || '' } }); };
+          if (Platform.OS === 'web') { if (window.confirm(t.confirmarNovoEmprestimo)) confirmar(); }
+          else { Alert.alert(t.novoEmprestimo, t.confirmarNovoEmprestimo, [{ text: t.nao, style: 'cancel' }, { text: t.sim, onPress: confirmar }]); }
+        }}
+        onRenegociar={(cli, empR) => {
+          const nav = navigation.getParent() || navigation;
+          nav.navigate('NovoCliente', { renegociacao: { emprestimo_id: empR.id, cliente_id: cli.id, cliente_nome: cli.nome, saldo_devedor: empR.saldo_emprestimo, telefone_celular: cli.telefone_celular, codigo_cliente: cli.codigo_cliente } });
+        }}
+      />
+    );
   };
 
   // ─── TELA DE REORDENAÇÃO ─────────────────────────────────────────────────
@@ -2231,183 +2106,36 @@ export default function ClientesScreen({ navigation, route }: any) {
       {/* ═══════════════════════════════════════════════════════════════════════
           DRAWER LATERAL DE FILTROS
           ═══════════════════════════════════════════════════════════════════════ */}
-      {drawerVisible && (
-        <>
-          <TouchableOpacity 
-            style={S.drawerOverlay} 
-            activeOpacity={1} 
-            onPress={closeDrawer}
-          />
-          <Animated.View style={[S.drawer, { transform: [{ translateX: drawerAnim }] }]}>
-            <View style={S.drawerHeader}>
-              <Text style={S.drawerTitle}>{lang === 'es' ? 'Filtros' : 'Filtros'}</Text>
-              <TouchableOpacity onPress={closeDrawer} activeOpacity={0.7}>
-                <Ionicons name="close" size={24} color="#374151" />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={S.drawerContent} showsVerticalScrollIndicator={false}>
-              {/* Seção: Ordenação (apenas no modo Liquidação) */}
-              {tab === 'liquidacao' && (
-                <View style={S.drawerSection}>
-                  <Text style={S.drawerSectionTitle}>
-                    <Ionicons name="swap-vertical-outline" size={16} color="#6B7280" /> {lang === 'es' ? 'Ordenar por' : 'Ordenar por'}
-                  </Text>
-                  {(['rota', 'nome'] as OrdenacaoLiquidacao[]).map(o => (
-                    <TouchableOpacity 
-                      key={o} 
-                      style={[S.drawerOption, ord === o && S.drawerOptionActive]}
-                      onPress={() => { setOrd(o); closeDrawer(); }}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons 
-                        name={o === 'rota' ? 'map-outline' : 'person-outline'} 
-                        size={18} 
-                        color={ord === o ? '#2563EB' : '#6B7280'} 
-                      />
-                      <Text style={[S.drawerOptionText, ord === o && S.drawerOptionTextActive]}>
-                        {o === 'rota' ? (lang === 'es' ? 'Orden de ruta' : 'Ordem da rota') : (lang === 'es' ? 'Nombre' : 'Nome')}
-                      </Text>
-                      {ord === o && <Ionicons name="checkmark" size={18} color="#2563EB" style={{ marginLeft: 'auto' }} />}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-
-              {/* Seção: Filtros de Status (modo Liquidação) */}
-              {tab === 'liquidacao' && (
-                <View style={S.drawerSection}>
-                  <Text style={S.drawerSectionTitle}>
-                    <Ionicons name="funnel-outline" size={16} color="#6B7280" /> {lang === 'es' ? 'Filtrar por' : 'Filtrar por'}
-                  </Text>
-                  {[
-                    { k: 'todos' as FiltroLiquidacao, l: t.filtroTodos, cnt: cntTotal, icon: 'people-outline' as const },
-                    { k: 'atrasados' as FiltroLiquidacao, l: t.filtroAtrasados, cnt: cntAtraso, icon: 'alert-circle-outline' as const },
-                    { k: 'pagas' as FiltroLiquidacao, l: t.filtroPagas, cnt: cntPagas, icon: 'checkmark-circle-outline' as const },
-                  ].map(f => (
-                    <TouchableOpacity 
-                      key={f.k} 
-                      style={[S.drawerOption, filtro === f.k && S.drawerOptionActive]}
-                      onPress={() => { setFiltro(f.k); closeDrawer(); }}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons name={f.icon} size={18} color={filtro === f.k ? '#2563EB' : '#6B7280'} />
-                      <Text style={[S.drawerOptionText, filtro === f.k && S.drawerOptionTextActive]}>
-                        {f.l}
-                      </Text>
-                      <View style={[S.drawerBadge, filtro === f.k && S.drawerBadgeActive]}>
-                        <Text style={[S.drawerBadgeText, filtro === f.k && S.drawerBadgeTextActive]}>{f.cnt}</Text>
-                      </View>
-                      {filtro === f.k && <Ionicons name="checkmark" size={18} color="#2563EB" />}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-
-              {/* Seção: Filtros (modo Todos) */}
-              {tab === 'todos' && (
-                <>
-                  <View style={S.drawerSection}>
-                    <Text style={S.drawerSectionTitle}>
-                      <Ionicons name="pricetag-outline" size={16} color="#6B7280" /> {t.tipoFiltro || 'Tipo'}
-                    </Text>
-                    {[
-                      { k: 'todos', l: t.tipoTodos },
-                      { k: 'NOVO', l: t.tipoNovo },
-                      { k: 'RENOVACAO', l: t.tipoRenovacao },
-                      { k: 'RENEGOCIACAO', l: t.tipoRenegociacao },
-                    ].map(o => (
-                      <TouchableOpacity 
-                        key={o.k} 
-                        style={[S.drawerOption, filtroTipo === o.k && S.drawerOptionActive]}
-                        onPress={() => { setFiltroTipo(o.k); }}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={[S.drawerOptionText, filtroTipo === o.k && S.drawerOptionTextActive]}>{o.l}</Text>
-                        {filtroTipo === o.k && <Ionicons name="checkmark" size={18} color="#2563EB" style={{ marginLeft: 'auto' }} />}
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-
-                  <View style={S.drawerSection}>
-                    <Text style={S.drawerSectionTitle}>
-                      <Ionicons name="flag-outline" size={16} color="#6B7280" /> {t.statusFiltro || 'Status'}
-                    </Text>
-                    {[
-                      { k: 'todos', l: t.stTodos },
-                      { k: 'ATIVO', l: t.stAtivo },
-                      { k: 'VENCIDO', l: t.stVencido },
-                      { k: 'QUITADO', l: t.stQuitado },
-                      { k: 'RENEGOCIADO', l: t.stRenegociado },
-                    ].map(o => (
-                      <TouchableOpacity 
-                        key={o.k} 
-                        style={[S.drawerOption, filtroStatus === o.k && S.drawerOptionActive]}
-                        onPress={() => { setFiltroStatus(o.k); }}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={[S.drawerOptionText, filtroStatus === o.k && S.drawerOptionTextActive]}>{o.l}</Text>
-                        {filtroStatus === o.k && <Ionicons name="checkmark" size={18} color="#2563EB" style={{ marginLeft: 'auto' }} />}
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-
-                  {/* Ocultar da liquidação */}
-                  {liqId && (
-                    <View style={S.drawerSection}>
-                      <TouchableOpacity 
-                        style={S.drawerToggleRow}
-                        onPress={() => setOcultarLiquidacao(!ocultarLiquidacao)}
-                        activeOpacity={0.7}
-                      >
-                        <View style={{ flex: 1 }}>
-                          <Text style={S.drawerToggleLabel}>{t.ocultarLiquidacao || 'Ocultar clientes da liquidação'}</Text>
-                          {ocultarLiquidacao && clientesLiqIds.size > 0 && (
-                            <Text style={S.drawerToggleSub}>-{clientesLiqIds.size} clientes</Text>
-                          )}
-                        </View>
-                        <Switch
-                          value={ocultarLiquidacao}
-                          onValueChange={setOcultarLiquidacao}
-                          trackColor={{ false: '#D1D5DB', true: '#3B82F6' }}
-                          thumbColor="#FFF"
-                        />
-                      </TouchableOpacity>
-                    </View>
-                  )}
-
-                  {/* Botão Reordenar */}
-                  <View style={S.drawerSection}>
-                    <TouchableOpacity 
-                      style={S.drawerReorderBtn}
-                      onPress={() => {
-                        const lista = [...todosList].sort((a, b) => {
-                          const oa = ordemRotaMap.get(a.id) ?? 9999;
-                          const ob = ordemRotaMap.get(b.id) ?? 9999;
-                          if (oa !== ob) return oa - ob;
-                          return a.nome.localeCompare(b.nome);
-                        });
-                        setListaReordenar(lista);
-                        setModoReordenar(true);
-                        closeDrawer();
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <Ionicons name="reorder-four-outline" size={20} color="#2563EB" />
-                      <Text style={S.drawerReorderText}>{lang === 'es' ? 'Reordenar clientes' : 'Reordenar clientes'}</Text>
-                    </TouchableOpacity>
-                  </View>
-                </>
-              )}
-
-              {/* Botão Aplicar/Fechar */}
-              <TouchableOpacity style={S.drawerApplyBtn} onPress={closeDrawer} activeOpacity={0.8}>
-                <Text style={S.drawerApplyText}>{lang === 'es' ? 'Aplicar' : 'Aplicar'}</Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </Animated.View>
-        </>
-      )}
+      <FiltrosDrawer
+        visible={drawerVisible}
+        drawerAnim={drawerAnim}
+        drawerWidth={DRAWER_WIDTH}
+        onClose={closeDrawer}
+        lang={lang}
+        tab={tab}
+        ord={ord}
+        setOrd={setOrd}
+        filtro={filtro}
+        setFiltro={setFiltro}
+        cntTotal={cntTotal}
+        cntAtraso={cntAtraso}
+        cntPagas={cntPagas}
+        filtroTipo={filtroTipo}
+        setFiltroTipo={setFiltroTipo}
+        filtroStatus={filtroStatus}
+        setFiltroStatus={setFiltroStatus}
+        ocultarLiquidacao={ocultarLiquidacao}
+        setOcultarLiquidacao={setOcultarLiquidacao}
+        liqId={liqId}
+        clientesLiqIdsCount={clientesLiqIds.size}
+        todosList={todosList}
+        ordemRotaMap={ordemRotaMap}
+        onReordenar={(lista) => {
+          setListaReordenar(lista);
+          setModoReordenar(true);
+        }}
+        t={t}
+      />
       {tab === 'liquidacao' ? (
         filtered.length === 0 ? (
           <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View>
