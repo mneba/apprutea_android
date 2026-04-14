@@ -18,10 +18,14 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import AlphabetSidebar from '../components/AlphabetSidebar';
+import AutorizacaoEstornoModal from '../components/AutorizacaoEstornoModal';
 import ClienteCardLiquidacao from '../components/ClienteCardLiquidacao';
 import ClienteCardTodos from '../components/ClienteCardTodos';
 import ClienteDetalhesModal from '../components/ClienteDetalhesModal';
+import EstornoModal from '../components/EstornoModal';
 import FiltrosDrawer from '../components/FiltrosDrawer';
+import LegendaCoresModal from '../components/LegendaCoresModal';
 import { ModalCriarNota, ModalNotasLista, buscarNotasCountPorClientes } from '../components/NotasComponent';
 import { useAuth } from '../contexts/AuthContext';
 import { Language, useLiquidacaoContext } from '../contexts/LiquidacaoContext';
@@ -425,80 +429,6 @@ export default function ClientesScreen({ navigation, route }: any) {
   // Alphabet sidebar
   const [activeLetterLiq, setActiveLetterLiq] = useState<string | null>(null);
   const [activeLetterTodos, setActiveLetterTodos] = useState<string | null>(null);
-  const alphabetTimeoutRef = useRef<any>(null);
-
-  const getAvailableLetters = useCallback((data: { nome: string }[]) => {
-    const letters = new Set<string>();
-    data.forEach(item => {
-      const first = item.nome.trim().charAt(0).toUpperCase();
-      if (first && /[A-ZÀ-Ü]/.test(first)) letters.add(first.normalize('NFD').replace(/[\u0300-\u036f]/g, '').charAt(0));
-    });
-    return 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').filter(l => letters.has(l));
-  }, []);
-
-  const scrollToLetter = useCallback((
-    letter: string, 
-    ref: React.RefObject<FlatList>, 
-    data: { nome: string }[],
-    setActive: (l: string | null) => void
-  ) => {
-    const normalLetter = letter.normalize('NFD').replace(/[\u0300-\u036f]/g, '').charAt(0).toUpperCase();
-    const targetIndex = data.findIndex(item => {
-      const first = item.nome.trim().charAt(0).normalize('NFD').replace(/[\u0300-\u036f]/g, '').charAt(0).toUpperCase();
-      return first >= normalLetter;
-    });
-    if (targetIndex >= 0 && ref.current) {
-      ref.current.scrollToOffset({ offset: targetIndex * 92, animated: false });
-    }
-    setActive(letter);
-    if (alphabetTimeoutRef.current) clearTimeout(alphabetTimeoutRef.current);
-    alphabetTimeoutRef.current = setTimeout(() => setActive(null), 1200);
-  }, []);
-
-  const AlphabetSidebar = useCallback(({ 
-    data, flatRef, activeLetter, setActive 
-  }: { 
-    data: { nome: string }[]; 
-    flatRef: React.RefObject<FlatList>; 
-    activeLetter: string | null;
-    setActive: (l: string | null) => void;
-  }) => {
-    const letters = getAvailableLetters(data);
-    const sidebarRef = useRef<View>(null);
-    const sidebarYRef = useRef(0);
-    const letterHeightRef = useRef(0);
-
-    return (
-      <View 
-        ref={sidebarRef}
-        style={S.alphaBar}
-        onLayout={(e) => {
-          sidebarRef.current?.measureInWindow((_x, y, _w, h) => {
-            sidebarYRef.current = y;
-            letterHeightRef.current = h / letters.length;
-          });
-        }}
-        onStartShouldSetResponder={() => true}
-        onMoveShouldSetResponder={() => true}
-        onResponderGrant={(e) => {
-          const idx = Math.floor((e.nativeEvent.pageY - sidebarYRef.current) / letterHeightRef.current);
-          if (idx >= 0 && idx < letters.length) scrollToLetter(letters[idx], flatRef, data, setActive);
-        }}
-        onResponderMove={(e) => {
-          const idx = Math.floor((e.nativeEvent.pageY - sidebarYRef.current) / letterHeightRef.current);
-          if (idx >= 0 && idx < letters.length) scrollToLetter(letters[idx], flatRef, data, setActive);
-        }}
-        onResponderRelease={() => {
-          if (alphabetTimeoutRef.current) clearTimeout(alphabetTimeoutRef.current);
-          alphabetTimeoutRef.current = setTimeout(() => setActive(null), 800);
-        }}
-      >
-        {letters.map(l => (
-          <Text key={l} style={[S.alphaLetter, activeLetter === l && S.alphaLetterActive]}>{l}</Text>
-        ))}
-      </View>
-    );
-  }, [getAvailableLetters, scrollToLetter]);
   const [empIdxTodos, setEmpIdxTodos] = useState<Record<string, number>>({});
   const [todosCount, setTodosCount] = useState<number | null>(null);
 
@@ -1982,37 +1912,13 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   if (loading) return (<View style={S.lW}><ActivityIndicator size="large" color="#3B82F6" /><Text style={S.lT}>{t.carregando}</Text></View>);
 
-  return (
+return (
     <View style={S.c}>
-      {/* Modal Legenda de Cores */}
-      <Modal visible={modalLegendaVisible} transparent animationType="fade" onRequestClose={() => setModalLegendaVisible(false)}>
-        <TouchableOpacity style={S.legendaOverlay} activeOpacity={1} onPress={() => setModalLegendaVisible(false)}>
-          <View style={S.legendaModal} onStartShouldSetResponder={() => true}>
-            <Text style={S.legendaTitle}>{t.legendaTitulo}</Text>
-            <Text style={S.legendaSubtitle}>{t.legendaSubtitulo}</Text>
-
-            {[
-              { color: '#10B981', label: t.legPagoLabel, desc: t.legPagoDesc },
-              { color: '#D1D5DB', label: t.legPendenteLabel, desc: t.legPendenteDesc },
-              { color: '#F59E0B', label: t.legLeveLabel, desc: t.legLeveDesc },
-              { color: '#F97316', label: t.legModeradoLabel, desc: t.legModeradoDesc },
-              { color: '#EF4444', label: t.legCriticoLabel, desc: t.legCriticoDesc },
-            ].map((item) => (
-              <View key={item.color} style={S.legendaRow}>
-                <View style={[S.legendaSwatch, { backgroundColor: item.color }]} />
-                <View style={S.legendaTexts}>
-                  <Text style={S.legendaLabel}>{item.label}</Text>
-                  <Text style={S.legendaDesc}>{item.desc}</Text>
-                </View>
-              </View>
-            ))}
-
-            <TouchableOpacity style={S.legendaClose} onPress={() => setModalLegendaVisible(false)}>
-              <Text style={S.legendaCloseText}>{t.legendaEntendido}</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+      <LegendaCoresModal
+        visible={modalLegendaVisible}
+        onClose={() => setModalLegendaVisible(false)}
+        t={t}
+      />
 
       {isViz && (<View style={S.vizBanner}><View style={S.vizBannerContent}><Text style={S.vizBannerIcon}>⚠️</Text><View style={S.vizBannerTexts}><Text style={S.vizBannerTitle}>{t.modoVisualizacao}</Text><Text style={S.vizBannerDesc}>{t.modoVisualizacaoDesc} {fmtData(dataLiq)}</Text></View></View></View>)}
       
@@ -2391,86 +2297,33 @@ export default function ClientesScreen({ navigation, route }: any) {
         </View></View>
       </Modal>
 
-      {/* MODAL ESTORNO */}
-      <Modal visible={modalEstornoVisible} animationType="fade" transparent={true} onRequestClose={() => setModalEstornoVisible(false)}>
-        <View style={S.modalOverlay}><View style={S.modalEstorno}>
-          <View style={S.estHeader}><Text style={S.estHeaderIcon}>↩</Text><Text style={S.estHeaderTitle}>{t.estornarPagamento}</Text><TouchableOpacity onPress={() => setModalEstornoVisible(false)} style={S.modalClose}><Text style={S.modalCloseX}>✕</Text></TouchableOpacity></View>
-          {parcelaEstorno && (<>
-            <View style={S.estInfo}><Text style={S.estInfoParcela}>{t.parcela} {parcelaEstorno.numero_parcela}</Text><Text style={S.estInfoCliente}>{clienteModal?.nome || ''}</Text><Text style={S.estInfoValor}>{t.pago} {fmt(parcelaEstorno.valor_pago || parcelaEstorno.valor_parcela)}</Text></View>
-            <View style={S.estInputBox}><Text style={S.estInputLabel}>{t.motivoEstorno}</Text><TextInput style={S.estInput} value={motivoEstorno} onChangeText={setMotivoEstorno} placeholder={lang === 'es' ? 'Escriba el motivo...' : 'Digite o motivo...'} multiline numberOfLines={3} /></View>
-            <View style={S.estBtns}><TouchableOpacity style={S.estBtnCancel} onPress={() => setModalEstornoVisible(false)}><Text style={S.estBtnCancelTx}>{t.cancelar}</Text></TouchableOpacity><TouchableOpacity style={[S.estBtnConfirm, (!motivoEstorno.trim() || processando) && S.estBtnDisabled]} onPress={confirmarEstorno} disabled={!motivoEstorno.trim() || processando}>{processando ? (<ActivityIndicator color="#fff" />) : (<Text style={S.estBtnConfirmTx}>{t.confirmarEstorno}</Text>)}</TouchableOpacity></View>
-          </>)}
-        </View></View>
-      </Modal>
+      <EstornoModal
+        visible={modalEstornoVisible}
+        onClose={() => setModalEstornoVisible(false)}
+        parcela={parcelaEstorno}
+        clienteNome={clienteModal?.nome || ''}
+        motivoEstorno={motivoEstorno}
+        setMotivoEstorno={setMotivoEstorno}
+        processando={processando}
+        onConfirmar={confirmarEstorno}
+        lang={lang}
+        t={t}
+      />
 
       {/* Modal Solicitação de Autorização de Estorno */}
-      <Modal visible={modalAutorizacaoEstornoVisible} animationType="fade" transparent={true} onRequestClose={() => setModalAutorizacaoEstornoVisible(false)}>
-        <View style={S.modalOverlay}>
-          <View style={S.modalEstorno}>
-            <View style={S.estHeader}>
-              <Text style={S.estHeaderIcon}>🔒</Text>
-              <Text style={S.estHeaderTitle}>{lang === 'pt-BR' ? 'Autorização Necessária' : 'Autorización Necesaria'}</Text>
-              <TouchableOpacity onPress={() => { setModalAutorizacaoEstornoVisible(false); setParcelaAguardandoAutorizacao(null); }} style={S.modalClose}>
-                <Text style={S.modalCloseX}>✕</Text>
-              </TouchableOpacity>
-            </View>
-            
-            {parcelaAguardandoAutorizacao && (
-              <>
-                {/* Aviso */}
-                <View style={{ backgroundColor: '#FEF3C7', padding: 12, borderRadius: 8, marginBottom: 16 }}>
-                  <Text style={{ color: '#92400E', fontSize: 14, textAlign: 'center' }}>
-                    {lang === 'pt-BR' 
-                      ? 'Estorno de pagamento requer autorização do supervisor.'
-                      : 'Reversión de pago requiere autorización del supervisor.'}
-                  </Text>
-                </View>
+       <AutorizacaoEstornoModal
+        visible={modalAutorizacaoEstornoVisible}
+        onClose={() => { setModalAutorizacaoEstornoVisible(false); setParcelaAguardandoAutorizacao(null); }}
+        parcela={parcelaAguardandoAutorizacao}
+        clienteNome={clienteModal?.nome || ''}
+        motivo={motivoSolicitacaoEstorno}
+        setMotivo={setMotivoSolicitacaoEstorno}
+        enviando={enviandoSolicitacaoEstorno}
+        onEnviar={enviarSolicitacaoEstorno}
+        lang={lang}
+        t={t}
+      />
 
-                {/* Info da parcela */}
-                <View style={S.estInfo}>
-                  <Text style={S.estInfoParcela}>{t.parcela} {parcelaAguardandoAutorizacao.numero_parcela}</Text>
-                  <Text style={S.estInfoCliente}>{clienteModal?.nome || ''}</Text>
-                  <Text style={S.estInfoValor}>{t.pago} {fmt(parcelaAguardandoAutorizacao.valor_pago || parcelaAguardandoAutorizacao.valor_parcela)}</Text>
-                </View>
-
-                {/* Campo de motivo */}
-                <View style={S.estInputBox}>
-                  <Text style={S.estInputLabel}>{lang === 'pt-BR' ? 'Motivo da solicitação' : 'Motivo de la solicitud'}</Text>
-                  <TextInput 
-                    style={S.estInput} 
-                    value={motivoSolicitacaoEstorno} 
-                    onChangeText={setMotivoSolicitacaoEstorno} 
-                    placeholder={lang === 'pt-BR' ? 'Explique por que precisa estornar...' : 'Explique por qué necesita reversar...'} 
-                    multiline 
-                    numberOfLines={3} 
-                  />
-                </View>
-
-                {/* Botões */}
-                <View style={S.estBtns}>
-                  <TouchableOpacity 
-                    style={S.estBtnCancel} 
-                    onPress={() => { setModalAutorizacaoEstornoVisible(false); setParcelaAguardandoAutorizacao(null); }}
-                  >
-                    <Text style={S.estBtnCancelTx}>{t.cancelar}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={[S.estBtnConfirm, { backgroundColor: '#F59E0B' }, (!motivoSolicitacaoEstorno.trim() || enviandoSolicitacaoEstorno) && S.estBtnDisabled]} 
-                    onPress={enviarSolicitacaoEstorno} 
-                    disabled={!motivoSolicitacaoEstorno.trim() || enviandoSolicitacaoEstorno}
-                  >
-                    {enviandoSolicitacaoEstorno ? (
-                      <ActivityIndicator color="#fff" />
-                    ) : (
-                      <Text style={S.estBtnConfirmTx}>{lang === 'pt-BR' ? 'Solicitar Autorização' : 'Solicitar Autorización'}</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
-          </View>
-        </View>
-      </Modal>
 
       {/* Modal Criar Nota via Long Press */}
       <ModalCriarNota
