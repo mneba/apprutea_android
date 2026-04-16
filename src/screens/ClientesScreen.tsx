@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -27,8 +26,13 @@ import EstornoModal from '../components/EstornoModal';
 import FiltrosDrawer from '../components/FiltrosDrawer';
 import LegendaCoresModal from '../components/LegendaCoresModal';
 import { ModalCriarNota, ModalNotasLista, buscarNotasCountPorClientes } from '../components/NotasComponent';
+import PagamentoModal from '../components/PagamentoModal';
+import ParcelasModal from '../components/ParcelasModal';
 import { useAuth } from '../contexts/AuthContext';
 import { Language, useLiquidacaoContext } from '../contexts/LiquidacaoContext';
+import useClientesLiquidacao from '../hooks/useClientesLiquidacao';
+import useClientesTodos from '../hooks/useClientesTodos';
+import useGPSTracking from '../hooks/useGPSTracking';
 import { supabase } from '../services/supabase';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DRAWER_WIDTH = SCREEN_WIDTH * 0.75;
@@ -362,6 +366,15 @@ export default function ClientesScreen({ navigation, route }: any) {
     || (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`; })();
   const liqId = liqCtx.liquidacaoIdVisualizacao || route?.params?.liquidacaoId || (liqCtx.temLiquidacaoAberta ? liqCtx.liquidacaoAtual?.id : null);
   const isViz = liqCtx.modoVisualizacao || route?.params?.isVisualizacao || false;
+  const {
+    raw, setRaw,
+    pagasSet, pagMap, clientesPagosNaLiq,
+    ordemRotaMap, setOrdemRotaMap,
+    loading, setLoading,
+    refreshing, setRefreshing,
+    loadLiq,
+    atualizarSaldoLocalLiq,
+  } = useClientesLiquidacao({ rotaId, dataLiq, liqId });
 
   // DEBUG TEMPORÁRIO - REMOVER DEPOIS
   console.log('🔍 DEBUG ClientesScreen:', JSON.stringify({
@@ -377,9 +390,15 @@ export default function ClientesScreen({ navigation, route }: any) {
   const lang = liqCtx.language || 'pt-BR';
   // Se não há liquidação aberta, força tab "todos"
   const [tab, setTab] = useState<TabAtiva>(!liqId ? 'todos' : 'liquidacao');
+
+  const {
+    todosList, setTodosList,
+    loadTodos,
+    todosCount,
+    loadTodosClientes,
+    atualizarSaldoLocalTodos,
+  } = useClientesTodos({ rotaId, tab, setOrdemRotaMap, setRefreshing });
   const [modalLegendaVisible, setModalLegendaVisible] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [busca, setBusca] = useState('');
 
   // Drawer de filtros
@@ -395,17 +414,12 @@ export default function ClientesScreen({ navigation, route }: any) {
     Animated.timing(drawerAnim, { toValue: SCREEN_WIDTH, duration: 200, useNativeDriver: true }).start(() => setDrawerVisible(false));
   }, [drawerAnim]);
 
-  const [raw, setRaw] = useState<ClienteRotaDia[]>([]);
-  const [pagasSet, setPagasSet] = useState<Set<string>>(new Set());  const [pagMap, setPagMap] = useState<Map<string, PagamentoParcela>>(new Map());
-  const [clientesPagosNaLiq, setClientesPagosNaLiq] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<string | null>(null);
   const [empIdxMap, setEmpIdxMap] = useState<Record<string, number>>({});
   const [filtro, setFiltro] = useState<FiltroLiquidacao>('todos');
   const [ord, setOrd] = useState<OrdenacaoLiquidacao>('rota');
   const [showOrd, setShowOrd] = useState(false);
 
-  const [todosList, setTodosList] = useState<ClienteTodos[]>([]);
-  const [loadTodos, setLoadTodos] = useState(false);
   const [expandedTodos, setExpandedTodos] = useState<string | null>(null);
   const [filtroTipo, setFiltroTipo] = useState<string>('todos');
   const [filtroStatus, setFiltroStatus] = useState<string>('todos');
@@ -414,7 +428,6 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [ocultarLiquidacao, setOcultarLiquidacao] = useState(false);
 
   // Reordenação de clientes
-  const [ordemRotaMap, setOrdemRotaMap] = useState<Map<string, number>>(new Map());
   const [modoReordenar, setModoReordenar] = useState(false);
   const [listaReordenar, setListaReordenar] = useState<ClienteTodos[]>([]);
   const [salvandoOrdem, setSalvandoOrdem] = useState(false);
@@ -430,7 +443,6 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [activeLetterLiq, setActiveLetterLiq] = useState<string | null>(null);
   const [activeLetterTodos, setActiveLetterTodos] = useState<string | null>(null);
   const [empIdxTodos, setEmpIdxTodos] = useState<Record<string, number>>({});
-  const [todosCount, setTodosCount] = useState<number | null>(null);
 
   // Estados dos Modais
   const [modalParcelasVisible, setModalParcelasVisible] = useState(false);
@@ -447,8 +459,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [valorPagamento, setValorPagamento] = useState('');
   const [usarCredito, setUsarCredito] = useState(false);
   const [formaPagamento, setFormaPagamento] = useState('DINHEIRO');
-  const [gpsStatus, setGpsStatus] = useState<'ok' | 'erro' | 'carregando'>('carregando');
-  const [coords, setCoords] = useState<{ lat: number; lng: number; acc: number } | null>(null);
+  const { gpsStatus, coords, carregarGPS } = useGPSTracking();
   const [processando, setProcessando] = useState(false);
 
   // Notas
@@ -485,49 +496,6 @@ export default function ClientesScreen({ navigation, route }: any) {
     }
   }, []);
 
-  const carregarGPS = useCallback(async () => {
-    setGpsStatus('carregando');
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') { setGpsStatus('erro'); return; }
-      
-      // Tenta com precisão alta primeiro (timeout 5s)
-      try {
-        const loc = await Promise.race([
-          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
-        ]);
-        setCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude, acc: loc.coords.accuracy || 0 });
-        setGpsStatus('ok');
-        return;
-      } catch {
-        // Alta precisão falhou, tenta com precisão balanceada
-        console.log('⚠️ GPS High falhou, tentando Balanced...');
-      }
-      
-      // Fallback: precisão balanceada (mais rápido)
-      try {
-        const loc = await Promise.race([
-          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
-        ]);
-        setCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude, acc: loc.coords.accuracy || 0 });
-        setGpsStatus('ok');
-        return;
-      } catch {
-        console.log('⚠️ GPS Balanced falhou, tentando última posição conhecida...');
-      }
-      
-      // Último recurso: última posição conhecida
-      const lastKnown = await Location.getLastKnownPositionAsync();
-      if (lastKnown) {
-        setCoords({ lat: lastKnown.coords.latitude, lng: lastKnown.coords.longitude, acc: lastKnown.coords.accuracy || 999 });
-        setGpsStatus('ok');
-      } else {
-        setGpsStatus('erro');
-      }
-    } catch { setGpsStatus('erro'); }
-  }, []);
 
   // Carregar configurações do vendedor (permitir_exclusao_parcelas)
   useEffect(() => {
@@ -563,30 +531,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   }, [vendedor?.id]);
 
   // Iniciar GPS ao montar a tela (não esperar abrir modal)
-  const gpsInicializado = useRef(false);
-  useEffect(() => {
-    if (!gpsInicializado.current) {
-      gpsInicializado.current = true;
-      carregarGPS();
-    }
-    // Watch contínuo para manter coords atualizadas
-    let watchSub: Location.LocationSubscription | null = null;
-    (async () => {
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') return;
-        watchSub = await Location.watchPositionAsync(
-          { accuracy: Location.Accuracy.Balanced, timeInterval: 10000, distanceInterval: 10 },
-          (loc) => {
-            setCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude, acc: loc.coords.accuracy || 0 });
-            setGpsStatus('ok');
-          }
-        );
-      } catch (e) { console.log('⚠️ watchPosition falhou:', e); }
-    })();
-    return () => { watchSub?.remove(); };
-  }, [carregarGPS]);
-
+  
   // ─── REORDENAÇÃO DE CLIENTES ─────────────────────────────────────────────
 
   const moverItem = useCallback((fromIndex: number, toIndex: number) => {
@@ -635,317 +580,6 @@ export default function ClientesScreen({ navigation, route }: any) {
     }
   }, [rotaId, listaReordenar]);
 
-  // Atualiza saldo do empréstimo localmente após pagamento — sem recarregar tudo
-  const atualizarSaldoLocal = useCallback(async (emprestimoId: string) => {
-    if (!emprestimoId) return;
-    const { data } = await supabase
-      .from('emprestimos')
-      .select('id, valor_saldo, status')
-      .eq('id', emprestimoId)
-      .single();
-    if (!data) return;
-    const novoSaldo = data.valor_saldo ?? 0;
-    const novoStatus = data.status;
-    // Atualizar aba Liquidação (raw)
-    setRaw(prev => prev.map(r =>
-      r.emprestimo_id === emprestimoId
-        ? { ...r, saldo_emprestimo: novoSaldo }
-        : r
-    ));
-    // Atualizar aba Todos (todosList)
-    setTodosList(prev => prev.map(c => ({
-      ...c,
-      emprestimos: c.emprestimos.map(e =>
-        e.id === emprestimoId
-          ? { ...e, saldo_emprestimo: novoSaldo, status: novoStatus }
-          : e
-      ),
-    })));
-  }, []);
-
-  // ─────────────────────────────────────────────────────────────────────────
-
-  const loadLiq = useCallback(async () => {
-    if (!rotaId) {
-      console.log('❌ loadLiq: rotaId não definido');
-      setLoading(false);
-      setRefreshing(false);
-      return;
-    }
-    console.log('🔍 loadLiq: Buscando clientes...', { rotaId, dataLiq, liqId });
-    try {
-      // 1. Busca clientes para a liquidação do dia via function
-      // A function fn_clientes_liquidacao_dia recebe a data como parâmetro
-      // para calcular corretamente dia da semana/mês:
-      //   DIARIO: aparece todo dia
-      //   SEMANAL: aparece se mesmo dia da semana da data de referência
-      //   MENSAL/QUINZENAL/FLEXIVEL: aparece se mesmo dia do mês
-      const { data, error } = await supabase
-        .rpc('fn_clientes_liquidacao_dia', {
-          p_rota_id: rotaId,
-          p_data_referencia: dataLiq
-        });
-      
-      if (error) throw error;
-      
-      let allData = ((data || []) as any[]).map(r => ({
-        ...r,
-        codigo_cliente: r.codigo_cliente ?? r.consecutivo ?? null,
-      })) as ClienteRotaDia[];
-      const existingParcelaIds = new Set(allData.map(r => r.parcela_id));
-
-      // Enriquecer com data_emprestimo (RPC não retorna esse campo)
-      const empIdsUnicos = [...new Set(allData.map(r => r.emprestimo_id).filter(Boolean))];
-      if (empIdsUnicos.length > 0) {
-        const { data: empsData } = await supabase
-          .from('emprestimos')
-          .select('id, data_emprestimo')
-          .in('id', empIdsUnicos);
-        if (empsData && empsData.length > 0) {
-          const empDataMap = new Map((empsData as any[]).map(e => [e.id, e.data_emprestimo]));
-          allData = allData.map(r => ({ ...r, data_emprestimo: empDataMap.get(r.emprestimo_id) || null }));
-        }
-
-        // Descontar crédito acumulado do saldo do empréstimo
-        const creditoMap = await buscarCreditoMap(empIdsUnicos);
-        if (creditoMap.size > 0) {
-          allData = allData.map(r => ({
-            ...r,
-            saldo_emprestimo: Math.max(0, (r.saldo_emprestimo || 0) - (creditoMap.get(r.emprestimo_id) || 0)),
-          }));
-        }
-      }
-      
-      // 2. Busca parcelas que foram pagas NA liquidação atual (para mostrar como "pagas")
-      if (liqId) {
-        console.log('🔍 Buscando parcelas pagas na liquidação:', liqId);
-        
-        // Busca diretamente de pagamentos_parcelas que tem todos os dados
-        const { data: pagamentos, error: errPag } = await supabase
-          .from('pagamentos_parcelas')
-          .select('parcela_id, cliente_id, emprestimo_id, liquidacao_id, numero_parcela, valor_parcela, valor_pago_atual, valor_credito_gerado, estornado')
-          .eq('liquidacao_id', liqId)
-          .eq('estornado', false);
-        
-        console.log('📦 Pagamentos na liquidação:', { count: pagamentos?.length, error: errPag?.message });
-        
-        if (pagamentos && pagamentos.length > 0) {
-          // Filtra parcelas que não estão na lista (view não retornou pq já estão pagas)
-          const pagamentosNovos = pagamentos.filter(p => !existingParcelaIds.has(p.parcela_id));
-          
-          console.log('📋 Pagamentos não listados:', pagamentosNovos.length);
-          
-          if (pagamentosNovos.length > 0) {
-            // Busca dados dos clientes
-            const clienteIds = [...new Set(pagamentosNovos.map(p => p.cliente_id))];
-            const { data: clientes } = await supabase
-              .from('clientes')
-              .select('id, nome, telefone_celular, endereco, latitude, longitude, codigo_cliente')
-              .in('id', clienteIds);
-            const cliMap = new Map((clientes || []).map(c => [c.id, c]));
-            
-            // Busca dados dos empréstimos
-            const empIds = [...new Set(pagamentosNovos.map(p => p.emprestimo_id))];
-            const { data: emps } = await supabase
-              .from('emprestimos')
-              .select('id, valor_principal, valor_saldo, numero_parcelas, status, frequencia_pagamento, rota_id, data_emprestimo')
-              .in('id', empIds);
-            const empMap = new Map((emps || []).map(e => [e.id, e]));
-            
-            // Busca dados das parcelas (para data_vencimento)
-            const parcIds = pagamentosNovos.map(p => p.parcela_id);
-            const { data: parcs } = await supabase
-              .from('emprestimo_parcelas')
-              .select('id, data_vencimento, status')
-              .in('id', parcIds);
-            const parcMap = new Map((parcs || []).map(p => [p.id, p]));
-            
-            // Monta os registros
-            pagamentosNovos.forEach(pag => {
-              const cli = cliMap.get(pag.cliente_id);
-              const emp = empMap.get(pag.emprestimo_id);
-              const parc = parcMap.get(pag.parcela_id);
-              if (!cli || !emp) return;
-              
-              const pagaRow: ClienteRotaDia = {
-                cliente_id: cli.id,
-                nome: cli.nome,
-                telefone_celular: cli.telefone_celular,
-                endereco: cli.endereco,
-                latitude: cli.latitude,
-                longitude: cli.longitude,
-                codigo_cliente: cli.codigo_cliente,
-                emprestimo_id: emp.id,
-                saldo_emprestimo: emp.valor_saldo,
-                valor_principal: emp.valor_principal,
-                numero_parcelas: emp.numero_parcelas,
-                status_emprestimo: emp.status,
-                rota_id: emp.rota_id,
-                frequencia_pagamento: emp.frequencia_pagamento,
-                parcela_id: pag.parcela_id,
-                numero_parcela: pag.numero_parcela,
-                valor_parcela: pag.valor_parcela,
-                valor_pago_parcela: pag.valor_pago_atual,
-                saldo_parcela: 0,
-                status_parcela: parc?.status || 'PAGO',
-                data_vencimento: parc?.data_vencimento || new Date().toISOString(),
-                ordem_visita_dia: null,
-                liquidacao_id: pag.liquidacao_id,
-                tem_parcelas_vencidas: false,
-                total_parcelas_vencidas: 0,
-                valor_total_vencido: 0,
-                status_dia: 'PAGO',
-                permite_emprestimo_adicional: false,
-                is_parcela_atrasada: false,
-                data_emprestimo: (emp as any).data_emprestimo || null,
-              };
-              allData.push(pagaRow);
-              existingParcelaIds.add(pag.parcela_id);
-              console.log('✅ Adicionado cliente pago:', cli.nome, 'parcela:', pag.numero_parcela);
-            });
-          }
-        }
-      }
-      
-      console.log('📊 loadLiq resultado:', { 
-        countOriginal: data?.length || 0,
-        countTotal: allData.length,
-        rotaId,
-        dataLiq,
-        liqId
-      });
-      
-      setRaw(allData);
-      const ids = allData.map((r: any) => r.parcela_id).filter(Boolean);
-      if (ids.length > 0) {
-        // Busca pagamentos NÃO estornados
-        const { data: pags } = await supabase
-          .from('pagamentos_parcelas')
-          .select('parcela_id, cliente_id, valor_pago_atual, valor_credito_gerado, valor_parcela, data_pagamento, liquidacao_id')
-          .in('parcela_id', ids)
-          .eq('estornado', false);
-        
-        const m = new Map<string, PagamentoParcela>();
-        const s = new Set<string>();
-        const cliPagos = new Set<string>();
-        
-        (pags || []).forEach((p: any) => { 
-          m.set(p.parcela_id, p); 
-          if (p.valor_pago_atual >= p.valor_parcela) s.add(p.parcela_id);
-          // Se o pagamento foi feito NA liquidação atual → cliente "visitado/pago"
-          if (liqId && p.liquidacao_id === liqId) {
-            cliPagos.add(p.cliente_id);
-          }
-        });
-        
-        // Também busca clientes pagos que NÃO estão no allData (parcelas já saíram da view)
-        if (liqId) {
-          const { data: todosPagLiq } = await supabase
-            .from('pagamentos_parcelas')
-            .select('cliente_id')
-            .eq('liquidacao_id', liqId)
-            .eq('estornado', false);
-          (todosPagLiq || []).forEach((p: any) => cliPagos.add(p.cliente_id));
-        }
-        
-        // Também adiciona ao pagasSet as parcelas que vieram como PAGO no allData
-        allData.forEach((r: any) => {
-          if (r.status_dia === 'PAGO' || r.status_parcela === 'PAGO') {
-            s.add(r.parcela_id);
-          }
-        });
-        
-        console.log('📋 PagasSet:', { total: s.size, ids: Array.from(s).slice(0, 5) });
-        console.log('📋 ClientesPagosNaLiq:', { total: cliPagos.size, ids: Array.from(cliPagos).slice(0, 5) });
-        setPagMap(m); 
-        setPagasSet(s);
-        setClientesPagosNaLiq(cliPagos);
-      } else { setPagMap(new Map()); setPagasSet(new Set()); setClientesPagosNaLiq(new Set()); }
-
-      // Carregar ordem da rota para aba Liquidação
-      if (rotaId) {
-        const clienteIds = [...new Set(allData.map(r => r.cliente_id))];
-        if (clienteIds.length > 0) {
-          const { data: ordens } = await supabase
-            .from('ordem_rota_cliente')
-            .select('cliente_id, ordem')
-            .eq('rota_id', rotaId)
-            .in('cliente_id', clienteIds);
-          if (ordens && ordens.length > 0) {
-            const m = new Map<string, number>();
-            (ordens as any[]).forEach(o => m.set(o.cliente_id, Number(o.ordem)));
-            setOrdemRotaMap(m);
-          }
-        }
-      }
-    } catch (e) { console.error('Erro loadLiq:', e); }
-    finally { setLoading(false); setRefreshing(false); }
-  }, [rotaId, dataLiq, liqId]);
-
-  const loadTodosClientes = useCallback(async (forceReload = false) => {
-    if (!rotaId || (!forceReload && todosList.length > 0)) { setRefreshing(false); return; }
-    setLoadTodos(true);
-    try {
-      // Query 1: Todos os empréstimos da rota com dados do cliente
-      const { data: emps } = await supabase.from('emprestimos').select(`id, valor_principal, valor_saldo, valor_parcela, numero_parcelas, status, frequencia_pagamento, tipo_emprestimo, data_emprestimo, clientes!inner(id, nome, telefone_celular, status, codigo_cliente, permite_renegociacao, created_at)`).eq('rota_id', rotaId).in('status', ['ATIVO', 'VENCIDO', 'QUITADO', 'RENEGOCIADO']);
-      if (!emps || emps.length === 0) { setTodosList([]); return; }
-
-      // Query 2: Todas as parcelas dos empréstimos de uma vez
-      const empIds = (emps as any[]).map(e => e.id);
-      const { data: allParcs } = await supabase.from('emprestimo_parcelas').select('emprestimo_id, numero_parcela, valor_parcela, status').in('emprestimo_id', empIds);
-
-      // Agrupa parcelas por empréstimo
-      const parcMap = new Map<string, { maxParcela: number; vencidas: number; totalVencido: number }>();
-      (allParcs || []).forEach((p: any) => {
-        let info = parcMap.get(p.emprestimo_id);
-        if (!info) { info = { maxParcela: 0, vencidas: 0, totalVencido: 0 }; parcMap.set(p.emprestimo_id, info); }
-        if (p.numero_parcela > info.maxParcela) info.maxParcela = p.numero_parcela;
-        if (p.status === 'VENCIDO' || p.status === 'VENCIDA') { info.vencidas++; info.totalVencido += (p.valor_parcela || 0); }
-      });
-
-      // Monta clientes
-      const cliMap = new Map<string, ClienteTodos>();
-      for (const e of emps as any[]) {
-        const c = e.clientes; if (!c) continue;
-        let cli = cliMap.get(c.id);
-        if (!cli) { cli = { id: c.id, codigo_cliente: c.codigo_cliente, nome: c.nome, telefone_celular: c.telefone_celular, status: c.status, tem_atraso: false, permite_renegociacao: c.permite_renegociacao || false, cliente_created_at: c.created_at || null, emprestimos: [] }; cliMap.set(c.id, cli); }
-        const info = parcMap.get(e.id) || { maxParcela: 1, vencidas: 0, totalVencido: 0 };
-        if (info.vencidas > 0) cli.tem_atraso = true;
-        cli.emprestimos.push({ id: e.id, valor_principal: e.valor_principal, saldo_emprestimo: e.valor_saldo, valor_parcela: e.valor_parcela, numero_parcelas: e.numero_parcelas, numero_parcela_atual: info.maxParcela, status: e.status, frequencia_pagamento: e.frequencia_pagamento, tipo_emprestimo: (e as any).tipo_emprestimo || 'NOVO', total_parcelas_vencidas: info.vencidas, valor_total_vencido: info.totalVencido, data_emprestimo: (e as any).data_emprestimo || null });
-      }
-      // Descontar crédito acumulado do saldo de cada empréstimo
-      const empIdsTodos = (emps as any[]).map(e => e.id);
-      const creditoMapTodos = await buscarCreditoMap(empIdsTodos);
-      if (creditoMapTodos.size > 0) {
-        Array.from(cliMap.values()).forEach(cli => {
-          cli.emprestimos.forEach(emp => {
-            const credito = creditoMapTodos.get(emp.id) || 0;
-            if (credito > 0) emp.saldo_emprestimo = Math.max(0, emp.saldo_emprestimo - credito);
-          });
-        });
-      }
-      setTodosList(Array.from(cliMap.values()));
-
-      // Carregar ordem da rota
-      if (rotaId) {
-        const clienteIds = Array.from(cliMap.keys());
-        const { data: ordens } = await supabase
-          .from('ordem_rota_cliente')
-          .select('cliente_id, ordem')
-          .eq('rota_id', rotaId)
-          .in('cliente_id', clienteIds);
-        if (ordens && ordens.length > 0) {
-          const m = new Map<string, number>();
-          (ordens as any[]).forEach(o => m.set(o.cliente_id, Number(o.ordem)));
-          setOrdemRotaMap(m);
-        }
-      }
-    } catch (e) { console.error('Erro loadTodos:', e); }
-    finally { setLoadTodos(false); setRefreshing(false); }
-  }, [rotaId, todosList.length]);
-
-  useEffect(() => { loadLiq(); }, [loadLiq]);
-  useEffect(() => { if (tab === 'todos') loadTodosClientes(); }, [tab, loadTodosClientes]);
 
   // Buscar contagem de notas por cliente quando lista muda
   useEffect(() => {
@@ -963,20 +597,6 @@ export default function ClientesScreen({ navigation, route }: any) {
     }
   }, [liqCtx.temLiquidacaoAberta, liqCtx.liquidacaoAtual?.id]);
   
-  // Contagem rápida de clientes para exibir no tab "Todos" antes de carregar
-  useEffect(() => {
-    if (!rotaId || todosCount !== null) return;
-    (async () => {
-      try {
-        const { count } = await supabase
-          .from('emprestimos')
-          .select('cliente_id', { count: 'exact', head: true })
-          .eq('rota_id', rotaId)
-          .in('status', ['ATIVO', 'VENCIDO', 'QUITADO']);
-        setTodosCount(count || 0);
-      } catch { }
-    })();
-  }, [rotaId, todosCount]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -1225,7 +845,7 @@ export default function ClientesScreen({ navigation, route }: any) {
           setParcelaPagamento(null);
           setDadosPagamento(null);
           setUsarCredito(false);
-          if (clienteModal?.emprestimo_id) atualizarSaldoLocal(clienteModal.emprestimo_id);
+          if (clienteModal?.emprestimo_id) { atualizarSaldoLocalLiq(clienteModal.emprestimo_id); atualizarSaldoLocalTodos(clienteModal.emprestimo_id); }
           setClienteModal(null);
           loadLiq();
           showAlert(t.sucessoGenerico || 'Sucesso', res.mensagem || t.sucesso);
@@ -1448,7 +1068,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         setModalEstornoVisible(false);
         setParcelaEstorno(null);
         Alert.alert(t.sucessoGenerico, res.mensagem || t.estornoSucesso);
-        if (clienteModal?.emprestimo_id) atualizarSaldoLocal(clienteModal.emprestimo_id);
+        if (clienteModal?.emprestimo_id) { atualizarSaldoLocalLiq(clienteModal.emprestimo_id); atualizarSaldoLocalTodos(clienteModal.emprestimo_id); }
         if (clienteModal) abrirParcelas(clienteModal.id, clienteModal.nome, clienteModal.emprestimo_id);
         loadLiq();
       } else { 
@@ -1536,123 +1156,6 @@ export default function ClientesScreen({ navigation, route }: any) {
   const eIdx = (cid: string) => empIdxMap[cid] || 0;
   const eSet = (cid: string, i: number) => setEmpIdxMap(p => ({ ...p, [cid]: i }));
   const eAtual = (c: ClienteAgrupado) => c.emprestimos[Math.min(eIdx(c.cliente_id), c.emprestimos.length - 1)];
-
-  const renderParcelaItem = (p: ParcelaModal) => {
-    const isPago = p.status === 'PAGO';
-    const isParcial = p.status === 'PARCIAL';
-    const isVencida = p.status === 'VENCIDO' || p.status === 'VENCIDA';
-    const isCancelado = p.status === 'CANCELADO';
-    const isAutoQuitacao = (p.observacoes || '').includes('[AUTO-QUITAÇÃO]');
-    const isQuitacaoOrigem = isPago && (p.credito_gerado || 0) > 0 && clienteModal?.emprestimo_status === 'QUITADO';
-    
-    const iconColor = isPago ? '#10B981' : isParcial ? '#F59E0B' : isCancelado ? '#9CA3AF' : isVencida ? '#EF4444' : '#6B7280';
-    const iconBg = isPago ? '#D1FAE5' : isParcial ? '#FEF3C7' : isCancelado ? '#F3F4F6' : isVencida ? '#FEE2E2' : '#F3F4F6';
-    const statusColor = isPago ? '#10B981' : isParcial ? '#D97706' : isCancelado ? '#9CA3AF' : isVencida ? '#EF4444' : '#F97316';
-    const statusBg = isPago ? '#D1FAE5' : isParcial ? '#FEF3C7' : isCancelado ? '#F3F4F6' : isVencida ? '#FEE2E2' : '#FFEDD5';
-    const statusText = isPago ? t.pagoStatus : isParcial ? t.parcialStatus : isCancelado ? 'CANCELADO' : isVencida ? t.vencidaStatus : t.pendente;
-    
-    const valorPago = p.valor_pago || 0;
-    const valorSaldo = p.valor_saldo ?? (p.valor_parcela - valorPago);
-    const temPagamentoParcial = !isPago && valorPago > 0;
-    
-    return (
-      <View key={p.parcela_id} style={[S.mParcela, { borderLeftColor: iconColor }]}>
-        <View style={S.mParcelaRow}>
-          {/* Lado esquerdo: ícone + info + valores */}
-          <View style={[S.mParcelaIcon, { backgroundColor: iconBg }]}>
-            <Text style={{ color: iconColor, fontSize: 14 }}>
-              {isPago ? '✓' : temPagamentoParcial ? '◐' : isParcial ? '◐' : '📅'}
-            </Text>
-          </View>
-          <View style={S.mParcelaInfo}>
-            {/* Linha 1: Parcela X + badge status */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={S.mParcelaNum}>{t.parcela} {p.numero_parcela}</Text>
-              <View style={[S.mParcelaStatus, { backgroundColor: statusBg }]}>
-                <Text style={[S.mParcelaStatusTx, { color: statusColor }]}>{statusText}</Text>
-              </View>
-            </View>
-            {/* Linha 2: Datas */}
-            <View style={{ marginTop: 3 }}>
-              <Text style={S.mParcelaVenc}>📅 {t.venc} {fmtData(p.data_vencimento)}</Text>
-              {p.data_pagamento && (
-                <Text style={[S.mParcelaDataPg, { marginTop: 1 }]}>💰 {t.em} {fmtData(p.data_pagamento)}</Text>
-              )}
-              {p.data_liquidacao && (
-                <Text style={[S.mParcelaDataPg, { marginTop: 1, color: '#6366F1' }]}>📋 {t.liq} {fmtData(p.data_liquidacao)}</Text>
-              )}
-            </View>
-            
-            {/* PAGO: valor pago + original + crédito + indicador quitação */}
-            {isPago && (
-              <View style={{ marginTop: 2 }}>
-                {/* Badge quitação antecipada (parcela que originou) */}
-                {isQuitacaoOrigem && (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF3C7', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, marginBottom: 4, alignSelf: 'flex-start' }}>
-                    <Text style={{ fontSize: 11, color: '#D97706', fontWeight: '700' }}>⚡ {t.quitacaoAntecipada}</Text>
-                  </View>
-                )}
-                {/* Badge auto-quitação */}
-                {isAutoQuitacao && (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#DBEAFE', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, marginBottom: 4, alignSelf: 'flex-start' }}>
-                    <Text style={{ fontSize: 11, color: '#2563EB', fontWeight: '600' }}>🔄 {t.quitadoPorCredito}</Text>
-                  </View>
-                )}
-                {valorPago !== p.valor_parcela ? (
-                  <>
-                    <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
-                    <Text style={S.mParcelaOriginal}>{t.original} {fmt(p.valor_parcela)}</Text>
-                  </>
-                ) : (
-                  <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
-                )}
-                {(p.credito_gerado || 0) > 0 && !isAutoQuitacao && (
-                  <Text style={S.mParcelaCredito}>{t.credito} {fmt(p.credito_gerado || 0)}</Text>
-                )}
-                {(p.saldo_excedente || 0) > 0 && (p.credito_gerado || 0) === 0 && !isAutoQuitacao && (
-                  <Text style={S.mParcelaCredito}>{t.credito} {fmt(p.saldo_excedente || 0)}</Text>
-                )}
-              </View>
-            )}
-            
-            {/* PARCIAL / VENCIDA com pagamento parcial */}
-            {temPagamentoParcial && (
-              <View style={{ marginTop: 2 }}>
-                <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
-                <Text style={S.mParcelaRestante}>{t.restante} {fmt(valorSaldo)}</Text>
-              </View>
-            )}
-            
-            {/* SEM PAGAMENTO: só valor */}
-            {!isPago && !temPagamentoParcial && (
-              <Text style={S.mParcelaValor}>{fmt(p.valor_parcela)}</Text>
-            )}
-          </View>
-          {/* Lado direito: botões */}
-          <View style={S.mParcelaBtns}>
-            {!isPago && p.parcela_id && !['RENEGOCIADO', 'QUITADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '') && p.status !== 'CANCELADO' && (
-              <TouchableOpacity 
-                style={[S.mBtnPagar, (!liqId || isViz) && S.mBtnPagarDisabled]} 
-                onPress={() => abrirPagamento(p)} 
-                disabled={!liqId || isViz}
-              >
-                <Text style={S.mBtnPagarIcon}>💰</Text>
-                <Text style={S.mBtnPagarTx}>{t.pagar}</Text>
-              </TouchableOpacity>
-            )}
-            {/* Estorno: PAGO ou qualquer parcela com pagamento (parcial) na liquidação atual */}
-            {/* Não permite estorno se empréstimo foi quitado (auto-quitação) */}
-            {(isPago || valorPago > 0) && p.parcela_id && liqId && !isViz && p.liquidacao_id === liqId && !['QUITADO', 'RENEGOCIADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '') && (
-              <TouchableOpacity style={S.mBtnEstornar} onPress={() => abrirEstorno(p)}>
-                <Text style={S.mBtnEstornarIcon}>↩</Text>
-                <Text style={S.mBtnEstornarTx}>{t.estornar}</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-      </View>
-    );
-  };
 
  const renderCard = (c: ClienteAgrupado) => {
     const e = eAtual(c);
@@ -2099,203 +1602,41 @@ return (
       )}
 
       {/* MODAL PARCELAS */}
-      <Modal visible={modalParcelasVisible} animationType="slide" transparent={true} onRequestClose={() => setModalParcelasVisible(false)}>
-        <View style={S.modalOverlay}><View style={S.modalContainer}>
-          <View style={S.modalHeader}><Text style={S.modalTitle}>{clienteModal?.nome || ''}</Text><TouchableOpacity onPress={() => setModalParcelasVisible(false)} style={S.modalClose}><Text style={S.modalCloseX}>✕</Text></TouchableOpacity></View>
-          {creditoDisponivel > 0 && (<View style={S.creditoBanner}><Text style={S.creditoIcon}>💳</Text><Text style={S.creditoText}>{t.creditoDisponivel} {fmt(creditoDisponivel)}</Text></View>)}
-          <ScrollView style={S.modalScroll} showsVerticalScrollIndicator={false}>
-            {loadingParcelas ? (<ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />) : parcelasModal.length === 0 ? (<Text style={S.modalEmpty}>{ t.nenhumaParcelaEncontrada }</Text>) : (parcelasModal.map(p => renderParcelaItem(p)))}
-            <View style={{ height: 10 }} />
-          </ScrollView>
-          <View style={S.mBtnFecharWrap}>
-            <TouchableOpacity style={S.mBtnFechar} onPress={() => setModalParcelasVisible(false)}>
-              <Text style={S.mBtnFecharTx}>{t.fechar}</Text>
-            </TouchableOpacity>
-          </View>
-        </View></View>
-      </Modal>
+      <ParcelasModal
+        visible={modalParcelasVisible}
+        onClose={() => setModalParcelasVisible(false)}
+        clienteModal={clienteModal}
+        parcelasModal={parcelasModal}
+        loadingParcelas={loadingParcelas}
+        creditoDisponivel={creditoDisponivel}
+        liqId={liqId}
+        isViz={isViz}
+        onPagar={abrirPagamento}
+        onEstornar={abrirEstorno}
+        t={t}
+      />
 
       {/* MODAL PAGAMENTO - COM CRÉDITO E VALIDAÇÕES */}
-      <Modal visible={modalPagamentoVisible} animationType="fade" transparent={true} onRequestClose={() => setModalPagamentoVisible(false)}>
-        <View style={S.modalOverlay}><View style={S.modalPagamento}>
-          <View style={S.pgHeader}><Text style={S.pgHeaderIcon}>💰</Text><Text style={S.pgHeaderTitle}>{t.registrarPagamento}</Text><TouchableOpacity onPress={() => setModalPagamentoVisible(false)} style={S.modalClose}><Text style={S.modalCloseX}>✕</Text></TouchableOpacity></View>
-          
-          {loadingDadosPagamento ? (
-            <View style={S.pgLoading}><ActivityIndicator size="large" color="#3B82F6" /><Text style={S.pgLoadingText}>{t.carregandoDados || 'Carregando...'}</Text></View>
-          ) : parcelaPagamento && (
-            <>
-              <View style={S.pgInfoRow}>
-                <Text style={S.pgInfoParcela}>{t.parcela} {dadosPagamento?.numero_parcela || parcelaPagamento.numero_parcela}/{dadosPagamento?.total_parcelas || parcelasModal.length || '?'}</Text>
-                <View style={[
-                  S.pgInfoStatus, 
-                  (dadosPagamento?.status_parcela || parcelaPagamento.status) === 'PARCIAL' && { backgroundColor: '#FEF3C7' }
-                ]}>
-                  <Text style={[
-                    S.pgInfoStatusTx,
-                    (dadosPagamento?.status_parcela || parcelaPagamento.status) === 'PARCIAL' && { color: '#D97706' }
-                  ]}>
-                    {(dadosPagamento?.status_parcela || parcelaPagamento.status) === 'PARCIAL' ? 'PARCIAL' : t.pendente}
-                  </Text>
-                </View>
-              </View>
-              <Text style={S.pgInfoCliente}>{dadosPagamento?.cliente_nome || clienteModal?.nome || ''}</Text>
-              <Text style={S.pgInfoVenc}>{t.vencimento} {fmtData(dadosPagamento?.data_vencimento || parcelaPagamento.data_vencimento)}</Text>
-              
-              {/* CENÁRIO A: Parcela NÃO é a próxima - BLOQUEIA (qtd_parcelas_anteriores_pendentes > 0) */}
-              {dadosPagamento && dadosPagamento.qtd_parcelas_anteriores_pendentes > 0 && (
-                <>
-                  {/* Alerta amarelo - saldo anterior pendente */}
-                  <View style={S.pgAlertYellow}>
-                    <Text style={S.pgAlertYellowIcon}>⚠</Text>
-                    <View style={S.pgAlertYellowTexts}>
-                      <Text style={S.pgAlertYellowTitle}>{t.saldoAnterior || 'Saldo anterior de'} {dadosPagamento.qtd_parcelas_anteriores_pendentes} {t.parcela}(s)</Text>
-                      <Text style={S.pgAlertYellowDesc}>{t.valorPendente || 'Valor pendente:'} {fmt(dadosPagamento.saldo_parcelas_anteriores)}</Text>
-                    </View>
-                  </View>
-                  
-                  {/* Alerta vermelho - bloqueio */}
-                  <View style={S.pgAlertRed}>
-                    <Text style={S.pgAlertRedIcon}>⛔</Text>
-                    <View style={S.pgAlertRedTexts}>
-                      <Text style={S.pgAlertRedTitle}>{t.pagamentoBloqueado || 'Pagamento bloqueado'}</Text>
-                      <Text style={S.pgAlertRedDesc}>
-                        {`${t.existemParcelas} ${dadosPagamento.qtd_parcelas_anteriores_pendentes} ${t.parcelasAnteriores} ${fmt(dadosPagamento.saldo_parcelas_anteriores)}. ${t.quitarPrimeiro}`}
-                      </Text>
-                    </View>
-                    <TouchableOpacity style={S.pgAlertRedBtn} onPress={irParaProximaParcela}>
-                      <Text style={S.pgAlertRedBtnTx}>{t.irProximaParcela || 'Ir para próxima parcela pendente'}</Text>
-                    </TouchableOpacity>
-                  </View>
-                </>
-              )}
-              
-              {/* CENÁRIO B: Parcela É a próxima - Mostra formulário (qtd_parcelas_anteriores_pendentes === 0) */}
-              {(!dadosPagamento || dadosPagamento.qtd_parcelas_anteriores_pendentes === 0) && (
-                <>
-                  {/* Aviso amarelo se tem saldo anterior parcial (parcelas com pagamento parcial) */}
-                  {dadosPagamento?.tem_saldo_anterior && dadosPagamento.saldo_parcelas_anteriores > 0 && (
-                    <View style={S.pgAlertYellow}>
-                      <Text style={S.pgAlertYellowIcon}>⚠</Text>
-                      <View style={S.pgAlertYellowTexts}>
-                        <Text style={S.pgAlertYellowTitle}>{t.saldoAnterior} {t.saldoAnteriorParcelas}</Text>
-                        <Text style={S.pgAlertYellowDesc}>{t.valorPendente} {fmt(dadosPagamento.saldo_parcelas_anteriores)}</Text>
-                      </View>
-                      {/* Botão para incluir atrasos no pagamento */}
-                      <TouchableOpacity 
-                        style={S.pgAlertYellowBtn} 
-                        onPress={() => {
-                          const valorTotal = dadosPagamento.valor_total_sugerido || (dadosPagamento.valor_saldo_parcela + dadosPagamento.saldo_parcelas_anteriores);
-                          const valorFinal = usarCredito && dadosPagamento.credito_disponivel > 0 
-                            ? Math.max(0, valorTotal - dadosPagamento.credito_disponivel)
-                            : valorTotal;
-                          setValorPagamento(valorFinal.toFixed(2).replace('.', ','));
-                        }}
-                      >
-                        <Text style={S.pgAlertYellowBtnTx}>+ {t.incluirAtraso} ({fmt(dadosPagamento.saldo_parcelas_anteriores)})</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                  
-                  {/* Input de valor */}
-                  <View style={S.pgInputBox}>
-                    <Text style={S.pgInputLabel}>{t.valorAPagar}</Text>
-                    <View style={S.pgInputRow}>
-                      <Text style={S.pgInputCurrency}>$</Text>
-                      <TextInput 
-                        style={S.pgInput} 
-                        value={valorPagamento} 
-                        onChangeText={setValorPagamento} 
-                        keyboardType="decimal-pad" 
-                        placeholder="0,00"
-                        editable={dadosPagamento?.permite_pagamento !== false}
-                      />
-                    </View>
-                    {/* Indicador de máximo permitido */}
-                    {clienteModal?.saldo_emprestimo != null && (
-                      <Text style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
-                        {t.maxPermitido || 'Máx:'} {fmt(clienteModal.saldo_emprestimo)}
-                      </Text>
-                    )}
-                    
-                    {/* Linha de crédito disponível */}
-                    {dadosPagamento?.tem_credito && dadosPagamento.credito_disponivel > 0 && (
-                      <View style={S.pgCreditoRow}>
-                        <Text style={S.pgCreditoIcon}>💳</Text>
-                        <Text style={S.pgCreditoText}>{t.credito} {fmt(dadosPagamento.credito_disponivel)}</Text>
-                        <TouchableOpacity 
-                          style={[S.pgCreditoBtn, usarCredito && S.pgCreditoBtnOn]} 
-                          onPress={() => {
-                            const novoUsarCredito = !usarCredito;
-                            setUsarCredito(novoUsarCredito);
-                            const valorSaldoParcela = dadosPagamento.valor_saldo_parcela || parcelaPagamento.valor_parcela;
-                            const saldoEmp = clienteModal?.saldo_emprestimo ?? valorSaldoParcela;
-                            if (novoUsarCredito) {
-                              const creditoAplicado = Math.min(dadosPagamento.credito_disponivel, valorSaldoParcela);
-                              const maxDinheiro = Math.max(saldoEmp - creditoAplicado, 0);
-                              const valorSugerido = Math.min(valorSaldoParcela - creditoAplicado, maxDinheiro);
-                              setValorPagamento(Math.max(0, valorSugerido).toFixed(2).replace('.', ','));
-                            } else {
-                              setValorPagamento(valorSaldoParcela.toFixed(2).replace('.', ','));
-                            }
-                          }}
-                        >
-                          <View style={[S.pgCreditoCheck, usarCredito && S.pgCreditoCheckOn]}>
-                            {usarCredito && <Text style={S.pgCreditoCheckIcon}>✓</Text>}
-                          </View>
-                          <Text style={[S.pgCreditoBtnTx, usarCredito && S.pgCreditoBtnTxOn]}>{t.usar || 'Usar'}</Text>
-                        </TouchableOpacity>
-                      </View>
-                    )}
-                  </View>
-                  
-                  {/* Alerta de bloqueio por status (PAGO/CANCELADO) */}
-                  {dadosPagamento && !dadosPagamento.permite_pagamento && dadosPagamento.mensagem_bloqueio && (
-                    <View style={S.pgAlertRed}>
-                      <Text style={S.pgAlertRedIcon}>⛔</Text>
-                      <View style={S.pgAlertRedTexts}>
-                        <Text style={S.pgAlertRedTitle}>{t.pagamentoBloqueado || 'Pagamento bloqueado'}</Text>
-                        <Text style={S.pgAlertRedDesc}>{dadosPagamento.mensagem_bloqueio}</Text>
-                      </View>
-                    </View>
-                  )}
-                  
-                  <View style={S.pgFormRow}>
-                    <Text style={S.pgFormLabel}>{t.forma}</Text>
-                    <TouchableOpacity style={S.pgFormSelect} onPress={() => setFormaPagamento(formaPagamento === 'DINHEIRO' ? 'TRANSFERENCIA' : 'DINHEIRO')}>
-                      <Text style={S.pgFormSelectTx}>{formaPagamento === 'DINHEIRO' ? t.dinheiro : t.transferencia}</Text>
-                      <Text style={S.pgFormSelectChev}>▼</Text>
-                    </TouchableOpacity>
-                    <View style={[S.pgGpsStatus, gpsStatus === 'ok' ? S.pgGpsOk : S.pgGpsErro]}>
-                      <Text style={S.pgGpsIcon}>{gpsStatus === 'ok' ? '◉' : '○'}</Text>
-                      <Text style={[S.pgGpsTx, gpsStatus === 'ok' ? S.pgGpsTxOk : S.pgGpsTxErro]}>{gpsStatus === 'ok' ? t.gpsOk : t.gpsErro}</Text>
-                    </View>
-                  </View>
-                  
-                  <TouchableOpacity 
-                    style={[S.pgBtnPagar, (processando || (dadosPagamento && !dadosPagamento.permite_pagamento)) && S.pgBtnDisabled]} 
-                    onPress={registrarPagamento} 
-                    disabled={processando || (dadosPagamento && !dadosPagamento.permite_pagamento)}
-                  >
-                    {processando ? (
-                      <ActivityIndicator color="#fff" />
-                    ) : (
-                      <>
-                        <Text style={S.pgBtnIcon}>✓</Text>
-                        <Text style={S.pgBtnTx}>{t.pagarBtn} {fmt(
-                          (parseFloat(valorPagamento.replace(',', '.')) || 0) + 
-                          (usarCredito && dadosPagamento?.credito_disponivel 
-                            ? Math.min(dadosPagamento.credito_disponivel, dadosPagamento.valor_saldo_parcela || parcelaPagamento?.valor_parcela || 0) 
-                            : 0)
-                        )}</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                </>
-              )}
-            </>
-          )}
-        </View></View>
-      </Modal>
+      <PagamentoModal
+        visible={modalPagamentoVisible}
+        onClose={() => setModalPagamentoVisible(false)}
+        parcelaPagamento={parcelaPagamento}
+        clienteModal={clienteModal}
+        dadosPagamento={dadosPagamento}
+        parcelasModalLength={parcelasModal.length}
+        loadingDadosPagamento={loadingDadosPagamento}
+        valorPagamento={valorPagamento}
+        setValorPagamento={setValorPagamento}
+        usarCredito={usarCredito}
+        setUsarCredito={setUsarCredito}
+        formaPagamento={formaPagamento}
+        setFormaPagamento={setFormaPagamento}
+        gpsStatus={gpsStatus}
+        processando={processando}
+        onIrProximaParcela={irParaProximaParcela}
+        onRegistrarPagamento={registrarPagamento}
+        t={t}
+      />
 
       <EstornoModal
         visible={modalEstornoVisible}
