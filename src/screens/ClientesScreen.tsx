@@ -6,10 +6,8 @@ import {
   Animated,
   Dimensions,
   FlatList,
-  Modal,
   Platform,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -28,6 +26,7 @@ import LegendaCoresModal from '../components/LegendaCoresModal';
 import { ModalCriarNota, ModalNotasLista, buscarNotasCountPorClientes } from '../components/NotasComponent';
 import PagamentoModal from '../components/PagamentoModal';
 import ParcelasModal from '../components/ParcelasModal';
+import ReordenarModal from '../components/ReordenarModal';
 import { useAuth } from '../contexts/AuthContext';
 import { Language, useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import useClientesLiquidacao from '../hooks/useClientesLiquidacao';
@@ -431,9 +430,6 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [modoReordenar, setModoReordenar] = useState(false);
   const [listaReordenar, setListaReordenar] = useState<ClienteTodos[]>([]);
   const [salvandoOrdem, setSalvandoOrdem] = useState(false);
-  const [popupOrdem, setPopupOrdem] = useState<{ cliente: ClienteTodos; index: number } | null>(null);
-  const [popupNovaOrdem, setPopupNovaOrdem] = useState('');
-  const [buscaReordenar, setBuscaReordenar] = useState('');
 
   // Refs das FlatLists para alphabet sidebar
   const flatListLiqRef = useRef<FlatList>(null);
@@ -551,7 +547,6 @@ export default function ClientesScreen({ navigation, route }: any) {
   const cancelarReordenar = useCallback(() => {
     setModoReordenar(false);
     setListaReordenar([]);
-    setBuscaReordenar('');
   }, []);
 
   const salvarOrdem = useCallback(async () => {
@@ -572,7 +567,6 @@ export default function ClientesScreen({ navigation, route }: any) {
       setOrdemRotaMap(m);
       setModoReordenar(false);
       setListaReordenar([]);
-      setBuscaReordenar('');
     } catch (e: any) {
       Alert.alert('Erro', 'Não foi possível salvar a ordem: ' + (e.message || ''));
     } finally {
@@ -1256,162 +1250,20 @@ export default function ClientesScreen({ navigation, route }: any) {
     );
   };
 
-  // ─── TELA DE REORDENAÇÃO ─────────────────────────────────────────────────
+
   if (modoReordenar) {
-    const listaFiltrada = buscaReordenar.trim()
-      ? listaReordenar.filter(c => c.nome.toLowerCase().includes(buscaReordenar.toLowerCase().trim()))
-      : listaReordenar;
-    const estaBuscando = buscaReordenar.trim().length > 0;
-
     return (
-      <View style={{ flex: 1, backgroundColor: '#F9FAFB' }}>
-        {/* Header */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' }}>
-          <TouchableOpacity onPress={cancelarReordenar} style={{ paddingVertical: 6, paddingHorizontal: 2, minWidth: 64 }}>
-            <Text style={{ fontSize: 14, color: '#6B7280' }}>{lang === 'es' ? 'Cancelar' : 'Cancelar'}</Text>
-          </TouchableOpacity>
-          <View style={{ flex: 1, alignItems: 'center', paddingHorizontal: 8 }}>
-            <Text style={{ fontSize: 16, fontWeight: '700', color: '#111827' }} numberOfLines={1}>{lang === 'es' ? 'Ordenar Ruta' : 'Ordem da Rota'}</Text>
-            <Text style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>{lang === 'es' ? 'Use ↑↓ para mover' : 'Use ↑↓ para mover'}</Text>
-          </View>
-          <TouchableOpacity onPress={salvarOrdem} disabled={salvandoOrdem} style={{ paddingHorizontal: 14, paddingVertical: 7, backgroundColor: salvandoOrdem ? '#93C5FD' : '#2563EB', borderRadius: 8, minWidth: 64, alignItems: 'center' }}>
-            <Text style={{ fontSize: 14, color: '#FFF', fontWeight: '600' }}>{salvandoOrdem ? '...' : (lang === 'es' ? 'Guardar' : 'Salvar')}</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Barra de busca */}
-        <View style={{ paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E5E7EB' }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', borderRadius: 10, paddingHorizontal: 12, height: 40, borderWidth: 1, borderColor: '#E5E7EB' }}>
-            <Text style={{ fontSize: 13, marginRight: 6, opacity: 0.5 }}>🔍</Text>
-            <TextInput
-              style={{ flex: 1, fontSize: 13, color: '#1F2937', padding: 0 }}
-              placeholder={lang === 'es' ? 'Buscar cliente...' : 'Buscar cliente...'}
-              placeholderTextColor="#9CA3AF"
-              value={buscaReordenar}
-              onChangeText={setBuscaReordenar}
-            />
-            {buscaReordenar.length > 0 && (
-              <TouchableOpacity onPress={() => setBuscaReordenar('')} style={{ padding: 4 }}>
-                <Text style={{ fontSize: 14, color: '#9CA3AF', fontWeight: '700' }}>✕</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-          {estaBuscando ? (
-            <Text style={{ fontSize: 11, color: '#6B7280', marginTop: 6 }}>
-              {listaFiltrada.length} {lang === 'es' ? 'resultado(s) — toque para definir posición' : 'resultado(s) — toque para definir posição'}
-            </Text>
-          ) : (
-            <Text style={{ fontSize: 11, color: '#1D4ED8', marginTop: 6 }}>
-              {listaReordenar.length} {lang === 'es' ? 'clientes • Busque o use ↑↓' : 'clientes • Busque ou use ↑↓'}
-            </Text>
-          )}
-        </View>
-
-        <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
-          {listaFiltrada.map((cliente) => {
-            const index = listaReordenar.findIndex(c => c.id === cliente.id);
-            const empAtivo = cliente.emprestimos.find((e: any) => e.status === 'ATIVO' || e.status === 'VENCIDO');
-            return (
-              <View key={cliente.id} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', marginHorizontal: 12, marginTop: 8, borderRadius: 12, borderWidth: 1.5, borderColor: cliente.tem_atraso ? '#FCA5A5' : '#E5E7EB', paddingVertical: 10, paddingHorizontal: 12 }}>
-                {/* Badge posição — clicável */}
-                <TouchableOpacity
-                  onPress={() => { setPopupOrdem({ cliente, index }); setPopupNovaOrdem(String(index + 1)); }}
-                  style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#2563EB', alignItems: 'center', justifyContent: 'center', marginRight: 10 }}
-                  activeOpacity={0.75}
-                >
-                  <Text style={{ fontSize: 13, fontWeight: '800', color: '#FFF' }}>{index + 1}</Text>
-                </TouchableOpacity>
-
-                {/* Info — toque abre popup quando está buscando */}
-                <TouchableOpacity
-                  style={{ flex: 1 }}
-                  activeOpacity={estaBuscando ? 0.6 : 1}
-                  onPress={estaBuscando ? () => { setPopupOrdem({ cliente, index }); setPopupNovaOrdem(String(index + 1)); } : undefined}
-                >
-                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#111827' }} numberOfLines={1}>{cliente.nome}</Text>
-                  <Text style={{ fontSize: 11, color: estaBuscando ? '#2563EB' : '#6B7280', marginTop: 2 }}>
-                    {cliente.codigo_cliente ? `#${cliente.codigo_cliente}` : ''}
-                    {empAtivo ? ` • ${empAtivo.status === 'VENCIDO' ? '⚠️ Vencido' : '✅ Ativo'}` : ''}
-                    {estaBuscando ? (lang === 'es' ? ' · Toque para definir posición' : ' · Toque para definir posição') : ''}
-                  </Text>
-                </TouchableOpacity>
-
-                {/* Botões ↑↓ — ocultos durante busca */}
-                {!estaBuscando && (
-                  <View style={{ gap: 4 }}>
-                    <TouchableOpacity onPress={() => index > 0 && moverItem(index, index - 1)} disabled={index === 0} style={{ width: 32, height: 28, borderRadius: 6, backgroundColor: index === 0 ? '#F3F4F6' : '#DBEAFE', alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.6}>
-                      <Text style={{ fontSize: 16, color: index === 0 ? '#D1D5DB' : '#2563EB', fontWeight: '700' }}>↑</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => index < listaReordenar.length - 1 && moverItem(index, index + 1)} disabled={index === listaReordenar.length - 1} style={{ width: 32, height: 28, borderRadius: 6, backgroundColor: index === listaReordenar.length - 1 ? '#F3F4F6' : '#DBEAFE', alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.6}>
-                      <Text style={{ fontSize: 16, color: index === listaReordenar.length - 1 ? '#D1D5DB' : '#2563EB', fontWeight: '700' }}>↓</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
-            );
-          })}
-          <View style={{ height: 40 }} />
-        </ScrollView>
-
-        {/* Popup posicionamento direto */}
-        <Modal visible={!!popupOrdem} transparent animationType="fade" onRequestClose={() => setPopupOrdem(null)}>
-          <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', alignItems: 'center', padding: 32 }} activeOpacity={1} onPress={() => setPopupOrdem(null)}>
-            <View style={{ width: '100%', backgroundColor: '#FFF', borderRadius: 16, overflow: 'hidden' }} onStartShouldSetResponder={() => true}>
-              <View style={{ backgroundColor: '#2563EB', paddingHorizontal: 20, paddingVertical: 16 }}>
-                <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', fontWeight: '500', marginBottom: 2 }}>
-                  {lang === 'es' ? 'POSICIÓN ACTUAL' : 'POSIÇÃO ATUAL'} #{popupOrdem ? popupOrdem.index + 1 : ''}
-                </Text>
-                <Text style={{ fontSize: 17, fontWeight: '800', color: '#FFF' }} numberOfLines={1}>{popupOrdem?.cliente.nome}</Text>
-              </View>
-              <View style={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 8 }}>
-                <Text style={{ fontSize: 13, fontWeight: '700', color: '#374151', marginBottom: 12 }}>
-                  {lang === 'es' ? 'Mover a la posición:' : 'Mover para a posição:'}
-                </Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-                  <TouchableOpacity onPress={() => setPopupNovaOrdem(p => String(Math.max(1, parseInt(p || '1') - 1)))} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#EFF6FF', borderWidth: 1.5, borderColor: '#BFDBFE', alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
-                    <Text style={{ fontSize: 22, color: '#2563EB', fontWeight: '700', lineHeight: 26 }}>−</Text>
-                  </TouchableOpacity>
-                  <TextInput
-                    style={{ width: 100, textAlign: 'center', fontSize: 32, fontWeight: '800', color: '#1F2937', borderBottomWidth: 2.5, borderBottomColor: '#2563EB', paddingVertical: 4 }}
-                    value={popupNovaOrdem}
-                    onChangeText={v => setPopupNovaOrdem(v.replace(/[^0-9]/g, ''))}
-                    keyboardType="number-pad"
-                    maxLength={3}
-                    selectTextOnFocus
-                    autoFocus
-                  />
-                  <TouchableOpacity onPress={() => setPopupNovaOrdem(p => String(Math.min(listaReordenar.length, parseInt(p || '1') + 1)))} style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#EFF6FF', borderWidth: 1.5, borderColor: '#BFDBFE', alignItems: 'center', justifyContent: 'center' }} activeOpacity={0.7}>
-                    <Text style={{ fontSize: 22, color: '#2563EB', fontWeight: '700', lineHeight: 26 }}>+</Text>
-                  </TouchableOpacity>
-                </View>
-                <Text style={{ textAlign: 'center', fontSize: 11, color: '#9CA3AF', marginTop: 8 }}>1 – {listaReordenar.length}</Text>
-              </View>
-              <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingBottom: 20, paddingTop: 8 }}>
-                <TouchableOpacity onPress={() => setPopupOrdem(null)} style={{ flex: 1, paddingVertical: 13, borderRadius: 10, backgroundColor: '#F3F4F6', alignItems: 'center' }} activeOpacity={0.7}>
-                  <Text style={{ fontSize: 14, fontWeight: '600', color: '#6B7280' }}>{lang === 'es' ? 'Cancelar' : 'Cancelar'}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => {
-                    const nova = parseInt(popupNovaOrdem);
-                    if (!isNaN(nova) && nova >= 1 && nova <= listaReordenar.length && popupOrdem) {
-                      moverParaPosicao(popupOrdem.index, nova);
-                    }
-                    setPopupOrdem(null);
-                    setBuscaReordenar('');
-                  }}
-                  style={{ flex: 2, paddingVertical: 13, borderRadius: 10, backgroundColor: '#2563EB', alignItems: 'center' }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFF' }}>{lang === 'es' ? 'Mover' : 'Mover'} →</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </TouchableOpacity>
-        </Modal>
-      </View>
+      <ReordenarModal
+        listaReordenar={listaReordenar}
+        salvandoOrdem={salvandoOrdem}
+        lang={lang}
+        onCancelar={cancelarReordenar}
+        onSalvar={salvarOrdem}
+        onMoverItem={moverItem}
+        onMoverParaPosicao={moverParaPosicao}
+      />
     );
   }
-  // ─────────────────────────────────────────────────────────────────────────
 
   if (loading) return (<View style={S.lW}><ActivityIndicator size="large" color="#3B82F6" /><Text style={S.lT}>{t.carregando}</Text></View>);
 
@@ -1730,9 +1582,7 @@ const S = StyleSheet.create({
   lW: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EEF2FF' },
   lT: { marginTop: 12, color: '#6B7280', fontSize: 14 },
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // NOVO HEADER REDESENHADO
-  // ═══════════════════════════════════════════════════════════════════════
+  // Header
   newHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1756,6 +1606,8 @@ const S = StyleSheet.create({
     fontWeight: '500',
     color: '#6B7280',
   },
+
+  // Search
   searchRow: {
     paddingHorizontal: 16,
     paddingBottom: 12,
@@ -1777,6 +1629,8 @@ const S = StyleSheet.create({
     color: '#1F2937',
     padding: 0,
   },
+
+  // Filter row
   filterRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1840,407 +1694,31 @@ const S = StyleSheet.create({
     borderColor: '#E5E7EB',
   },
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // DRAWER LATERAL
-  // ═══════════════════════════════════════════════════════════════════════
-  drawerOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    zIndex: 998,
-  },
-  drawer: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    width: DRAWER_WIDTH,
-    backgroundColor: '#FFF',
-    zIndex: 999,
-    shadowColor: '#000',
-    shadowOffset: { width: -4, height: 0 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 20,
-  },
-  drawerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'ios' ? 60 : 20,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  drawerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  drawerContent: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 16,
-  },
-  drawerSection: {
-    marginBottom: 24,
-  },
-  drawerSectionTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#9CA3AF',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 10,
-  },
-  drawerOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    marginBottom: 4,
-    gap: 12,
-  },
-  drawerOptionActive: {
-    backgroundColor: '#EFF6FF',
-  },
-  drawerOptionText: {
-    fontSize: 15,
-    color: '#374151',
-    flex: 1,
-  },
-  drawerOptionTextActive: {
-    color: '#2563EB',
-    fontWeight: '600',
-  },
-  drawerBadge: {
-    backgroundColor: '#F3F4F6',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  drawerBadgeActive: {
-    backgroundColor: '#DBEAFE',
-  },
-  drawerBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#6B7280',
-  },
-  drawerBadgeTextActive: {
-    color: '#2563EB',
-  },
-  drawerToggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    backgroundColor: '#F9FAFB',
-    borderRadius: 10,
-  },
-  drawerToggleLabel: {
-    fontSize: 14,
-    color: '#374151',
-    fontWeight: '500',
-  },
-  drawerToggleSub: {
-    fontSize: 12,
-    color: '#3B82F6',
-    marginTop: 2,
-  },
-  drawerReorderBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    backgroundColor: '#EFF6FF',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#BFDBFE',
-    gap: 8,
-  },
-  drawerReorderText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#2563EB',
-  },
-  drawerApplyBtn: {
-    backgroundColor: '#3B82F6',
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
-    marginTop: 10,
-    marginBottom: 40,
-  },
-  drawerApplyText: {
-    color: '#FFF',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // ESTILOS ANTIGOS (mantidos para compatibilidade)
-  // ═══════════════════════════════════════════════════════════════════════
-  hd: { backgroundColor: '#3B82F6', paddingTop: 48, paddingBottom: 14, paddingHorizontal: 16, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  hdHelp: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#EFF6FF', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#BFDBFE' },
-  hdHelpText: { color: '#2563EB', fontSize: 14, fontWeight: '700', lineHeight: 18 },
-  legendaOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 24 },
-  legendaModal: { backgroundColor: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 340 },
-  legendaTitle: { fontSize: 17, fontWeight: '700', color: '#1F2937', marginBottom: 4 },
-  legendaSubtitle: { fontSize: 12, color: '#6B7280', marginBottom: 20 },
-  legendaRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 14, gap: 12 },
-  legendaSwatch: { width: 6, height: 44, borderRadius: 3 },
-  legendaTexts: { flex: 1 },
-  legendaLabel: { fontSize: 14, fontWeight: '600', color: '#1F2937' },
-  legendaDesc: { fontSize: 12, color: '#6B7280', marginTop: 1 },
-  legendaClose: { marginTop: 8, backgroundColor: '#3B82F6', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
-  legendaCloseText: { color: '#fff', fontWeight: '600', fontSize: 15 },
-  hdT: { color: '#fff', fontSize: 18, fontWeight: '700' }, hdS: { color: 'rgba(255,255,255,0.75)', fontSize: 12, marginTop: 1 },
-  hdR: { flexDirection: 'row', alignItems: 'center', gap: 10 }, hdDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#10B981' }, hdI: { fontSize: 18 },
+  // Banner de visualização
   vizBanner: { backgroundColor: '#FEF3C7', paddingVertical: 10, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#FDE68A' },
   vizBannerContent: { flexDirection: 'row', alignItems: 'center' },
   vizBannerIcon: { fontSize: 16, marginRight: 10 },
   vizBannerTexts: { flex: 1 },
   vizBannerTitle: { fontSize: 13, fontWeight: '700', color: '#92400E' },
   vizBannerDesc: { fontSize: 11, color: '#B45309', marginTop: 1 },
-  tabs: { flexDirection: 'row', marginHorizontal: 16, marginTop: 14, backgroundColor: '#E8EBF7', borderRadius: 12, padding: 3 },
-  tb: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 11, borderRadius: 10, gap: 5 }, tbOn: { backgroundColor: '#3B82F6' },
-  tbI: { fontSize: 13 }, tbTx: { fontSize: 13, fontWeight: '600', color: '#6B7280' }, tbTxOn: { color: '#fff' },
-  srR: { flexDirection: 'row', marginHorizontal: 16, marginTop: 10, gap: 8 },
-  srB: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 10, height: 40, borderWidth: 1, borderColor: '#E5E7EB' },
-  srI: { fontSize: 13, marginRight: 6, opacity: 0.5 }, srIn: { flex: 1, fontSize: 13, color: '#1F2937', padding: 0 },
-  orB: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 10, paddingHorizontal: 10, height: 40, gap: 4, borderWidth: 1, borderColor: '#E5E7EB' },
-  orI: { fontSize: 11 }, orTx: { fontSize: 12, color: '#6B7280' }, orCh: { fontSize: 8, color: '#9CA3AF' },
-  orDr: { position: 'absolute', top: 175, right: 16, zIndex: 100, backgroundColor: '#fff', borderRadius: 10, padding: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 8, elevation: 8 },
-  orOp: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8 }, orOpOn: { backgroundColor: '#EFF6FF' },
-  orOpTx: { fontSize: 13, color: '#6B7280' }, orOpTxOn: { color: '#3B82F6', fontWeight: '600' },
-  chs: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginTop: 10, gap: 8 },
-  ch: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#fff' }, chOn: { backgroundColor: '#1F2937', borderColor: '#1F2937' },
-  chTx: { fontSize: 12, fontWeight: '500', color: '#6B7280' }, chTxOn: { color: '#fff' },
-  chPOn: { backgroundColor: '#059669', borderColor: '#059669' }, chPOff: { backgroundColor: '#F3F4F6', borderColor: '#E5E7EB' },
-  chPTxOn: { color: '#fff' }, chPTxOff: { color: '#6B7280' }, chCh: { fontSize: 10, color: '#9CA3AF' },
-  tF: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginTop: 10, gap: 8, zIndex: 1000 },
-  tFB: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', backgroundColor: '#fff', gap: 4 },
-  tFBT: { fontSize: 12, color: '#6B7280' }, tFC: { fontSize: 8, color: '#9CA3AF' },
-  tCnt: { flex: 1, textAlign: 'right', fontSize: 12, color: '#6B7280' }, tChv: { fontSize: 10, color: '#9CA3AF' },
-  tDD: { position: 'absolute', top: 36, left: 0, zIndex: 999, backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#E5E7EB', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.15, shadowRadius: 6, elevation: 8, minWidth: 130 },
-  tDDI: { paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
-  tDDISel: { backgroundColor: '#EFF6FF' },
-  tDDIT: { fontSize: 13, color: '#374151' },
-  tDDITSel: { color: '#3B82F6', fontWeight: '600' },
-  ls: { flex: 1, marginTop: 10, zIndex: 1 }, lsI: { paddingHorizontal: 16 },
-  em: { alignItems: 'center', paddingTop: 60 }, emI: { fontSize: 48, marginBottom: 12 }, emT: { fontSize: 14, color: '#9CA3AF' },
-  card: { backgroundColor: '#fff', borderRadius: 12, padding: 12, marginBottom: 8, borderLeftWidth: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 2 },
-  cardRow: { flexDirection: 'row' },
-  av: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginRight: 10 }, avTx: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  cardInfo: { flex: 1 }, nameRow: { flexDirection: 'row', alignItems: 'center' },
-  nome: { flex: 1, fontSize: 14, fontWeight: '600', color: '#1F2937' },
-  bWarn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF2F2', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 10, marginLeft: 4, borderWidth: 1, borderColor: '#FECACA' },
-  bWarnNew: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEE2E2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10, marginLeft: 6, gap: 2 },
-  bWarnNewI: { fontSize: 10, color: '#EF4444' },
-  bWarnNewT: { fontSize: 10, fontWeight: '700', color: '#EF4444' },
 
-  // Linha de ação expandida
-  expActRow: { flexDirection: 'row', gap: 8, marginBottom: 6, alignItems: 'center' },
-
-  // Botão grande Pagar
-  btPagarGrande: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#10B981', borderRadius: 10, paddingVertical: 12, gap: 8 },
-  btPagarDisabled: { backgroundColor: '#D1D5DB' },
-  btPagarIcon: { fontSize: 16, fontWeight: '800', color: '#FFF' },
-  btPagarText: { fontSize: 15, fontWeight: '700', color: '#FFF' },
-  btPagarValor: { backgroundColor: 'rgba(255,255,255,0.25)', paddingHorizontal: 10, paddingVertical: 2, borderRadius: 8 },
-  btPagarValorText: { fontSize: 13, fontWeight: '700', color: '#FFF' },
-
-  // Botões secundários (parcelas + notas)
-  btSecRow: { flexDirection: 'row', gap: 8 },
-  btSecVerde: { width: 46, height: 46, borderRadius: 10, backgroundColor: '#10B981', alignItems: 'center', justifyContent: 'center' },
-  btSecAmarelo: { width: 46, height: 46, borderRadius: 10, backgroundColor: '#F59E0B', alignItems: 'center', justifyContent: 'center' },
-  btSecIcon: { fontSize: 18 },
-  btSecIconBox: { alignItems: 'center', justifyContent: 'center' },
-  btSecIconTx: { fontSize: 20, color: '#FFF', fontWeight: '700' },
-  btSecBadge: { position: 'absolute', top: -4, right: -4, backgroundColor: '#EF4444', borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
-  btSecBadgeT: { fontSize: 9, fontWeight: '700', color: '#FFF' },
-
-  // Link detalhes
-  linkDetalhes: { alignItems: 'center', paddingVertical: 4 },
-  linkDetalhesTx: { fontSize: 12, color: '#9CA3AF' },
-  bWarnI: { fontSize: 10, color: '#F59E0B', marginRight: 2 }, bWarnT: { fontSize: 10, fontWeight: '700', color: '#DC2626' },
-  bMul: { backgroundColor: '#FED7AA', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 10, marginLeft: 3 }, bMulT: { fontSize: 10, fontWeight: '700', color: '#C2410C' },
-  bNota: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#EFF6FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 4, gap: 2, borderWidth: 1, borderColor: '#BFDBFE' }, bNotaI: { fontSize: 8 }, bNotaT: { fontSize: 9, fontWeight: '700', color: '#2563EB' },
-  dots: { fontSize: 18, color: '#9CA3AF', marginLeft: 4, fontWeight: '700' }, sub: { fontSize: 11, color: '#6B7280', marginTop: 2 },
-  pRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
-  pLblR: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }, pLbl: { fontSize: 11, color: '#6B7280' },
-  fBdg: { backgroundColor: '#EDE9FE', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }, fBdgT: { fontSize: 9, fontWeight: '600', color: '#7C3AED' },
-  dataEmpLbl: { fontSize: 10, color: '#9CA3AF', marginTop: 2 },
-  pVal: { fontSize: 15, fontWeight: '700', color: '#1F2937' },
-  pValBig: { fontSize: 18, fontWeight: '800', color: '#1F2937', textAlign: 'right' },
-  sCol: { alignItems: 'flex-end' }, sLbl: { fontSize: 11, color: '#6B7280', marginBottom: 2 }, sVal: { fontSize: 15, fontWeight: '700', color: '#1F2937' },
-  pgVal: { fontSize: 14, fontWeight: '700', color: '#059669' }, pgOrig: { fontSize: 10, color: '#9CA3AF' }, pgCred: { fontSize: 10, color: '#2563EB' },
-  exp: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
-  aR: { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', borderRadius: 8, padding: 10, marginBottom: 10 }, aRT: { fontSize: 12, fontWeight: '600', color: '#DC2626' }, aRS: { fontSize: 11, color: '#B91C1C', marginTop: 2 },
-  aY: { backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 8, padding: 10, marginBottom: 10 }, aYT: { fontSize: 12, fontWeight: '600', color: '#D97706' }, aYS: { fontSize: 11, color: '#B45309', marginTop: 2 },
-  eNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: 10, gap: 6 },
-  eNBtn: { width: 26, height: 26, borderRadius: 13, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' }, eNOff: { opacity: 0.3 }, eNBTx: { fontSize: 11, color: '#6B7280' },
-  eDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#D1D5DB' }, eDotOn: { backgroundColor: '#3B82F6' }, eNLbl: { fontSize: 10, color: '#6B7280' },
-  res: { backgroundColor: '#FAFAFA', borderRadius: 10, padding: 10, marginBottom: 10, borderWidth: 1, borderColor: '#F3F4F6' },
-  resH: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }, resT: { fontSize: 12, fontWeight: '600', color: '#1F2937' },
-  stB: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }, stBT: { fontSize: 9, fontWeight: '700' },
-  g3: { flexDirection: 'row', marginBottom: 6 }, gi: { flex: 1 }, gl: { fontSize: 9, color: '#9CA3AF', marginBottom: 1 }, gv: { fontSize: 12, fontWeight: '700', color: '#1F2937' },
-  prL: { fontSize: 9, color: '#9CA3AF', marginTop: 4, marginBottom: 3 }, prB: { height: 5, backgroundColor: '#E5E7EB', borderRadius: 3, overflow: 'hidden' }, prF: { height: '100%', backgroundColor: '#3B82F6', borderRadius: 3 }, prR: { fontSize: 9, color: '#9CA3AF', marginTop: 2, textAlign: 'right' },
-  btR: { flexDirection: 'row', gap: 8, marginBottom: 6 },
-  bt: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 11, borderRadius: 10, gap: 5 },
-  btG: { backgroundColor: '#10B981' }, btBl: { backgroundColor: '#3B82F6' }, btRed: { backgroundColor: '#EF4444' }, btOY: { backgroundColor: '#F59E0B' },
-  btDetalhes: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 8, marginTop: 6, backgroundColor: '#F5F3FF', borderRadius: 8, borderWidth: 1, borderColor: '#DDD6FE', gap: 6 },
-  btDetalhesIcon: { fontSize: 12 },
-  btDetalhesTx: { fontSize: 12, fontWeight: '600', color: '#6366F1' },
-  btOG: { backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' }, btOB: { backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE' }, btOff: { opacity: 0.4 },
-  btI: { fontSize: 13 }, btW: { color: '#fff', fontSize: 12, fontWeight: '600' }, btTG: { color: '#059669', fontSize: 12, fontWeight: '600' }, btTB: { color: '#2563EB', fontSize: 12, fontWeight: '600' },
-  tSt: { fontSize: 11, fontWeight: '500', marginLeft: 8 },
-  tEmpCard: { backgroundColor: '#FAFAFA', borderRadius: 10, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#E5E7EB' },
-  tEmpHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  tEmpTitle: { fontSize: 13, fontWeight: '700', color: '#1F2937' }, tEmpParcela: { fontSize: 12, fontWeight: '500', color: '#6B7280' },
-  tEmpBody: { flexDirection: 'row', justifyContent: 'space-between' },
-  tEmpLbl: { fontSize: 10, color: '#9CA3AF', marginBottom: 2 }, tEmpVal: { fontSize: 14, fontWeight: '700', color: '#1F2937' },
-  tAddRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, marginBottom: 10, opacity: 0.35 },
-  tAddIcon: { fontSize: 16, color: '#9CA3AF', marginRight: 6 }, tAddText: { fontSize: 12, color: '#9CA3AF' },
-  tAddRowActive: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, marginBottom: 10, backgroundColor: '#EFF6FF', borderRadius: 8, borderWidth: 1, borderColor: '#3B82F6' },
-  tAddIconActive: { fontSize: 16, color: '#3B82F6', marginRight: 6, fontWeight: '700' as const }, tAddTextActive: { fontSize: 13, color: '#3B82F6', fontWeight: '600' as const },
-  btReneg: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, marginBottom: 10, backgroundColor: '#FFF7ED', borderRadius: 8, borderWidth: 1, borderColor: '#F97316' },
-  btRenegI: { fontSize: 16, marginRight: 6 }, btRenegT: { fontSize: 13, color: '#F97316', fontWeight: '600' as const },
-  // MODAIS
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
-  modalContainer: { width: '92%', maxHeight: '85%', backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-  modalTitle: { fontSize: 16, fontWeight: '700', color: '#1F2937', flex: 1 },
-  modalClose: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
-  modalCloseX: { fontSize: 16, color: '#6B7280' },
-  modalScroll: { padding: 16 },
-  modalEmpty: { textAlign: 'center', color: '#9CA3AF', marginTop: 40 },
-  creditoBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#DBEAFE', padding: 12, marginHorizontal: 16, marginTop: 12, borderRadius: 10, borderWidth: 1, borderColor: '#93C5FD' },
-  creditoIcon: { fontSize: 18, marginRight: 10 },
-  creditoText: { fontSize: 13, fontWeight: '600', color: '#1D4ED8' },
-  mParcela: { backgroundColor: '#FAFAFA', borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#E5E7EB', borderLeftWidth: 4 },
-  mParcelaRow: { flexDirection: 'row', alignItems: 'center' },
-  mParcelaIcon: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
-  mParcelaInfo: { flex: 1 },
-  mParcelaNum: { fontSize: 14, fontWeight: '700', color: '#1F2937' },
-  mParcelaVenc: { fontSize: 11, color: '#6B7280', marginTop: 1 },
-  mParcelaValores: { alignItems: 'flex-end' },
-  mParcelaOriginal: { fontSize: 10, color: '#9CA3AF' },
-  mParcelaValor: { fontSize: 15, fontWeight: '700', color: '#1F2937', marginTop: 2 },
-  mParcelaPago: { fontSize: 13, fontWeight: '700', color: '#10B981' },
-  mParcelaRestante: { fontSize: 11, fontWeight: '600', color: '#D97706', marginTop: 1 },
-  mParcelaCredito: { fontSize: 10, color: '#2563EB' },
-  mParcelaStatus: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
-  mParcelaStatusTx: { fontSize: 9, fontWeight: '700' },
-  mParcelaDataPg: { fontSize: 9, color: '#6B7280', marginTop: 1 },
-  mParcelaBtns: { marginLeft: 8, justifyContent: 'center' },
-  mBtnPagar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#10B981', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, gap: 6 },
-  mBtnPagarIcon: { fontSize: 14 },
-  mBtnPagarTx: { color: '#fff', fontSize: 12, fontWeight: '600' },
-  mBtnEstornar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#EF4444', gap: 6 },
-  mBtnFecharWrap: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 20, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
-  mBtnFechar: { backgroundColor: '#3B82F6', paddingVertical: 14, borderRadius: 10, alignItems: 'center' },
-  mBtnFecharTx: { fontSize: 15, fontWeight: '700', color: '#fff' },
-  mBtnEstornarIcon: { fontSize: 14, color: '#EF4444' },
-  mBtnEstornarTx: { color: '#EF4444', fontSize: 12, fontWeight: '600' },
-  modalPagamento: { width: '90%', backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden' },
-  pgHeader: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-  pgHeaderIcon: { fontSize: 20, marginRight: 10 },
-  pgHeaderTitle: { fontSize: 16, fontWeight: '700', color: '#1F2937', flex: 1 },
-  pgInfoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 16 },
-  pgInfoParcela: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
-  pgInfoStatus: { backgroundColor: '#FEF3C7', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
-  pgInfoStatusTx: { fontSize: 10, fontWeight: '700', color: '#D97706' },
-  pgInfoCliente: { fontSize: 13, color: '#6B7280', paddingHorizontal: 16, marginTop: 4 },
-  pgInfoVenc: { fontSize: 12, color: '#9CA3AF', paddingHorizontal: 16, marginTop: 2 },
-  pgInputBox: { marginHorizontal: 16, marginTop: 16, backgroundColor: '#F9FAFB', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#E5E7EB' },
-  pgInputLabel: { fontSize: 12, color: '#6B7280', marginBottom: 8 },
-  pgInputRow: { flexDirection: 'row', alignItems: 'center' },
-  pgInputCurrency: { fontSize: 20, fontWeight: '700', color: '#6B7280', marginRight: 8 },
-  pgInput: { flex: 1, fontSize: 24, fontWeight: '700', color: '#1F2937', padding: 0 },
-  pgFormRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, marginTop: 16, gap: 12 },
-  pgFormLabel: { fontSize: 12, color: '#6B7280' },
-  pgFormSelect: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F6', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, gap: 8 },
-  pgFormSelectTx: { fontSize: 13, color: '#1F2937' },
-  pgFormSelectChev: { fontSize: 10, color: '#9CA3AF' },
-  pgGpsStatus: { flexDirection: 'row', alignItems: 'center', marginLeft: 'auto', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20, gap: 4 },
-  pgGpsOk: { backgroundColor: '#D1FAE5' },
-  pgGpsErro: { backgroundColor: '#FEE2E2' },
-  pgGpsIcon: { fontSize: 10 },
-  pgGpsTx: { fontSize: 11, fontWeight: '500' },
-  pgGpsTxOk: { color: '#059669' },
-  pgGpsTxErro: { color: '#DC2626' },
-  pgBtnPagar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#10B981', marginHorizontal: 16, marginVertical: 16, paddingVertical: 14, borderRadius: 12, gap: 8 },
-  pgBtnDisabled: { opacity: 0.5 },
-  pgBtnIcon: { fontSize: 16, color: '#fff' },
-  pgBtnTx: { fontSize: 15, fontWeight: '700', color: '#fff' },
-  modalEstorno: { width: '90%', backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden' },
-  estHeader: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-  estHeaderIcon: { fontSize: 20, color: '#EF4444', marginRight: 10 },
-  estHeaderTitle: { fontSize: 16, fontWeight: '700', color: '#1F2937', flex: 1 },
-  estInfo: { padding: 16, backgroundColor: '#FEF2F2', margin: 16, borderRadius: 12 },
-  estInfoParcela: { fontSize: 14, fontWeight: '700', color: '#1F2937' },
-  estInfoCliente: { fontSize: 13, color: '#6B7280', marginTop: 2 },
-  estInfoValor: { fontSize: 16, fontWeight: '700', color: '#DC2626', marginTop: 8 },
-  estInputBox: { marginHorizontal: 16 },
-  estInputLabel: { fontSize: 12, color: '#6B7280', marginBottom: 8 },
-  estInput: { backgroundColor: '#F9FAFB', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#E5E7EB', fontSize: 14, color: '#1F2937', minHeight: 80, textAlignVertical: 'top' },
-  estBtns: { flexDirection: 'row', gap: 12, padding: 16 },
-  estBtnCancel: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 12, backgroundColor: '#F3F4F6' },
-  estBtnCancelTx: { fontSize: 14, fontWeight: '600', color: '#6B7280' },
-  estBtnConfirm: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 12, backgroundColor: '#EF4444' },
-  estBtnDisabled: { opacity: 0.5 },
-  estBtnConfirmTx: { fontSize: 14, fontWeight: '700', color: '#fff' },
-  // Loading do modal pagamento
-  pgLoading: { padding: 40, alignItems: 'center' },
-  pgLoadingText: { marginTop: 12, color: '#6B7280', fontSize: 14 },
-  // Linha de crédito disponível
-  pgCreditoRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
-  pgCreditoIcon: { fontSize: 16, marginRight: 8 },
-  pgCreditoText: { flex: 1, fontSize: 13, color: '#6B7280' },
-  pgCreditoBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: '#D1D5DB', backgroundColor: '#fff' },
-  pgCreditoBtnOn: { borderColor: '#10B981', backgroundColor: '#ECFDF5' },
-  pgCreditoCheck: { width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: '#D1D5DB', marginRight: 6, justifyContent: 'center', alignItems: 'center' },
-  pgCreditoCheckOn: { borderColor: '#10B981', backgroundColor: '#10B981' },
-  pgCreditoCheckIcon: { color: '#fff', fontSize: 10, fontWeight: '700' },
-  pgCreditoBtnTx: { fontSize: 12, color: '#6B7280', fontWeight: '500' },
-  pgCreditoBtnTxOn: { color: '#059669' },
-  // Alerta amarelo (saldo anterior)
-  pgAlertYellow: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#FEF3C7', marginHorizontal: 16, marginTop: 12, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#FDE68A' },
-  pgAlertYellowIcon: { fontSize: 16, marginRight: 10, marginTop: 2 },
-  pgAlertYellowTexts: { flex: 1 },
-  pgAlertYellowTitle: { fontSize: 13, fontWeight: '600', color: '#92400E' },
-  pgAlertYellowDesc: { fontSize: 12, color: '#B45309', marginTop: 2 },
-  pgAlertYellowBtn: { alignSelf: 'flex-start', marginTop: 8, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: '#F59E0B' },
-  pgAlertYellowBtnTx: { fontSize: 12, fontWeight: '600', color: '#fff' },
-  // Alerta vermelho (bloqueio)
-  pgAlertRed: { backgroundColor: '#FEF2F2', marginHorizontal: 16, marginTop: 12, marginBottom: 16, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#FECACA' },
-  pgAlertRedIcon: { fontSize: 16, marginRight: 10 },
-  pgAlertRedTexts: { marginBottom: 10 },
-  pgAlertRedTitle: { fontSize: 13, fontWeight: '700', color: '#DC2626' },
-  pgAlertRedDesc: { fontSize: 12, color: '#B91C1C', marginTop: 4 },
-  pgAlertRedBtn: { alignSelf: 'flex-start', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#DC2626', backgroundColor: '#fff' },
-  pgAlertRedBtnTx: { fontSize: 12, fontWeight: '600', color: '#DC2626' },
   // Banner sem liquidação
   semLiqBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF2F2', paddingVertical: 10, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#FECACA' },
   semLiqIcon: { fontSize: 18, marginRight: 10 },
   semLiqTexts: { flex: 1 },
   semLiqTitle: { fontSize: 13, fontWeight: '700', color: '#DC2626' },
   semLiqDesc: { fontSize: 11, color: '#B91C1C', marginTop: 1 },
-  // Tab desabilitada
-  tbDisabled: { backgroundColor: '#E5E7EB', opacity: 0.6 },
-  tbTxDisabled: { color: '#9CA3AF' },
-  // Botão Pagar desabilitado no modal
-  mBtnPagarDisabled: { backgroundColor: '#E5E7EB', opacity: 0.5 },
-  // Alphabet sidebar
-  alphaBar: { position: 'absolute', right: 2, top: 15, bottom: 100, justifyContent: 'center', alignItems: 'center', width: 22, zIndex: 100, backgroundColor: 'rgba(255,255,255,0.85)', borderRadius: 11, paddingVertical: 4 },
-  alphaLetter: { fontSize: 10, color: '#9CA3AF', fontWeight: '600', paddingVertical: 1.5, paddingHorizontal: 4, textAlign: 'center' },
-  alphaLetterActive: { color: '#3B82F6', fontWeight: '800', fontSize: 12, backgroundColor: '#EFF6FF', borderRadius: 8, overflow: 'hidden' },
+
+  // Lista
+  ls: { flex: 1, marginTop: 10, zIndex: 1 },
+  lsI: { paddingHorizontal: 16 },
+
+  // Empty state
+  em: { alignItems: 'center', paddingTop: 60 },
+  emI: { fontSize: 48, marginBottom: 12 },
+  emT: { fontSize: 14, color: '#9CA3AF' },
+
+  // Alphabet sidebar indicator
   alphaIndicator: { position: 'absolute', left: '50%', top: '45%', marginLeft: -30, marginTop: -30, width: 60, height: 60, borderRadius: 12, backgroundColor: 'rgba(59,130,246,0.9)', justifyContent: 'center', alignItems: 'center', zIndex: 200 },
   alphaIndicatorText: { color: '#fff', fontSize: 28, fontWeight: '800' },
 });
