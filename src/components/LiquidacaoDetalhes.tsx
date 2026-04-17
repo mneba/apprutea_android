@@ -209,7 +209,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
       const { data: pags, error: errPag } = await supabase
         .from('pagamentos_parcelas')
         .select(`
-          id, numero_parcela, valor_pago_total, valor_parcela, valor_credito_gerado,
+          id, numero_parcela, valor_pago_total, valor_pago_atual, valor_parcela, valor_credito_usado, valor_credito_gerado,
           forma_pagamento, created_at, cliente_id, parcela_id, emprestimo_id,
           clientes!pagamentos_parcelas_cliente_id_fkey(nome, consecutivo)
         `)
@@ -222,7 +222,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         // Fallback: busca sem join se foreign key falhar
         const { data: pagsSem, error: errSem } = await supabase
           .from('pagamentos_parcelas')
-          .select('id, numero_parcela, valor_pago_total, valor_parcela, valor_credito_gerado, forma_pagamento, created_at, cliente_id')
+          .select('id, numero_parcela, valor_pago_total, valor_pago_atual, valor_parcela, valor_credito_usado, valor_credito_gerado, forma_pagamento, created_at, cliente_id')
           .eq('liquidacao_id', liquidacaoId)
           .eq('estornado', false)
           .order('created_at', { ascending: true });
@@ -706,16 +706,27 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                         {pagamentos.map((p, idx) => {
                           const nomeCliente = (p.clientes as any)?.nome || (p.cliente as any)?.nome || `Parcela ${p.numero_parcela}`;
                           const excedente = parseFloat(p.valor_credito_gerado || 0);
+                          const creditoUsado = parseFloat(p.valor_credito_usado || 0);
                           const valorParcela = parseFloat(p.valor_parcela || 0);
                           const totalRealPago = parseFloat(p.valor_pago_total || 0);
+                          // ⭐ Valor efetivamente recebido em DINHEIRO neste dia
+                          const valorDinheiro = totalRealPago - creditoUsado;
                           const temExcedente = excedente > 0;
+                          const temCreditoUsado = creditoUsado > 0;
                           return (
                             <View key={p.id}>
                               <View style={cupom.itemRow}>
                                 <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
                                 <Text style={cupom.itemCat} numberOfLines={1}>{nomeCliente}</Text>
-                                <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(totalRealPago)}</Text>
+                                {/* ⭐ Mostra valor DINHEIRO (não o total com crédito) */}
+                                <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(valorDinheiro)}</Text>
                               </View>
+                              {/* ⭐ Indicar quando usou crédito */}
+                              {temCreditoUsado && (
+                                <Text style={[cupom.itemSub, { color: '#2563EB', fontSize: 9 }]}>
+                                  {'   '}💳 {t.creditoUsado}: {fmt(creditoUsado)} · Total: {fmt(totalRealPago)}
+                                </Text>
+                              )}
                               {temExcedente && (
                                 <Text style={[cupom.itemSub, { color: '#6B7280', fontSize: 9 }]}>
                                   {'   '}
@@ -952,15 +963,28 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
         grupo.parcelas[existIdx] = r;
       }
     });
-    // Recalcular totalPago após deduplicação
+    // Recalcular totalPago após deduplicação — ⭐ APENAS DINHEIRO (sem crédito usado)
     map.forEach(grupo => {
-      grupo.totalPago = grupo.parcelas.reduce((s: number, p: any) => s + parseFloat(p.valor_pago_total || 0), 0);
+      grupo.totalPago = grupo.parcelas.reduce((s: number, p: any) => {
+        const total = parseFloat(p.valor_pago_total || 0);
+        const creditoUsado = parseFloat(p.valor_credito_usado || 0);
+        return s + (total - creditoUsado); // Só o dinheiro efetivamente recebido
+      }, 0);
     });
     return Array.from(map.values());
   }, [registros]);
 
-  const totalDinheiro = registros.filter(r => r.forma_pagamento === 'DINHEIRO').reduce((s, r) => s + parseFloat(r.valor_pago_total || 0), 0);
-  const totalTransf = registros.filter(r => r.forma_pagamento !== 'DINHEIRO').reduce((s, r) => s + parseFloat(r.valor_pago_total || 0), 0);
+  // ⭐ Calcular totais apenas com DINHEIRO (descontando crédito usado)
+  const totalDinheiro = registros.filter(r => r.forma_pagamento === 'DINHEIRO').reduce((s, r) => {
+    const total = parseFloat(r.valor_pago_total || 0);
+    const creditoUsado = parseFloat(r.valor_credito_usado || 0);
+    return s + (total - creditoUsado);
+  }, 0);
+  const totalTransf = registros.filter(r => r.forma_pagamento !== 'DINHEIRO').reduce((s, r) => {
+    const total = parseFloat(r.valor_pago_total || 0);
+    const creditoUsado = parseFloat(r.valor_credito_usado || 0);
+    return s + (total - creditoUsado);
+  }, 0);
 
   const renderCliente = ({ item: grupo }: { item: ClienteGrupo }) => {
     const isExpanded = expandido === grupo.clienteId;
@@ -986,7 +1010,11 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
         {/* Parcelas (expandido) */}
         {isExpanded && (
           <View style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6', paddingTop: 8 }}>
-            {grupo.parcelas.map((p) => (
+            {grupo.parcelas.map((p) => {
+              const totalPago = parseFloat(p.valor_pago_total || 0);
+              const creditoUsado = parseFloat(p.valor_credito_usado || 0);
+              const valorDinheiro = totalPago - creditoUsado;
+              return (
               <View key={p.id} style={{ paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#F9FAFB' }}>
                 <View style={dStyles.pagItemBottom}>
                   <View style={dStyles.pagDetail}>
@@ -995,7 +1023,8 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
                   </View>
                   <View style={dStyles.pagDetail}>
                     <Text style={dStyles.pagDetailLabel}>{t.valor}</Text>
-                    <Text style={[dStyles.pagDetailValue, { color: '#059669', fontWeight: '700' }]}>{fmt(parseFloat(p.valor_pago_total || 0))}</Text>
+                    {/* ⭐ Mostra valor DINHEIRO, não o total */}
+                    <Text style={[dStyles.pagDetailValue, { color: '#059669', fontWeight: '700' }]}>{fmt(valorDinheiro)}</Text>
                   </View>
                   <View style={dStyles.pagDetail}>
                     <Text style={dStyles.pagDetailLabel}>Forma</Text>
@@ -1006,14 +1035,19 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
                     <Text style={dStyles.pagDetailValue}>{fmtHora(p.created_at)}</Text>
                   </View>
                 </View>
-                {(p.valor_credito_usado > 0 || p.valor_credito_gerado > 0) && (
+                {/* ⭐ Mostrar crédito usado e total quando relevante */}
+                {creditoUsado > 0 && (
                   <View style={dStyles.pagCredito}>
-                    {p.valor_credito_usado > 0 && <Text style={dStyles.pagCreditoText}>{t.creditoUsado}: {fmt(p.valor_credito_usado)}</Text>}
-                    {p.valor_credito_gerado > 0 && <Text style={dStyles.pagCreditoText}>{t.creditoGerado}: {fmt(p.valor_credito_gerado)}</Text>}
+                    <Text style={[dStyles.pagCreditoText, { color: '#2563EB' }]}>💳 {t.creditoUsado}: {fmt(creditoUsado)} · Total parcela: {fmt(totalPago)}</Text>
+                  </View>
+                )}
+                {p.valor_credito_gerado > 0 && (
+                  <View style={dStyles.pagCredito}>
+                    <Text style={dStyles.pagCreditoText}>{t.creditoGerado}: {fmt(p.valor_credito_gerado)}</Text>
                   </View>
                 )}
               </View>
-            ))}
+            )})}
           </View>
         )}
 

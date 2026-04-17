@@ -21,6 +21,7 @@ export interface ParcelaModal {
   valor_multa: number;
   valor_pago?: number;
   valor_saldo?: number;
+  credito_usado?: number;
   credito_gerado?: number;
   saldo_excedente?: number;
   liquidacao_id?: string | null;
@@ -111,6 +112,8 @@ interface ParcelasModalProps {
     diaAtraso: string;
     pagoNoDia: string;
     pagoAdiantado: string;
+    dinheiro: string;
+    creditoUsado: string;
   };
 }
 
@@ -175,6 +178,8 @@ export default function ParcelasModal({
     const statusText = isPago ? t.pagoStatus : isParcial ? t.parcialStatus : isCancelado ? 'CANCELADO' : isVencida ? t.vencidaStatus : t.pendente;
 
     const valorPago = p.valor_pago || 0;
+    const creditoUsado = p.credito_usado || 0;
+    const valorDinheiro = valorPago - creditoUsado; // Valor efetivamente pago em dinheiro
     const valorSaldo = p.valor_saldo ?? (p.valor_parcela - valorPago);
     const temPagamentoParcial = !isPago && valorPago > 0;
 
@@ -243,7 +248,20 @@ export default function ParcelasModal({
                     <Text style={{ fontSize: 11, color: '#2563EB', fontWeight: '600' }}>🔄 {t.quitadoPorCredito}</Text>
                   </View>
                 )}
-                {valorPago !== p.valor_parcela ? (
+                {/* ⭐ Exibição detalhada: Dinheiro + Crédito usado separados */}
+                {creditoUsado > 0 ? (
+                  <>
+                    {/* Quando usou crédito, mostra breakdown completo */}
+                    <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
+                    <View style={S.mParcelaBreakdown}>
+                      <Text style={S.mParcelaBreakdownItem}>💵 {t.dinheiro}: {fmt(valorDinheiro)}</Text>
+                      <Text style={S.mParcelaBreakdownItemCredito}>💳 {t.creditoUsado}: {fmt(creditoUsado)}</Text>
+                    </View>
+                    {valorPago !== p.valor_parcela && (
+                      <Text style={S.mParcelaOriginal}>{t.original} {fmt(p.valor_parcela)}</Text>
+                    )}
+                  </>
+                ) : valorPago !== p.valor_parcela ? (
                   <>
                     <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
                     <Text style={S.mParcelaOriginal}>{t.original} {fmt(p.valor_parcela)}</Text>
@@ -264,6 +282,12 @@ export default function ParcelasModal({
             {temPagamentoParcial && (
               <View style={{ marginTop: 2 }}>
                 <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
+                {creditoUsado > 0 && (
+                  <View style={S.mParcelaBreakdown}>
+                    <Text style={S.mParcelaBreakdownItem}>💵 {t.dinheiro}: {fmt(valorDinheiro)}</Text>
+                    <Text style={S.mParcelaBreakdownItemCredito}>💳 {t.creditoUsado}: {fmt(creditoUsado)}</Text>
+                  </View>
+                )}
                 <Text style={S.mParcelaRestante}>{t.restante} {fmt(valorSaldo)}</Text>
               </View>
             )}
@@ -360,6 +384,10 @@ const S = StyleSheet.create({
   mParcelaPago: { fontSize: 13, fontWeight: '700', color: '#10B981' },
   mParcelaRestante: { fontSize: 11, fontWeight: '600', color: '#D97706', marginTop: 1 },
   mParcelaCredito: { fontSize: 10, color: '#2563EB' },
+  // ⭐ Breakdown de pagamento (dinheiro + crédito)
+  mParcelaBreakdown: { marginTop: 2, paddingLeft: 2 },
+  mParcelaBreakdownItem: { fontSize: 11, color: '#6B7280' },
+  mParcelaBreakdownItemCredito: { fontSize: 11, color: '#2563EB', fontWeight: '500' },
   mParcelaStatus: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
   mParcelaStatusTx: { fontSize: 9, fontWeight: '700' },
   mParcelaDataPg: { fontSize: 9, color: '#6B7280', marginTop: 1 },

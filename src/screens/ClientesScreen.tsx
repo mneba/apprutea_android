@@ -192,6 +192,13 @@ const textos = {
     quitacaoAntecipada: 'Quitação antecipada',
     quitadoPorCredito: 'Quitado por crédito',
     restante: 'Restante:',
+    pagoComAtraso: 'Pago com atraso',
+    diasAtraso: 'dias de atraso',
+    diaAtraso: 'dia de atraso',
+    pagoNoDia: 'No dia',
+    pagoAdiantado: 'Adiantado',
+    dinheiro: 'Dinheiro',
+    creditoUsado: 'Crédito usado',
     toqueDetalhes: 'Toque para ver detalhes',
     legendaTitulo: 'Significado das Cores',
     legendaSubtitulo: 'Borda esquerda de cada card',
@@ -277,6 +284,11 @@ const textos = {
     quitacaoAntecipada: 'Liquidación anticipada',
     quitadoPorCredito: 'Liquidado por crédito',
     restante: 'Restante:',
+    pagoComAtraso: 'Pagado con atraso',
+    diasAtraso: 'días de atraso',
+    diaAtraso: 'día de atraso',
+    pagoNoDia: 'A tiempo',
+    pagoAdiantado: 'Adelantado',
     toqueDetalhes: 'Toque para ver detalles',
     legendaTitulo: 'Significado de los Colores',
     legendaSubtitulo: 'Borde izquierdo de cada tarjeta',
@@ -641,14 +653,15 @@ export default function ClientesScreen({ navigation, route }: any) {
       // Busca pagamentos com liquidacao_id (tabela pagamentos_parcelas tem tudo)
       const { data: pagamentos } = await supabase
         .from('pagamentos_parcelas')
-        .select('parcela_id, valor_pago_atual, valor_credito_gerado, liquidacao_id, estornado')
+        .select('parcela_id, valor_pago_atual, valor_credito_usado, valor_credito_gerado, liquidacao_id, estornado')
         .in('parcela_id', ids)
         .eq('estornado', false);
       
-      const pMap = new Map<string, { valorPago: number; creditoGerado: number; liquidacaoId: string | null }>();
+      const pMap = new Map<string, { valorPago: number; creditoUsado: number; creditoGerado: number; liquidacaoId: string | null }>();
       (pagamentos || []).forEach((p: any) => { 
         pMap.set(p.parcela_id, { 
           valorPago: p.valor_pago_atual || 0, 
+          creditoUsado: p.valor_credito_usado || 0,
           creditoGerado: p.valor_credito_gerado || 0, 
           liquidacaoId: p.liquidacao_id 
         }); 
@@ -680,6 +693,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         const pag = pMap.get(p.id); 
         const vPago = p.valor_pago || 0;
         const vSaldo = p.valor_saldo || 0;
+        const creditoUsado = pag?.creditoUsado || 0;
         const creditoGerado = pag?.creditoGerado || 0;
         const liqPag = pag?.liquidacaoId || p.liquidacao_id || null;
         const dataLiquidacao = liqPag ? (liqDataMap.get(liqPag) || null) : null;
@@ -693,6 +707,7 @@ export default function ClientesScreen({ navigation, route }: any) {
           valor_multa: p.valor_multa || 0, 
           valor_pago: vPago, 
           valor_saldo: vSaldo,
+          credito_usado: creditoUsado,
           credito_gerado: creditoGerado,
           saldo_excedente: p.saldo_excedente || 0,
           liquidacao_id: liqPag,
