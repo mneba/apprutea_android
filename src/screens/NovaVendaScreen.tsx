@@ -458,6 +458,9 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   const [fotoCliente, setFotoCliente] = useState<string | null>(null);
   const [observacoesCliente, setObservacoesCliente] = useState('');
 
+  // ⭐ Estado para campos com erro (validação visual)
+  const [camposComErro, setCamposComErro] = useState<Set<string>>(new Set());
+
   // -----------------------------------------------------------
   // POPUP BUSCA POR DOCUMENTO (somente fluxo novo cliente)
   // -----------------------------------------------------------
@@ -888,6 +891,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         return [...prev, dia].sort((a, b) => a - b);
       }
     });
+    limparErroCampo('diasMesFlexivel');
   };
 
   // Formatar data para exibição
@@ -998,8 +1002,17 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   // VALIDAÇÃO
   // -----------------------------------------------------------
   const isValido = (): boolean => {
-    return !!(
+    // ⭐ Campos obrigatórios do cliente (novos)
+    const clienteValido = !!(
       nome.trim() &&
+      documento.trim() &&
+      telefoneCelular.trim() &&
+      endereco.trim() &&
+      enderecoComercial.trim()
+    );
+    
+    // Campos obrigatórios do empréstimo (existentes)
+    const emprestimoValido = !!(
       valorPrincipal > 0 &&
       taxaJuros &&
       numeroParcelas &&
@@ -1007,6 +1020,46 @@ export default function NovaVendaScreen({ navigation, route }: any) {
       dataPrimeiroVencimento &&
       frequencia
     );
+    
+    return clienteValido && emprestimoValido;
+  };
+
+  // ⭐ Validar e marcar campos com erro (para feedback visual)
+  const validarCamposComFeedback = (): boolean => {
+    const erros = new Set<string>();
+    
+    // Campos do cliente
+    if (!nome.trim()) erros.add('nome');
+    if (!documento.trim()) erros.add('documento');
+    if (!telefoneCelular.trim()) erros.add('telefoneCelular');
+    if (!endereco.trim()) erros.add('endereco');
+    if (!enderecoComercial.trim()) erros.add('enderecoComercial');
+    
+    // Campos do empréstimo
+    if (!valorPrincipal || valorPrincipal <= 0) erros.add('valorEmprestimo');
+    if (!numeroParcelas || parseInt(numeroParcelas) <= 0) erros.add('numeroParcelas');
+    if (!taxaJuros) erros.add('taxaJuros');
+    if (!dataPrimeiroVencimento) erros.add('dataPrimeiroVencimento');
+    if (!frequencia) erros.add('frequencia');
+    
+    // Campos condicionais de frequência
+    if (frequencia === 'SEMANAL' && !diaSemanaPagamento) erros.add('diaSemanaPagamento');
+    if (frequencia === 'MENSAL' && !diaMesPagamento) erros.add('diaMesPagamento');
+    if (frequencia === 'FLEXIVEL' && diasMesFlexivel.length === 0) erros.add('diasMesFlexivel');
+    
+    setCamposComErro(erros);
+    return erros.size === 0;
+  };
+
+  // ⭐ Limpar erro de um campo específico quando usuário começa a digitar
+  const limparErroCampo = (campo: string) => {
+    if (camposComErro.has(campo)) {
+      setCamposComErro(prev => {
+        const novo = new Set(prev);
+        novo.delete(campo);
+        return novo;
+      });
+    }
   };
 
   // -----------------------------------------------------------
@@ -1039,28 +1092,16 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     setObservacoesEmprestimo('');
     setValorMicroseguro('');
     setResultado(null);
+    setCamposComErro(new Set()); // ⭐ Limpar erros de validação
   };
 
   // -----------------------------------------------------------
   // SUBMIT - CONFIRMAR VENDA
   // -----------------------------------------------------------
   const handleSubmit = async () => {
-    // ETAPA 1 - Validação local
-    if (!isValido()) {
+    // ETAPA 1 - Validação local com feedback visual
+    if (!validarCamposComFeedback()) {
       Alert.alert(t.dadosIncompletos, t.dadosIncompletosMsg);
-      return;
-    }
-
-    if (frequencia === 'SEMANAL' && !diaSemanaPagamento) {
-      Alert.alert(t.campoObrigatorio, t.selecioneDiaSemana);
-      return;
-    }
-    if (frequencia === 'MENSAL' && !diaMesPagamento) {
-      Alert.alert(t.campoObrigatorio, t.informeDiaMes);
-      return;
-    }
-    if (frequencia === 'FLEXIVEL' && diasMesFlexivel.length === 0) {
-      Alert.alert(t.campoObrigatorio, t.selecionePeloMenosDia);
       return;
     }
 
@@ -1581,9 +1622,9 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                     Nome completo <Text style={styles.required}>*</Text>
                   </Text>
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, camposComErro.has('nome') && styles.inputError]}
                     value={nome}
-                    onChangeText={setNome}
+                    onChangeText={(text) => { setNome(text); limparErroCampo('nome'); }}
                     placeholder={t.phNomeCliente}
                     placeholderTextColor="#9CA3AF"
                     autoCapitalize="words"
@@ -1592,11 +1633,13 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
                 {/* Documento */}
                 <View style={styles.fieldGroup}>
-                  <Text style={styles.fieldLabel}>{t.documento}</Text>
+                  <Text style={[styles.fieldLabel, camposComErro.has('documento') && styles.fieldLabelError]}>
+                    {t.documento} <Text style={styles.required}>*</Text>
+                  </Text>
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, camposComErro.has('documento') && styles.inputError]}
                     value={documento}
-                    onChangeText={setDocumento}
+                    onChangeText={(text) => { setDocumento(text); limparErroCampo('documento'); }}
                     placeholder={t.phDoc}
                     placeholderTextColor="#9CA3AF"
                   />
@@ -1604,7 +1647,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
                 {/* Celular (DDI + número) */}
                 <View style={styles.fieldGroup}>
-                  <Text style={styles.fieldLabel}>
+                  <Text style={[styles.fieldLabel, camposComErro.has('telefoneCelular') && styles.fieldLabelError]}>
                     Celular <Text style={styles.required}>*</Text>
                   </Text>
                   <View style={styles.rowFields}>
@@ -1617,9 +1660,9 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                       <Text style={styles.ddiChevron}>▼</Text>
                     </TouchableOpacity>
                     <TextInput
-                      style={[styles.input, { flex: 1 }]}
+                      style={[styles.input, { flex: 1 }, camposComErro.has('telefoneCelular') && styles.inputError]}
                       value={telefoneCelular}
-                      onChangeText={(text) => setTelefoneCelular(text.replace(/[^\d]/g, ''))}
+                      onChangeText={(text) => { setTelefoneCelular(text.replace(/[^\d]/g, '')); limparErroCampo('telefoneCelular'); }}
                       placeholder={t.phTelefone}
                       placeholderTextColor="#9CA3AF"
                       keyboardType="phone-pad"
@@ -1666,11 +1709,13 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
                 {/* Endereço Residencial */}
                 <View style={styles.fieldGroup}>
-                  <Text style={styles.fieldLabel}>{t.endResidencial}</Text>
+                  <Text style={[styles.fieldLabel, camposComErro.has('endereco') && styles.fieldLabelError]}>
+                    {t.endResidencial} <Text style={styles.required}>*</Text>
+                  </Text>
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, camposComErro.has('endereco') && styles.inputError]}
                     value={endereco}
-                    onChangeText={setEndereco}
+                    onChangeText={(text) => { setEndereco(text); limparErroCampo('endereco'); }}
                     placeholder={t.phEndRes}
                     placeholderTextColor="#9CA3AF"
                   />
@@ -1678,11 +1723,13 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
                 {/* Endereço Comercial */}
                 <View style={styles.fieldGroup}>
-                  <Text style={styles.fieldLabel}>{t.endComercial}</Text>
+                  <Text style={[styles.fieldLabel, camposComErro.has('enderecoComercial') && styles.fieldLabelError]}>
+                    {t.endComercial} <Text style={styles.required}>*</Text>
+                  </Text>
                   <TextInput
-                    style={styles.input}
+                    style={[styles.input, camposComErro.has('enderecoComercial') && styles.inputError]}
                     value={enderecoComercial}
-                    onChangeText={setEnderecoComercial}
+                    onChangeText={(text) => { setEnderecoComercial(text); limparErroCampo('enderecoComercial'); }}
                     placeholder={t.phEndCom}
                     placeholderTextColor="#9CA3AF"
                   />
@@ -1772,28 +1819,29 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                 {/* Valor + Parcelas na mesma linha */}
                 <View style={styles.rowFields}>
                   <View style={[styles.fieldGroup, { flex: 1 }]}>
-                    <Text style={styles.fieldLabel}>
+                    <Text style={[styles.fieldLabel, camposComErro.has('valorEmprestimo') && styles.fieldLabelError]}>
                       Valor <Text style={styles.required}>*</Text>
                     </Text>
                     <TextInput
-                      style={styles.input}
+                      style={[styles.input, camposComErro.has('valorEmprestimo') && styles.inputError]}
                       value={valorEmprestimo}
-                      onChangeText={handleValorEmprestimoChange}
+                      onChangeText={(text) => { handleValorEmprestimoChange(text); limparErroCampo('valorEmprestimo'); }}
                       placeholder="500"
                       placeholderTextColor="#9CA3AF"
                       keyboardType="decimal-pad"
                     />
                   </View>
                   <View style={[styles.fieldGroup, { flex: 1 }]}>
-                    <Text style={styles.fieldLabel}>
+                    <Text style={[styles.fieldLabel, camposComErro.has('numeroParcelas') && styles.fieldLabelError]}>
                       Parcelas <Text style={styles.required}>*</Text>
                     </Text>
                     <TextInput
-                      style={styles.input}
+                      style={[styles.input, camposComErro.has('numeroParcelas') && styles.inputError]}
                       value={numeroParcelas}
                       onChangeText={(text) => {
                         const num = text.replace(/[^\d]/g, '');
                         setNumeroParcelas(num);
+                        limparErroCampo('numeroParcelas');
                       }}
                       placeholder="20"
                       placeholderTextColor="#9CA3AF"
@@ -1805,12 +1853,12 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
                 {/* Taxa de juros */}
                 <View style={styles.fieldGroup}>
-                  <Text style={styles.fieldLabel}>
+                  <Text style={[styles.fieldLabel, camposComErro.has('taxaJuros') && styles.fieldLabelError]}>
                     Taxa de juros (%) <Text style={styles.required}>*</Text>
                   </Text>
                   
                   {!taxaJurosPersonalizada ? (
-                    <View style={styles.taxaButtonsRow}>
+                    <View style={[styles.taxaButtonsRow, camposComErro.has('taxaJuros') && { borderWidth: 2, borderColor: '#EF4444', borderRadius: 8, padding: 4 }]}>
                       {taxasPermitidas.map((taxa) => (
                         <TouchableOpacity
                           key={taxa}
@@ -1818,7 +1866,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                             styles.taxaButton,
                             taxaJuros === String(taxa) && styles.taxaButtonActive,
                           ]}
-                          onPress={() => { setTaxaJuros(String(taxa)); setTaxaJurosPersonalizada(false); }}
+                          onPress={() => { setTaxaJuros(String(taxa)); setTaxaJurosPersonalizada(false); limparErroCampo('taxaJuros'); }}
                           activeOpacity={0.7}
                         >
                           <Text style={[
@@ -1866,10 +1914,10 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
                 {/* Frequência de pagamento */}
                 <View style={styles.fieldGroup}>
-                  <Text style={styles.fieldLabel}>
+                  <Text style={[styles.fieldLabel, camposComErro.has('frequencia') && styles.fieldLabelError]}>
                     Frequência de pagamento <Text style={styles.required}>*</Text>
                   </Text>
-                  <View style={styles.frequenciaGrid}>
+                  <View style={[styles.frequenciaGrid, camposComErro.has('frequencia') && { borderWidth: 2, borderColor: '#EF4444', borderRadius: 8, padding: 4 }]}>
                     {[
                       { value: 'DIARIO', label: 'Diário' },
                       { value: 'SEMANAL', label: 'Semanal' },
@@ -1885,6 +1933,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                         ]}
                         onPress={() => {
                           setFrequencia(freq.value);
+                          limparErroCampo('frequencia');
                           if (freq.value === 'DIARIO') {
                             setDataPrimeiroVencimento(amanha());
                           } else if (freq.value === 'MENSAL' && diaMesPagamento) {
@@ -1913,12 +1962,12 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                 {/* Dia da semana (SEMANAL) */}
                 {frequencia === 'SEMANAL' && (
                   <View style={styles.fieldGroup}>
-                    <Text style={styles.fieldLabel}>
+                    <Text style={[styles.fieldLabel, camposComErro.has('diaSemanaPagamento') && styles.fieldLabelError]}>
                       Dia da semana <Text style={styles.required}>*</Text>
                     </Text>
                     <TouchableOpacity
-                      style={styles.selectField}
-                      onPress={() => setShowDiaSemanaModal(true)}
+                      style={[styles.selectField, camposComErro.has('diaSemanaPagamento') && styles.inputError]}
+                      onPress={() => { setShowDiaSemanaModal(true); limparErroCampo('diaSemanaPagamento'); }}
                       activeOpacity={0.7}
                     >
                       <Text style={styles.selectFieldText}>{getDiaSemanaLabel()}</Text>
@@ -1930,17 +1979,18 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                 {/* Dia do mês (MENSAL) */}
                 {frequencia === 'MENSAL' && (
                   <View style={styles.fieldGroup}>
-                    <Text style={styles.fieldLabel}>
+                    <Text style={[styles.fieldLabel, camposComErro.has('diaMesPagamento') && styles.fieldLabelError]}>
                       Dia do mês <Text style={styles.required}>*</Text>
                     </Text>
                     <TextInput
-                      style={styles.input}
+                      style={[styles.input, camposComErro.has('diaMesPagamento') && styles.inputError]}
                       value={diaMesPagamento}
                       onChangeText={(text) => {
                         const num = text.replace(/[^\d]/g, '');
                         const val = Math.min(31, Math.max(0, parseInt(num) || 0));
                         setDiaMesPagamento(num ? String(val) : '');
                         if (val > 0) setDataPrimeiroVencimento(calcularDataMensal(val));
+                        limparErroCampo('diaMesPagamento');
                       }}
                       placeholder="1-31"
                       placeholderTextColor="#9CA3AF"
@@ -1953,10 +2003,10 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                 {/* Dias do mês (FLEXIVEL) */}
                 {frequencia === 'FLEXIVEL' && (
                   <View style={styles.fieldGroup}>
-                    <Text style={styles.fieldLabel}>
+                    <Text style={[styles.fieldLabel, camposComErro.has('diasMesFlexivel') && styles.fieldLabelError]}>
                       Dias de cobrança <Text style={styles.required}>*</Text>
                     </Text>
-                    <View style={styles.diasGrid}>
+                    <View style={[styles.diasGrid, camposComErro.has('diasMesFlexivel') && { borderWidth: 2, borderColor: '#EF4444', borderRadius: 8, padding: 4 }]}>
                       {Array.from({ length: 31 }, (_, i) => i + 1).map((dia) => (
                         <TouchableOpacity
                           key={dia}
@@ -2002,12 +2052,12 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
                 {/* Data 1º vencimento */}
                 <View style={styles.fieldGroup}>
-                  <Text style={styles.fieldLabel}>
+                  <Text style={[styles.fieldLabel, camposComErro.has('dataPrimeiroVencimento') && styles.fieldLabelError]}>
                     Data 1º vencimento <Text style={styles.required}>*</Text>
                   </Text>
                   <TouchableOpacity
-                    style={styles.selectField}
-                    onPress={() => setShowDatePicker(true)}
+                    style={[styles.selectField, camposComErro.has('dataPrimeiroVencimento') && styles.inputError]}
+                    onPress={() => { setShowDatePicker(true); limparErroCampo('dataPrimeiroVencimento'); }}
                     activeOpacity={0.7}
                   >
                     <Text style={styles.selectFieldText}>
@@ -2677,6 +2727,15 @@ const styles = StyleSheet.create({
   textArea: {
     minHeight: 64,
     textAlignVertical: 'top',
+  },
+  // ⭐ Estilo de campo com erro
+  inputError: {
+    borderColor: '#EF4444',
+    borderWidth: 2,
+    backgroundColor: '#FEF2F2',
+  },
+  fieldLabelError: {
+    color: '#EF4444',
   },
 
   // Row fields (DDI + telefone)
