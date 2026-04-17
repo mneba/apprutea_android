@@ -142,6 +142,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
         .from('categorias_financeiras')
         .select('id, codigo, nome_pt, tipo_movimento')
         .eq('ativo', true)
+        .eq('aplicavel_rota', true) // ⭐ Filtrar apenas categorias aplicáveis à rota
         .order('ordem_exibicao', { ascending: true });
 
       if (error) throw error;
@@ -149,9 +150,9 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
       const cats = data || [];
       setTodasCategorias(cats);
 
-      // Auto-selecionar primeira categoria compatível com RECEBER
+      // ⭐ Auto-selecionar primeira categoria compatível com o tipo ATUAL (PAGAR)
       const primeira = cats.find(
-        (c) => c.tipo_movimento === 'RECEBER' || c.tipo_movimento === 'AMBOS'
+        (c) => c.tipo_movimento === tipo || c.tipo_movimento === 'AMBOS'
       );
       if (primeira) setCategoria(primeira.codigo);
     } catch (err) {
