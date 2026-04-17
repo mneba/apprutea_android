@@ -606,6 +606,14 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   // ⭐ Recarregar lista ao voltar para a tela (após criar novo empréstimo, renovar, etc)
   const isFirstMount = useRef(true);
+  const lastFocusTime = useRef(0); // ⭐ Debounce para evitar chamadas repetidas
+  // ⭐ Refs para evitar que mudanças nas funções causem re-execução do useFocusEffect
+  const loadLiqRef = useRef(loadLiq);
+  const loadTodosClientesRef = useRef(loadTodosClientes);
+  
+  // Manter refs atualizadas
+  useEffect(() => { loadLiqRef.current = loadLiq; }, [loadLiq]);
+  useEffect(() => { loadTodosClientesRef.current = loadTodosClientes; }, [loadTodosClientes]);
   
   useFocusEffect(
     useCallback(() => {
@@ -615,15 +623,23 @@ export default function ClientesScreen({ navigation, route }: any) {
         return;
       }
       
+      // ⭐ Debounce: evitar múltiplas chamadas em menos de 1 segundo
+      const now = Date.now();
+      if (now - lastFocusTime.current < 1000) {
+        console.log('🔄 useFocusEffect: Ignorando (debounce)');
+        return;
+      }
+      lastFocusTime.current = now;
+      
       // Ao voltar para a tela, recarrega a lista ativa
       console.log('🔄 useFocusEffect: Tela recebeu foco, recarregando lista...');
       if (tab === 'liquidacao') {
-        loadLiq();
+        loadLiqRef.current();
       } else {
         setTodosList([]);
-        loadTodosClientes(true);
+        loadTodosClientesRef.current(true);
       }
-    }, [tab, loadLiq, loadTodosClientes])
+    }, [tab, setTodosList]) // ⭐ Removidas as funções das dependências
   );
 
   const onRefresh = useCallback(() => {

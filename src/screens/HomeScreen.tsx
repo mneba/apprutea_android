@@ -21,6 +21,7 @@ import { supabase } from '../services/supabase';
 interface LiquidacaoDiaria {
   id: string; vendedor_id: string; rota_id: string; empresa_id: string;
   data_abertura: string; data_fechamento: string | null;
+  data_liquidacao?: string; // ⭐ Data pura (YYYY-MM-DD) da liquidação
   status: 'ABERTO' | 'FECHADO' | 'APROVADO' | 'REABERTO';
   caixa_inicial: number; caixa_final: number; carteira_inicial: number; carteira_final: number;
   valor_esperado_dia: number; valor_recebido_dia: number;
@@ -329,8 +330,29 @@ export default function HomeScreen({ navigation }: any) {
   const formatarMoeda = (v: number | null | undefined) => 
     `$ ${(v ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   
-  const formatarData = (d: string | Date) => 
-    (typeof d === 'string' ? new Date(d) : d).toLocaleDateString('pt-BR');
+  const formatarData = (d: string | Date) => {
+    if (!d) return '';
+    // Se é string no formato YYYY-MM-DD, formata diretamente (evita problemas de timezone)
+    if (typeof d === 'string' && d.length >= 10 && d.includes('-')) {
+      const [ano, mes, dia] = d.substring(0, 10).split('-');
+      return `${dia}/${mes}/${ano}`;
+    }
+    return (typeof d === 'string' ? new Date(d) : d).toLocaleDateString('pt-BR');
+  };
+  
+  // ⭐ Obtém a data da liquidação (prefere data_liquidacao, fallback para data_abertura)
+  const obterDataLiquidacao = (liq: LiquidacaoDiaria | null): string => {
+    if (!liq) return formatarData(new Date());
+    // Prefere data_liquidacao (DATE puro), fallback para data_abertura
+    if (liq.data_liquidacao) {
+      return formatarData(liq.data_liquidacao);
+    }
+    // Fallback: extrair apenas a data de data_abertura (YYYY-MM-DD)
+    if (liq.data_abertura) {
+      return formatarData(liq.data_abertura.substring(0, 10));
+    }
+    return formatarData(new Date());
+  };
   
   const calcularTotalClientes = () => liquidacao ? 
     (liquidacao.clientes_iniciais||0)+(liquidacao.clientes_novos||0)+(liquidacao.clientes_renovados||0)+
@@ -566,7 +588,7 @@ export default function HomeScreen({ navigation }: any) {
             </View>
             <View style={styles.vendedorDados}>
               <Text style={styles.vendedorNome}>{vendedor?.nome}</Text>
-              <Text style={styles.vendedorData}>📅 {liquidacao ? formatarData(liquidacao.data_abertura) : formatarData(new Date())}</Text>
+              <Text style={styles.vendedorData}>📅 {obterDataLiquidacao(liquidacao)}</Text>
             </View>
             <View style={[styles.statusBadge, podeEditar() ? styles.statusAberto : styles.statusFechado]}>
               <Text style={[styles.statusText, podeEditar() ? styles.statusTextoAberto : styles.statusTextoFechado]}>
