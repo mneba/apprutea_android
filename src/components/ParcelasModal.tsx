@@ -1,12 +1,12 @@
 import React from 'react';
 import {
-    ActivityIndicator,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -51,6 +51,28 @@ const fmtData = (d: string | null | undefined) => {
   return dt.toLocaleDateString('pt-BR');
 };
 
+// Calcula dias de atraso entre data de pagamento e data de vencimento
+// Retorna número positivo se pagou atrasado, 0 se pagou no dia, negativo se pagou adiantado
+const calcularDiasAtraso = (dataVencimento: string | null | undefined, dataPagamento: string | null | undefined): number => {
+  if (!dataVencimento || !dataPagamento) return 0;
+  
+  // Extrair apenas a parte da data (YYYY-MM-DD)
+  const vencStr = dataVencimento.substring(0, 10);
+  const pagStr = dataPagamento.substring(0, 10);
+  
+  // Criar datas sem timezone issues
+  const [vY, vM, vD] = vencStr.split('-').map(Number);
+  const [pY, pM, pD] = pagStr.split('-').map(Number);
+  
+  const vencDate = new Date(vY, vM - 1, vD);
+  const pagDate = new Date(pY, pM - 1, pD);
+  
+  const diffMs = pagDate.getTime() - vencDate.getTime();
+  const diffDias = Math.round(diffMs / (1000 * 60 * 60 * 24));
+  
+  return diffDias;
+};
+
 // ─── Props ──────────────────────────────────────────────────────────────────
 
 interface ParcelasModalProps {
@@ -84,6 +106,11 @@ interface ParcelasModalProps {
     nenhumaParcelaEncontrada: string;
     quitacaoAntecipada: string;
     quitadoPorCredito: string;
+    pagoComAtraso: string;
+    diasAtraso: string;
+    diaAtraso: string;
+    pagoNoDia: string;
+    pagoAdiantado: string;
   };
 }
 
@@ -110,10 +137,41 @@ export default function ParcelasModal({
     const isAutoQuitacao = (p.observacoes || '').includes('[AUTO-QUITAÇÃO]');
     const isQuitacaoOrigem = isPago && (p.credito_gerado || 0) > 0 && clienteModal?.emprestimo_status === 'QUITADO';
 
-    const iconColor = isPago ? '#10B981' : isParcial ? '#F59E0B' : isCancelado ? '#9CA3AF' : isVencida ? '#EF4444' : '#6B7280';
-    const iconBg = isPago ? '#D1FAE5' : isParcial ? '#FEF3C7' : isCancelado ? '#F3F4F6' : isVencida ? '#FEE2E2' : '#F3F4F6';
-    const statusColor = isPago ? '#10B981' : isParcial ? '#D97706' : isCancelado ? '#9CA3AF' : isVencida ? '#EF4444' : '#F97316';
-    const statusBg = isPago ? '#D1FAE5' : isParcial ? '#FEF3C7' : isCancelado ? '#F3F4F6' : isVencida ? '#FEE2E2' : '#FFEDD5';
+    // ⭐ Calcular dias de atraso para parcelas pagas
+    const diasAtraso = isPago ? calcularDiasAtraso(p.data_vencimento, p.data_pagamento) : 0;
+    const pagoComAtraso = isPago && diasAtraso > 0;
+    const pagoNoDia = isPago && diasAtraso === 0;
+    const pagoAdiantado = isPago && diasAtraso < 0;
+
+    // ⭐ Cores diferenciadas: verde normal para no dia, amarelo/laranja para atraso
+    const iconColor = isPago 
+      ? (pagoComAtraso ? '#F59E0B' : '#10B981')  // Amarelo se atrasou, verde se no dia
+      : isParcial ? '#F59E0B' 
+      : isCancelado ? '#9CA3AF' 
+      : isVencida ? '#EF4444' 
+      : '#6B7280';
+    
+    const iconBg = isPago 
+      ? (pagoComAtraso ? '#FEF3C7' : '#D1FAE5')  // Fundo amarelo se atrasou
+      : isParcial ? '#FEF3C7' 
+      : isCancelado ? '#F3F4F6' 
+      : isVencida ? '#FEE2E2' 
+      : '#F3F4F6';
+    
+    const statusColor = isPago 
+      ? (pagoComAtraso ? '#D97706' : '#10B981')  // Laranja escuro se atrasou
+      : isParcial ? '#D97706' 
+      : isCancelado ? '#9CA3AF' 
+      : isVencida ? '#EF4444' 
+      : '#F97316';
+    
+    const statusBg = isPago 
+      ? (pagoComAtraso ? '#FEF3C7' : '#D1FAE5')
+      : isParcial ? '#FEF3C7' 
+      : isCancelado ? '#F3F4F6' 
+      : isVencida ? '#FEE2E2' 
+      : '#FFEDD5';
+    
     const statusText = isPago ? t.pagoStatus : isParcial ? t.parcialStatus : isCancelado ? 'CANCELADO' : isVencida ? t.vencidaStatus : t.pendente;
 
     const valorPago = p.valor_pago || 0;
@@ -141,7 +199,29 @@ export default function ParcelasModal({
             <View style={{ marginTop: 3 }}>
               <Text style={S.mParcelaVenc}>📅 {t.venc} {fmtData(p.data_vencimento)}</Text>
               {p.data_pagamento && (
-                <Text style={[S.mParcelaDataPg, { marginTop: 1 }]}>💰 {t.em} {fmtData(p.data_pagamento)}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginTop: 1, gap: 6 }}>
+                  <Text style={[S.mParcelaDataPg, pagoComAtraso && { color: '#D97706' }]}>
+                    💰 {t.em} {fmtData(p.data_pagamento)}
+                  </Text>
+                  {/* ⭐ Badge de atraso/pontualidade */}
+                  {pagoComAtraso && (
+                    <View style={S.badgeAtraso}>
+                      <Text style={S.badgeAtrasoTx}>
+                        ⚠️ {diasAtraso} {diasAtraso === 1 ? t.diaAtraso : t.diasAtraso}
+                      </Text>
+                    </View>
+                  )}
+                  {pagoNoDia && (
+                    <View style={S.badgeNoDia}>
+                      <Text style={S.badgeNoDiaTx}>✓ {t.pagoNoDia}</Text>
+                    </View>
+                  )}
+                  {pagoAdiantado && (
+                    <View style={S.badgeAdiantado}>
+                      <Text style={S.badgeAdiantadoTx}>⭐ {t.pagoAdiantado}</Text>
+                    </View>
+                  )}
+                </View>
               )}
               {p.data_liquidacao && (
                 <Text style={[S.mParcelaDataPg, { marginTop: 1, color: '#6366F1' }]}>📋 {t.liq} {fmtData(p.data_liquidacao)}</Text>
@@ -283,6 +363,13 @@ const S = StyleSheet.create({
   mParcelaStatus: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
   mParcelaStatusTx: { fontSize: 9, fontWeight: '700' },
   mParcelaDataPg: { fontSize: 9, color: '#6B7280', marginTop: 1 },
+  // ⭐ Badges de atraso/pontualidade
+  badgeAtraso: { backgroundColor: '#FEE2E2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#FECACA' },
+  badgeAtrasoTx: { fontSize: 9, fontWeight: '700', color: '#DC2626' },
+  badgeNoDia: { backgroundColor: '#D1FAE5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#A7F3D0' },
+  badgeNoDiaTx: { fontSize: 9, fontWeight: '600', color: '#059669' },
+  badgeAdiantado: { backgroundColor: '#DBEAFE', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#BFDBFE' },
+  badgeAdiantadoTx: { fontSize: 9, fontWeight: '600', color: '#2563EB' },
   mParcelaBtns: { marginLeft: 8, justifyContent: 'center' },
   mBtnPagar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#10B981', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, gap: 6 },
   mBtnPagarDisabled: { backgroundColor: '#E5E7EB', opacity: 0.5 },

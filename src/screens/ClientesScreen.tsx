@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -590,7 +591,28 @@ export default function ClientesScreen({ navigation, route }: any) {
       setTab('liquidacao');
     }
   }, [liqCtx.temLiquidacaoAberta, liqCtx.liquidacaoAtual?.id]);
+
+  // ⭐ Recarregar lista ao voltar para a tela (após criar novo empréstimo, renovar, etc)
+  const isFirstMount = useRef(true);
   
+  useFocusEffect(
+    useCallback(() => {
+      // Na primeira montagem, não recarrega (os outros useEffects já fazem isso)
+      if (isFirstMount.current) {
+        isFirstMount.current = false;
+        return;
+      }
+      
+      // Ao voltar para a tela, recarrega a lista ativa
+      console.log('🔄 useFocusEffect: Tela recebeu foco, recarregando lista...');
+      if (tab === 'liquidacao') {
+        loadLiq();
+      } else {
+        setTodosList([]);
+        loadTodosClientes(true);
+      }
+    }, [tab, loadLiq, loadTodosClientes])
+  );
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);

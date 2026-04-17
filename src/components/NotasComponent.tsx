@@ -59,6 +59,7 @@ const textos = {
     selecioneParcela: 'Selecione a parcela', notaResolvida: 'Nota marcada como resolvida',
     cliente: 'Cliente', observacao: 'Observação de resolução...',
     confirmarResolver: 'Confirmar resolução?',
+    liquidacaoFechada: 'Abra a liquidação para criar notas',
   },
   'es': {
     notas: 'Notas', notasDoDia: 'Notas del Día', novaNota: '+ Nueva Nota',
@@ -73,6 +74,7 @@ const textos = {
     selecioneParcela: 'Seleccione la cuota', notaResolvida: 'Nota marcada como resuelta',
     cliente: 'Cliente', observacao: 'Observación de resolución...',
     confirmarResolver: '¿Confirmar resolución?',
+    liquidacaoFechada: 'Abra la liquidación para crear notas',
   },
 };
 
@@ -116,6 +118,7 @@ interface ModalNotasListaProps {
   autorNome: string;
   autorTipo?: 'VENDEDOR' | 'MONITOR';
   liquidacaoId?: string | null;
+  liquidacaoStatus?: string | null; // ⭐ NOVO: status da liquidação
   dataReferencia?: string; // YYYY-MM-DD
   clienteId?: string | null;
   clienteNome?: string | null;
@@ -129,8 +132,8 @@ interface ModalNotasListaProps {
 
 export function ModalNotasLista({
   visible, onClose, rotaId, empresaId, vendedorId, autorNome,
-  autorTipo = 'VENDEDOR', liquidacaoId, dataReferencia,
-  clienteId, clienteNome, lang = 'pt-BR', coords,
+  autorTipo = 'VENDEDOR', liquidacaoId, liquidacaoStatus,
+  dataReferencia, clienteId, clienteNome, lang = 'pt-BR', coords,
   permitirCriar = true, obsLocalPadrao = 'Geral',
 }: ModalNotasListaProps) {
   const t = textos[lang];
@@ -140,6 +143,11 @@ export function ModalNotasLista({
   // Filtros
   const [filtroLocal, setFiltroLocal] = useState<string | null>(null);
   const [filtroAutor, setFiltroAutor] = useState<string | null>(null);
+
+  // ⭐ NOVO: Verificar se pode criar nota (liquidação aberta ou reaberta)
+  const podeCriarNota = permitirCriar && 
+    liquidacaoId && 
+    (liquidacaoStatus === 'ABERTO' || liquidacaoStatus === 'REABERTO');
 
   const carregarNotas = useCallback(async () => {
     if (!rotaId) return;
@@ -264,7 +272,6 @@ export function ModalNotasLista({
   }, [novoTexto, empresaId, rotaId, vendedorId, autorNome, autorTipo, liquidacaoId, clienteId, dataReferencia, coords, obsLocalPadrao, carregarNotas, t]);
 
   // Formatar data/hora para exibição
-  // Formatar data/hora para exibição
   const fmtDataHora = (dt: string) => {
     const d = new Date(dt);
     return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -276,10 +283,20 @@ export function ModalNotasLista({
     return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
   };
 
+  // ⭐ NOVO: Verificar se pode editar nota (só se liquidação aberta e mesma liquidação)
+  const podeEditarNota = (nota: Nota) => {
+    if (autorTipo === 'MONITOR') return true;
+    // Vendedor só edita se: é autor + liquidação aberta/reaberta + mesma liquidação
+    return nota.autor_id === vendedorId && 
+           liquidacaoId && 
+           nota.liquidacao_id === liquidacaoId &&
+           (liquidacaoStatus === 'ABERTO' || liquidacaoStatus === 'REABERTO');
+  };
+
   const renderNota = ({ item: n }: { item: Nota }) => {
     const isExpanded = expanded === n.id;
     const isEditando = editandoId === n.id;
-    const podeEditar = autorTipo === 'VENDEDOR' ? (n.autor_id === vendedorId && liquidacaoId && n.liquidacao_id === liquidacaoId) : true;
+    const podeEditar = podeEditarNota(n);
 
     return (
       <TouchableOpacity
@@ -430,37 +447,45 @@ export function ModalNotasLista({
           </View>
           )}
 
-          {/* Campo inline nova nota */}
+          {/* ⭐ Campo inline nova nota - BLOQUEADO se liquidação fechada */}
           {permitirCriar && (
-            criando ? (
-              <View style={S.inlineNovaBox}>
-                <TextInput
-                  ref={inputNovoRef}
-                  style={S.inlineNovaInput}
-                  placeholder={t.escreverNota}
-                  placeholderTextColor="#9CA3AF"
-                  value={novoTexto}
-                  onChangeText={setNovoTexto}
-                  multiline
-                  autoFocus
-                />
-                <View style={S.inlineNovaBtns}>
-                  <TouchableOpacity style={S.inlineNovaCancel} onPress={() => { setCriando(false); setNovoTexto(''); }}>
-                    <Text style={S.inlineNovaCancelTx}>{lang === 'es' ? 'Cancelar' : 'Cancelar'}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={[S.inlineNovaSalvar, (salvandoNovo || !novoTexto.trim()) && { opacity: 0.5 }]} 
-                    onPress={handleSalvarNova} 
-                    disabled={salvandoNovo || !novoTexto.trim()}
-                  >
-                    <Text style={S.inlineNovaSalvarTx}>{salvandoNovo ? '...' : (lang === 'es' ? 'Guardar' : 'Salvar')}</Text>
-                  </TouchableOpacity>
+            podeCriarNota ? (
+              // Pode criar - mostra campo ou botão normal
+              criando ? (
+                <View style={S.inlineNovaBox}>
+                  <TextInput
+                    ref={inputNovoRef}
+                    style={S.inlineNovaInput}
+                    placeholder={t.escreverNota}
+                    placeholderTextColor="#9CA3AF"
+                    value={novoTexto}
+                    onChangeText={setNovoTexto}
+                    multiline
+                    autoFocus
+                  />
+                  <View style={S.inlineNovaBtns}>
+                    <TouchableOpacity style={S.inlineNovaCancel} onPress={() => { setCriando(false); setNovoTexto(''); }}>
+                      <Text style={S.inlineNovaCancelTx}>{lang === 'es' ? 'Cancelar' : 'Cancelar'}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={[S.inlineNovaSalvar, (salvandoNovo || !novoTexto.trim()) && { opacity: 0.5 }]} 
+                      onPress={handleSalvarNova} 
+                      disabled={salvandoNovo || !novoTexto.trim()}
+                    >
+                      <Text style={S.inlineNovaSalvarTx}>{salvandoNovo ? '...' : (lang === 'es' ? 'Guardar' : 'Salvar')}</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              </View>
+              ) : (
+                <TouchableOpacity style={S.inlineNovaBtn} onPress={() => { setCriando(true); setTimeout(() => inputNovoRef.current?.focus(), 200); }}>
+                  <Text style={S.inlineNovaBtnTx}>{t.novaNota}</Text>
+                </TouchableOpacity>
+              )
             ) : (
-              <TouchableOpacity style={S.inlineNovaBtn} onPress={() => { setCriando(true); setTimeout(() => inputNovoRef.current?.focus(), 200); }}>
-                <Text style={S.inlineNovaBtnTx}>{t.novaNota}</Text>
-              </TouchableOpacity>
+              // ⭐ BLOQUEADO - mostra aviso
+              <View style={S.inlineNovaBloqueado}>
+                <Text style={S.inlineNovaBloqueadoTx}>🔒 {t.liquidacaoFechada}</Text>
+              </View>
             )
           )}
 
@@ -499,6 +524,7 @@ interface ModalCriarNotaProps {
   autorNome: string;
   autorTipo: 'VENDEDOR' | 'MONITOR';
   liquidacaoId?: string | null;
+  liquidacaoStatus?: string | null; // ⭐ NOVO: status da liquidação
   clienteId?: string | null;
   clienteNome?: string | null;
   emprestimo_id?: string | null;
@@ -511,7 +537,7 @@ interface ModalCriarNotaProps {
 
 export function ModalCriarNota({
   visible, onClose, onSalvar, rotaId, empresaId, vendedorId,
-  autorNome, autorTipo = 'VENDEDOR', liquidacaoId,
+  autorNome, autorTipo = 'VENDEDOR', liquidacaoId, liquidacaoStatus,
   clienteId, clienteNome, emprestimo_id,
   dataReferencia, obsLocal = 'Geral', lang = 'pt-BR', coords, emprestimoId,
 }: ModalCriarNotaProps) {
@@ -523,12 +549,20 @@ export function ModalCriarNota({
   // Seletor de parcela removido - parcela é resolvida automaticamente
   const [parcelaAutoId, setParcelaAutoId] = useState<string | null>(null);
 
+  // ⭐ NOVO: Verificar se pode criar nota
+  const podeCriarNota = liquidacaoId && 
+    (liquidacaoStatus === 'ABERTO' || liquidacaoStatus === 'REABERTO');
+
   // Focar no input ao abrir
   useEffect(() => {
     if (visible) {
       setNotaTexto('');
       setParcelaAutoId(null);
-      setTimeout(() => inputRef.current?.focus(), 300);
+      
+      // Só foca se puder criar nota
+      if (podeCriarNota) {
+        setTimeout(() => inputRef.current?.focus(), 300);
+      }
 
       // Resolver parcela automaticamente
       if (emprestimoId) {
@@ -549,10 +583,10 @@ export function ModalCriarNota({
         })();
       }
     }
-  }, [visible, emprestimoId]);
+  }, [visible, emprestimoId, podeCriarNota]);
 
   const handleSalvar = async () => {
-    if (!notaTexto.trim()) return;
+    if (!notaTexto.trim() || !podeCriarNota) return;
     setSalvando(true);
     try {
       const { data, error } = await supabase.rpc('fn_criar_nota', {
@@ -603,45 +637,58 @@ export function ModalCriarNota({
             </TouchableOpacity>
           </View>
 
-          {/* Info contexto */}
-          {clienteNome && (
-            <View style={S.criarContexto}>
-              <Text style={S.criarContextoText}>👤 {clienteNome}</Text>
-              <View style={[S.notaLocalBadge, { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }]}>
-                <Text style={[S.notaLocalText, { color: '#2563EB' }]}>{obsLocal}</Text>
-              </View>
+          {/* ⭐ Se liquidação fechada, mostra aviso */}
+          {!podeCriarNota ? (
+            <View style={S.bloqueadoContainer}>
+              <Text style={S.bloqueadoIcon}>🔒</Text>
+              <Text style={S.bloqueadoTexto}>{t.liquidacaoFechada}</Text>
+              <TouchableOpacity style={S.btnFechar} onPress={onClose}>
+                <Text style={S.btnFecharText}>{t.fechar}</Text>
+              </TouchableOpacity>
             </View>
-          )}
-
-          {/* Input nota */}
-          <TextInput
-            ref={inputRef}
-            style={S.criarInput}
-            placeholder={t.escreverNota}
-            placeholderTextColor="#9CA3AF"
-            multiline
-            value={notaTexto}
-            onChangeText={setNotaTexto}
-            textAlignVertical="top"
-          />
-
-          {/* Botões */}
-          <View style={S.criarBotoes}>
-            <TouchableOpacity style={S.btnCancelar} onPress={onClose}>
-              <Text style={S.btnCancelarText}>{t.cancelar}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[S.btnSalvar, (!notaTexto.trim() || salvando) && S.btnDesabilitado]}
-              onPress={handleSalvar}
-              disabled={!notaTexto.trim() || salvando}
-            >
-              {salvando ? (
-                <ActivityIndicator size="small" color="#FFF" />
-              ) : (
-                <Text style={S.btnSalvarText}>{t.salvar}</Text>
+          ) : (
+            <>
+              {/* Info contexto */}
+              {clienteNome && (
+                <View style={S.criarContexto}>
+                  <Text style={S.criarContextoText}>👤 {clienteNome}</Text>
+                  <View style={[S.notaLocalBadge, { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }]}>
+                    <Text style={[S.notaLocalText, { color: '#2563EB' }]}>{obsLocal}</Text>
+                  </View>
+                </View>
               )}
-            </TouchableOpacity>
-          </View>
+
+              {/* Input nota */}
+              <TextInput
+                ref={inputRef}
+                style={S.criarInput}
+                placeholder={t.escreverNota}
+                placeholderTextColor="#9CA3AF"
+                multiline
+                value={notaTexto}
+                onChangeText={setNotaTexto}
+                textAlignVertical="top"
+              />
+
+              {/* Botões */}
+              <View style={S.criarBotoes}>
+                <TouchableOpacity style={S.btnCancelar} onPress={onClose}>
+                  <Text style={S.btnCancelarText}>{t.cancelar}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[S.btnSalvar, (!notaTexto.trim() || salvando) && S.btnDesabilitado]}
+                  onPress={handleSalvar}
+                  disabled={!notaTexto.trim() || salvando}
+                >
+                  {salvando ? (
+                    <ActivityIndicator size="small" color="#FFF" />
+                  ) : (
+                    <Text style={S.btnSalvarText}>{t.salvar}</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
         </View>
       </View>
     </Modal>
@@ -712,6 +759,10 @@ const S = StyleSheet.create({
   inlineNovaSalvar: { paddingVertical: 6, paddingHorizontal: 14, borderRadius: 8, backgroundColor: '#2563EB' },
   inlineNovaSalvarTx: { fontSize: 13, fontWeight: '600', color: '#FFF' },
 
+  // ⭐ NOVO: Inline bloqueado
+  inlineNovaBloqueado: { marginHorizontal: 16, marginVertical: 8, paddingVertical: 12, backgroundColor: '#FEF3C7', borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#FDE68A' },
+  inlineNovaBloqueadoTx: { fontSize: 13, fontWeight: '500', color: '#92400E' },
+
   // Meta row da nota (data + autor)
   notaDataHora: { fontSize: 11, color: '#9CA3AF' },
   notaAutor: { fontSize: 11, color: '#6B7280', fontWeight: '500' },
@@ -720,7 +771,6 @@ const S = StyleSheet.create({
   notaContextRow: { flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' },
   notaContextBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F0F9FF', borderWidth: 1, borderColor: '#BAE6FD', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
   notaContextTx: { fontSize: 10, fontWeight: '600', color: '#0369A1' },
-  btnNovaNotaText: { fontSize: 14, fontWeight: '600', color: '#FFF' },
 
   // Criar nota
   criarHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
@@ -736,6 +786,13 @@ const S = StyleSheet.create({
   btnSalvar: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: '#2563EB', alignItems: 'center' },
   btnSalvarText: { fontSize: 14, fontWeight: '600', color: '#FFF' },
   btnDesabilitado: { opacity: 0.5 },
+
+  // ⭐ NOVO: Bloqueado container (para ModalCriarNota)
+  bloqueadoContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
+  bloqueadoIcon: { fontSize: 48, marginBottom: 16 },
+  bloqueadoTexto: { fontSize: 16, fontWeight: '500', color: '#92400E', textAlign: 'center', marginBottom: 24 },
+  btnFechar: { paddingVertical: 12, paddingHorizontal: 32, borderRadius: 10, backgroundColor: '#F3F4F6' },
+  btnFecharText: { fontSize: 14, fontWeight: '500', color: '#6B7280' },
 });
 
 // ==================== UTILITÁRIO: Buscar contagem de notas por lista de clientes ====================
