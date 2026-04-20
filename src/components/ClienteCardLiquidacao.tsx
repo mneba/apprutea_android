@@ -1,11 +1,24 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import {
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { Language } from '../contexts/LiquidacaoContext';
+
+// ⭐ Swipeable só no mobile (web não suporta bem)
+let Swipeable: any = null;
+let Animated: any = null;
+if (Platform.OS !== 'web') {
+  try {
+    Swipeable = require('react-native-gesture-handler').Swipeable;
+    Animated = require('react-native').Animated;
+  } catch (e) {
+    console.warn('react-native-gesture-handler não disponível');
+  }
+}
 
 // ─── Types (re-exportados para uso externo) ────────────────────────────────
 
@@ -75,6 +88,7 @@ interface ClienteCardLiquidacaoProps {
   emprestimo: EmprestimoData;
   expanded: boolean;
   pagasSet: Set<string>;
+  naoPagosSet?: Set<string>; // ⭐ Parcelas marcadas como não pago
   liqId: string | null;
   isViz: boolean;
   lang: Language;
@@ -84,12 +98,20 @@ interface ClienteCardLiquidacaoProps {
     saldoEmprestimo: string;
     pagar: string;
     toqueDetalhes: string;
+    naoPago?: string;
   };
   onToggleExpand: () => void;
   onPagar: (parcela: any, clienteInfo: any) => void;
   onAbrirParcelas: (clienteId: string, clienteNome: string, emprestimoId: string) => void;
   onAbrirNotas: (clienteId: string, clienteNome: string) => void;
   onAbrirDetalhes: (cliente: { id: string; nome: string; telefone?: string | null; endereco?: string | null; codigo_cliente?: string | number | null }) => void;
+  onNaoPago?: (parcelaInfo: {
+    parcela_id: string;
+    numero_parcela: number;
+    valor_parcela: number;
+    valor_saldo: number;
+    emprestimo_id: string;
+  }, clienteInfo: { id: string; nome: string }) => void;
 }
 
 // ─── Componente ─────────────────────────────────────────────────────────────
@@ -99,6 +121,7 @@ export default function ClienteCardLiquidacao({
   emprestimo: e,
   expanded: ex,
   pagasSet,
+  naoPagosSet,
   liqId,
   isViz,
   lang,
@@ -109,28 +132,84 @@ export default function ClienteCardLiquidacao({
   onAbrirParcelas,
   onAbrirNotas,
   onAbrirDetalhes,
+  onNaoPago,
 }: ClienteCardLiquidacaoProps) {
+  const swipeableRef = useRef<any>(null);
+  
   const pg = isPagaFn(e.parcela_id, e.status_dia, pagasSet);
+  const np = naoPagosSet?.has(e.parcela_id) || false; // ⭐ Já marcado como não pago?
   const bc = borderOf(e, pg);
   const bg = bgOf(e, pg);
   const pi = e.pagamento_info;
   const valorAPagar = e.valor_pago_parcela > 0 && !pg ? e.saldo_parcela : e.valor_parcela;
 
-  return (
+  // ⭐ Swipe só funciona no mobile
+  const isMobile = Platform.OS !== 'web' && Swipeable && Animated;
+
+  // ⭐ Renderiza ação de swipe à direita (botão Não Pago) - APENAS MOBILE
+  const renderRightActions = (progress: any, dragX: any) => {
+    if (!Animated) return null;
+    
+    const scale = dragX.interpolate({
+      inputRange: [-100, 0],
+      outputRange: [1, 0.5],
+      extrapolate: 'clamp',
+    });
+
+    return (
+      <View style={S.swipeAction}>
+        <TouchableOpacity
+          style={S.naoPagoBtn}
+          onPress={() => {
+            swipeableRef.current?.close();
+            if (onNaoPago) {
+              onNaoPago(
+                {
+                  parcela_id: e.parcela_id,
+                  numero_parcela: e.numero_parcela,
+                  valor_parcela: e.valor_parcela,
+                  valor_saldo: e.saldo_parcela || e.valor_parcela,
+                  emprestimo_id: e.emprestimo_id,
+                },
+                { id: c.cliente_id, nome: c.nome }
+              );
+            }
+          }}
+        >
+          <Animated.View style={{ transform: [{ scale }], alignItems: 'center' }}>
+            <Text style={S.naoPagoIcon}>✗</Text>
+            <Text style={S.naoPagoText}>{t.naoPago || (lang === 'es' ? 'No Pagó' : 'Não Pagou')}</Text>
+          </Animated.View>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  const cardContent = (
     <TouchableOpacity
       key={c.cliente_id}
       activeOpacity={0.7}
       onPress={onToggleExpand}
-      style={[S.card, { borderLeftColor: bc, backgroundColor: bg }]}
+      style={[
+        S.card, 
+        { borderLeftColor: np ? '#6B7280' : bc, backgroundColor: np ? '#F9FAFB' : bg },
+      ]}
     >
+      {/* ⭐ Badge NÃO PAGO */}
+      {np && (
+        <View style={S.naoPagoBadge}>
+          <Text style={S.naoPagoBadgeText}>{lang === 'es' ? '✗ NO PAGÓ' : '✗ NÃO PAGOU'}</Text>
+        </View>
+      )}
+
       {/* === LINHA 1: Avatar + Nome + Badges === */}
       <View style={S.cardRow}>
-        <View style={[S.av, { backgroundColor: pg ? '#10B981' : e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 ? '#EF4444' : '#3B82F6' }]}>
+        <View style={[S.av, { backgroundColor: pg ? '#10B981' : np ? '#6B7280' : e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 ? '#EF4444' : '#3B82F6' }]}>
           <Text style={S.avTx}>{getIni(c.nome)}</Text>
         </View>
         <View style={S.cardInfo}>
           <View style={S.nameRow}>
-            <Text style={S.nome} numberOfLines={1}>{c.nome}</Text>
+            <Text style={[S.nome, np && { color: '#6B7280' }]} numberOfLines={1}>{c.nome}</Text>
             {e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && (
               <View style={S.bWarnNew}><Text style={S.bWarnNewI}>⚠</Text><Text style={S.bWarnNewT}>{e.total_parcelas_vencidas}</Text></View>
             )}
@@ -153,6 +232,8 @@ export default function ClienteCardLiquidacao({
         <View style={S.sCol}>
           {pg && pi ? (
             <Text style={[S.pValBig, { color: '#10B981' }]}>{fmt(pi.valorPago)}</Text>
+          ) : np ? (
+            <Text style={[S.pValBig, { color: '#6B7280', textDecorationLine: 'line-through' }]}>{fmt(valorAPagar)}</Text>
           ) : (
             <Text style={S.pValBig}>{fmt(valorAPagar)}</Text>
           )}
@@ -166,18 +247,18 @@ export default function ClienteCardLiquidacao({
           {/* Pagar (flex) + Parcelas + Notas na mesma linha */}
           <View style={S.expActRow}>
             <TouchableOpacity
-              style={[S.btPagarGrande, (pg || !liqId || isViz) && S.btPagarDisabled]}
+              style={[S.btPagarGrande, (pg || np || !liqId || isViz) && S.btPagarDisabled]}
               onPress={() => {
-                if (liqId && !isViz && !pg) onPagar(
+                if (liqId && !isViz && !pg && !np) onPagar(
                   { parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0, valor_pago: e.valor_pago_parcela || 0, valor_saldo: e.saldo_parcela || e.valor_parcela },
                   { id: c.cliente_id, nome: c.nome, emprestimo_id: e.emprestimo_id, saldo_emprestimo: e.saldo_emprestimo, emprestimo_status: e.status_emprestimo }
                 );
               }}
-              disabled={pg || !liqId || isViz}
+              disabled={pg || np || !liqId || isViz}
             >
               <Text style={S.btPagarIcon}>$</Text>
               <Text style={S.btPagarText}>{t.pagar}</Text>
-              {!pg && <View style={S.btPagarValor}><Text style={S.btPagarValorText}>${Math.round(valorAPagar)}</Text></View>}
+              {!pg && !np && <View style={S.btPagarValor}><Text style={S.btPagarValorText}>${Math.round(valorAPagar)}</Text></View>}
             </TouchableOpacity>
             <TouchableOpacity style={S.btSecVerde} onPress={() => onAbrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}>
               <View style={S.btSecIconBox}><Text style={S.btSecIconTx}>☰</Text></View>
@@ -198,12 +279,29 @@ export default function ClienteCardLiquidacao({
       )}
     </TouchableOpacity>
   );
+
+  // ⭐ Wrap com Swipeable apenas no mobile e se pode marcar como não pago
+  if (isMobile && !pg && !np && liqId && !isViz && onNaoPago) {
+    return (
+      <Swipeable
+        ref={swipeableRef}
+        renderRightActions={renderRightActions}
+        rightThreshold={40}
+        overshootRight={false}
+        friction={2}
+      >
+        {cardContent}
+      </Swipeable>
+    );
+  }
+
+  return cardContent;
 }
 
 // ─── Styles ─────────────────────────────────────────────────────────────────
 
 const S = StyleSheet.create({
-  card: { backgroundColor: '#fff', borderRadius: 12, padding: 12, marginBottom: 8, borderLeftWidth: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 2 },
+  card: { backgroundColor: '#fff', borderRadius: 12, padding: 12, marginBottom: 8, borderLeftWidth: 5, elevation: 2 },
   cardRow: { flexDirection: 'row' },
   av: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
   avTx: { color: '#fff', fontSize: 13, fontWeight: '700' },
@@ -239,4 +337,48 @@ const S = StyleSheet.create({
   btSecBadgeT: { fontSize: 9, fontWeight: '700', color: '#FFF' },
   linkDetalhes: { alignItems: 'center', paddingVertical: 4 },
   linkDetalhesTx: { fontSize: 12, color: '#9CA3AF' },
+  // ⭐ Estilos do swipe e não pago
+  swipeAction: { 
+    justifyContent: 'center', 
+    alignItems: 'flex-end',
+    paddingRight: 4,
+    marginBottom: 8,
+  },
+  naoPagoBtn: {
+    backgroundColor: '#6B7280',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 80,
+    height: '100%',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+  },
+  naoPagoIcon: {
+    fontSize: 24,
+    color: '#FFF',
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  naoPagoText: {
+    fontSize: 11,
+    color: '#FFF',
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  naoPagoBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: '#6B7280',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    zIndex: 10,
+  },
+  naoPagoBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#FFF',
+  },
 });
