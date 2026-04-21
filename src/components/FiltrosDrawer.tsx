@@ -1,14 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import {
-    Animated,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TouchableOpacity,
-    View,
+  Animated,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { Language } from '../contexts/LiquidacaoContext';
 
@@ -113,7 +113,16 @@ export default function FiltrosDrawer({
         activeOpacity={1}
         onPress={onClose}
       />
-      <Animated.View style={[S.drawer, { width: drawerWidth, transform: [{ translateX: drawerAnim }] }]}>
+      <Animated.View 
+        style={[
+          S.drawer, 
+          { 
+            width: drawerWidth, 
+            right: 0,
+            transform: [{ translateX: drawerAnim }] 
+          }
+        ]}
+      >
         <View style={S.drawerHeader}>
           <Text style={S.drawerTitle}>{lang === 'es' ? 'Filtros' : 'Filtros'}</Text>
           <TouchableOpacity onPress={onClose} activeOpacity={0.7}>

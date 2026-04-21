@@ -418,15 +418,16 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   // Drawer de filtros
   const [drawerVisible, setDrawerVisible] = useState(false);
-  const drawerAnim = useRef(new Animated.Value(SCREEN_WIDTH)).current;
+  // Drawer animação: começa fora (DRAWER_WIDTH) e anima para 0 (visível)
+  const drawerAnim = useRef(new Animated.Value(DRAWER_WIDTH)).current;
 
   const openDrawer = useCallback(() => {
     setDrawerVisible(true);
-    Animated.timing(drawerAnim, { toValue: SCREEN_WIDTH - DRAWER_WIDTH, duration: 250, useNativeDriver: true }).start();
+    Animated.timing(drawerAnim, { toValue: 0, duration: 250, useNativeDriver: true }).start();
   }, [drawerAnim]);
 
   const closeDrawer = useCallback(() => {
-    Animated.timing(drawerAnim, { toValue: SCREEN_WIDTH, duration: 200, useNativeDriver: true }).start(() => setDrawerVisible(false));
+    Animated.timing(drawerAnim, { toValue: DRAWER_WIDTH, duration: 200, useNativeDriver: true }).start(() => setDrawerVisible(false));
   }, [drawerAnim]);
 
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -1541,6 +1542,13 @@ return (
               onScrollBeginDrag={() => { setShowFiltroTipo(false); setShowFiltroStatus(false); }}
               ListFooterComponent={<View style={{ height: 90 }} />}
               viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
+              onScrollToIndexFailed={(info) => {
+                setTimeout(() => {
+                  if (flatListLiqRef.current && info.index < filtered.length) {
+                    flatListLiqRef.current.scrollToIndex({ index: info.index, animated: false });
+                  }
+                }, 100);
+              }}
             />
             {ord === 'nome' && filtered.length > 10 && (
               <AlphabetSidebar data={filtered} flatRef={flatListLiqRef} activeLetter={activeLetterLiq} setActive={setActiveLetterLiq} />
@@ -1569,6 +1577,13 @@ return (
               onScrollBeginDrag={() => { setShowFiltroTipo(false); setShowFiltroStatus(false); }}
               ListFooterComponent={<View style={{ height: 90 }} />}
               viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
+              onScrollToIndexFailed={(info) => {
+                setTimeout(() => {
+                  if (flatListTodosRef.current && info.index < todosFilt.length) {
+                    flatListTodosRef.current.scrollToIndex({ index: info.index, animated: false });
+                  }
+                }, 100);
+              }}
             />
             {todosFilt.length > 10 && (
               <AlphabetSidebar data={todosFilt} flatRef={flatListTodosRef} activeLetter={activeLetterTodos} setActive={setActiveLetterTodos} />
