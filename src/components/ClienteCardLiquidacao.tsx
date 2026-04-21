@@ -1,24 +1,14 @@
 import React, { useRef } from 'react';
 import {
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Animated,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Language } from '../contexts/LiquidacaoContext';
-
-// ⭐ Swipeable só no mobile (web não suporta bem)
-let Swipeable: any = null;
-let Animated: any = null;
-if (Platform.OS !== 'web') {
-  try {
-    Swipeable = require('react-native-gesture-handler').Swipeable;
-    Animated = require('react-native').Animated;
-  } catch (e) {
-    console.warn('react-native-gesture-handler não disponível');
-  }
-}
 
 // ─── Types (re-exportados para uso externo) ────────────────────────────────
 
@@ -88,6 +78,7 @@ interface ClienteCardLiquidacaoProps {
   emprestimo: EmprestimoData;
   expanded: boolean;
   pagasSet: Set<string>;
+  naoPagosSet?: Set<string>;
   liqId: string | null;
   isViz: boolean;
   lang: Language;
@@ -133,11 +124,26 @@ export default function ClienteCardLiquidacao({
   onAbrirDetalhes,
   onNaoPago,
 }: ClienteCardLiquidacaoProps) {
+  const swipeableRef = useRef<Swipeable>(null);
+  
   const pg = isPagaFn(e.parcela_id, e.status_dia, pagasSet);
+  const np = naoPagosSet?.has(e.parcela_id) || false;
   const bc = borderOf(e, pg);
   const bg = bgOf(e, pg);
   const pi = e.pagamento_info;
   const valorAPagar = e.valor_pago_parcela > 0 && !pg ? e.saldo_parcela : e.valor_parcela;
+
+  // Swipe só funciona no mobile
+  const isWeb = Platform.OS === 'web';
+  const podeSwipe = !isWeb && !pg && !np && !!liqId && !isViz && !!onNaoPago;
+
+  // Renderiza ação de swipe à direita (botão Não Pago)
+  const renderRightActions = (progress: Animated.AnimatedInterpolation<number>, dragX: Animated.AnimatedInterpolation<number>) => {
+    const scale = dragX.interpolate({
+      inputRange: [-100, 0],
+      outputRange: [1, 0.5],
+      extrapolate: 'clamp',
+    });
 
     return (
       <View style={S.swipeAction}>
@@ -178,6 +184,13 @@ export default function ClienteCardLiquidacao({
         { borderLeftColor: np ? '#6B7280' : bc, backgroundColor: np ? '#F9FAFB' : bg },
       ]}
     >
+      {/* Badge NÃO PAGO */}
+      {np && (
+        <View style={S.naoPagoBadge}>
+          <Text style={S.naoPagoBadgeText}>{lang === 'es' ? '✗ NO PAGÓ' : '✗ NÃO PAGOU'}</Text>
+        </View>
+      )}
+
       {/* === LINHA 1: Avatar + Nome + Badges === */}
       <View style={S.cardRow}>
         <View style={[S.av, { backgroundColor: pg ? '#10B981' : np ? '#6B7280' : e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 ? '#EF4444' : '#3B82F6' }]}>
@@ -255,6 +268,23 @@ export default function ClienteCardLiquidacao({
       )}
     </TouchableOpacity>
   );
+
+  // Wrap com Swipeable apenas no mobile e se pode marcar como não pago
+  if (podeSwipe) {
+    return (
+      <Swipeable
+        ref={swipeableRef}
+        renderRightActions={renderRightActions}
+        rightThreshold={40}
+        overshootRight={false}
+        friction={2}
+      >
+        {cardContent}
+      </Swipeable>
+    );
+  }
+
+  return cardContent;
 }
 
 // ─── Styles ─────────────────────────────────────────────────────────────────
@@ -296,4 +326,48 @@ const S = StyleSheet.create({
   btSecBadgeT: { fontSize: 9, fontWeight: '700', color: '#FFF' },
   linkDetalhes: { alignItems: 'center', paddingVertical: 4 },
   linkDetalhesTx: { fontSize: 12, color: '#9CA3AF' },
+  // Swipe action
+  swipeAction: { 
+    justifyContent: 'center', 
+    alignItems: 'flex-end',
+    paddingRight: 4,
+    marginBottom: 8,
+  },
+  naoPagoBtn: {
+    backgroundColor: '#6B7280',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 80,
+    height: '100%',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+  },
+  naoPagoIcon: {
+    fontSize: 24,
+    color: '#FFF',
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  naoPagoText: {
+    fontSize: 11,
+    color: '#FFF',
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  naoPagoBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: '#6B7280',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    zIndex: 10,
+  },
+  naoPagoBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#FFF',
+  },
 });
