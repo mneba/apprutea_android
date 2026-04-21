@@ -209,7 +209,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
       const { data: pags, error: errPag } = await supabase
         .from('pagamentos_parcelas')
         .select(`
-          id, numero_parcela, valor_pago_total, valor_pago_atual, valor_parcela, valor_credito_usado, valor_credito_gerado,
+          id, numero_parcela, valor_pago_total, valor_parcela, valor_credito_gerado,
           forma_pagamento, created_at, cliente_id, parcela_id, emprestimo_id,
           clientes!pagamentos_parcelas_cliente_id_fkey(nome, consecutivo)
         `)
@@ -222,7 +222,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         // Fallback: busca sem join se foreign key falhar
         const { data: pagsSem, error: errSem } = await supabase
           .from('pagamentos_parcelas')
-          .select('id, numero_parcela, valor_pago_total, valor_pago_atual, valor_parcela, valor_credito_usado, valor_credito_gerado, forma_pagamento, created_at, cliente_id')
+          .select('id, numero_parcela, valor_pago_total, valor_parcela, valor_credito_gerado, forma_pagamento, created_at, cliente_id')
           .eq('liquidacao_id', liquidacaoId)
           .eq('estornado', false)
           .order('created_at', { ascending: true });
@@ -265,7 +265,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
           id, valor_principal, valor_total, valor_parcela, numero_parcelas,
           taxa_juros, frequencia_pagamento, data_primeiro_vencimento,
           tipo_emprestimo, created_at,
-          cliente:cliente_id(nome)
+          cliente:cliente_id(nome, codigo_cliente)
         `)
         .eq('liquidacao_id', liquidacaoId)
         .gte('created_at', liqData?.data_abertura || new Date().toISOString())
@@ -282,7 +282,12 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
     }
   };
 
-  const totalSaidas = registros.filter(r => r.tipo === 'PAGAR' && r.categoria !== 'ESTORNO_PAGAMENTO' && r.categoria !== 'EMPRESTIMO' && !['RETIRO_MICROSEGURO', 'SAIDA_MICROSEGURO'].includes(r.categoria)).reduce((s, r) => s + parseFloat(r.valor), 0);
+  // ⭐ Total de empréstimos/renovações (SAÍDA de caixa - exclui renegociações pois não sai dinheiro)
+  const totalVendasEmprestimos = vendasDia.reduce((s, e) => s + parseFloat(e.valor_principal || 0), 0);
+  
+  const totalSaidasDespesas = registros.filter(r => r.tipo === 'PAGAR' && r.categoria !== 'ESTORNO_PAGAMENTO' && r.categoria !== 'EMPRESTIMO' && !['RETIRO_MICROSEGURO', 'SAIDA_MICROSEGURO'].includes(r.categoria)).reduce((s, r) => s + parseFloat(r.valor), 0);
+  // ⭐ Total de saídas = despesas + empréstimos/renovações (não inclui renegociações)
+  const totalSaidas = totalSaidasDespesas + totalVendasEmprestimos;
   const totalEntradas = registros.filter(r => r.tipo === 'RECEBER').reduce((s, r) => s + parseFloat(r.valor), 0);
   const totalPagamentos = pagamentos.reduce((s, p) => s + parseFloat(p.valor_pago_total || 0), 0);
   const registrosEntradas = registros.filter(r => r.tipo === 'RECEBER' && r.status !== 'CANCELADO');
@@ -426,21 +431,29 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
 
   ${vendasDia.length > 0 ? `
   <hr class="sep2">
-  <div class="secao" style="color:#10B981">${lang === 'es' ? 'VENTAS DEL DÍA' : 'VENDAS DO DIA'}</div>
+  <div class="secao" style="color:#EF4444">${lang === 'es' ? 'PRÉSTAMOS DEL DÍA' : 'EMPRÉSTIMOS DO DIA'}</div>
   <hr class="sep">
   ${vendasDia.map((emp, idx) => {
     const clienteNome = emp.cliente?.nome || '—';
+    const clienteCodigo = emp.cliente?.codigo_cliente || '';
     const primeiroPgto = emp.data_primeiro_vencimento
       ? new Date(emp.data_primeiro_vencimento + 'T00:00:00').toLocaleDateString(lang === 'es' ? 'es-CO' : 'pt-BR')
       : '—';
+    const isRenovacao = emp.tipo_emprestimo === 'RENOVACAO';
+    const isAdicional = emp.tipo_emprestimo === 'ADICIONAL';
+    const tipoLabel = isRenovacao ? (lang === 'es' ? '🔄 RENOVACIÓN' : '🔄 RENOVAÇÃO') 
+      : isAdicional ? (lang === 'es' ? '➕ ADICIONAL' : '➕ ADICIONAL')
+      : (lang === 'es' ? '🆕 NUEVO' : '🆕 NOVO');
+    const tipoCor = isRenovacao ? '#F59E0B' : isAdicional ? '#8B5CF6' : '#10B981';
     return `<div class="mov">
-      <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${clienteNome}</span><span class="mov-val verde">+${fmt(parseFloat(emp.valor_principal))}</span></div>
+      <div style="margin-bottom:2px"><span style="font-size:9px;font-weight:700;color:${tipoCor};background:${tipoCor}20;padding:1px 6px;border-radius:4px">${tipoLabel}</span></div>
+      <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${clienteCodigo ? '#' + clienteCodigo + ' ' : ''}${clienteNome}</span><span class="mov-val verm">-${fmt(parseFloat(emp.valor_principal))}</span></div>
       <div class="mov-sub">${lang === 'es' ? '1° pago' : '1° pgto'}: ${primeiroPgto} · ${emp.numero_parcelas}x ${fmt(parseFloat(emp.valor_parcela))} · ${emp.taxa_juros}%</div>
-      <div class="mov-meta"><span>${fmtHora(emp.created_at)}</span><span>${emp.tipo_emprestimo}</span></div>
+      <div class="mov-meta"><span>${fmtHora(emp.created_at)}</span></div>
     </div>`;
   }).join('')}
   <hr class="sep">
-  <div class="row"><span class="verde b">${lang === 'es' ? 'TOTAL VENTAS' : 'TOTAL VENDAS'}</span><span class="r verde b">${fmt(vendasDia.reduce((s, e) => s + parseFloat(e.valor_principal || 0), 0))}</span></div>
+  <div class="row"><span class="verm b">${lang === 'es' ? 'TOTAL PRÉSTAMOS' : 'TOTAL EMPRÉSTIMOS'}</span><span class="r verm b">-${fmt(vendasDia.reduce((s, e) => s + parseFloat(e.valor_principal || 0), 0))}</span></div>
   ` : ''}
 
   ${renegociacoesDia.length > 0 ? `
@@ -581,24 +594,39 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
               </>
             )}
 
-            {/* ═══ VENDAS DO DIA ═══ */}
+            {/* ═══ VENDAS/EMPRÉSTIMOS DO DIA (SAÍDAS DE CAIXA) ═══ */}
             {vendasDia.length > 0 && (
               <>
-                <Text style={[cupom.centro, { fontSize: 11, fontWeight: '700', marginBottom: 4, color: '#10B981' }]}>
-                  {lang === 'es' ? 'VENTAS DEL DÍA' : 'VENDAS DO DIA'}
+                <Text style={[cupom.centro, { fontSize: 11, fontWeight: '700', marginBottom: 4, color: '#EF4444' }]}>
+                  {lang === 'es' ? 'PRÉSTAMOS DEL DÍA' : 'EMPRÉSTIMOS DO DIA'}
                 </Text>
                 <Text style={cupom.div1}>{DIV}</Text>
                 {vendasDia.map((emp, idx) => {
                   const clienteNome = (emp.cliente as any)?.nome || '—';
+                  const clienteCodigo = (emp.cliente as any)?.codigo_cliente || '';
                   const primeiroPgto = emp.data_primeiro_vencimento
                     ? new Date(emp.data_primeiro_vencimento + 'T00:00:00').toLocaleDateString(lang === 'es' ? 'es-CO' : 'pt-BR')
                     : '—';
+                  // ⭐ Identificar tipo: NOVO, RENOVACAO, ADICIONAL
+                  const isRenovacao = emp.tipo_emprestimo === 'RENOVACAO';
+                  const isAdicional = emp.tipo_emprestimo === 'ADICIONAL';
+                  const tipoLabel = isRenovacao ? (lang === 'es' ? '🔄 RENOVACIÓN' : '🔄 RENOVAÇÃO') 
+                    : isAdicional ? (lang === 'es' ? '➕ ADICIONAL' : '➕ ADICIONAL')
+                    : (lang === 'es' ? '🆕 NUEVO' : '🆕 NOVO');
+                  const tipoCor = isRenovacao ? '#F59E0B' : isAdicional ? '#8B5CF6' : '#10B981';
                   return (
                     <View key={emp.id}>
+                      {/* ⭐ Badge do tipo em destaque */}
+                      <View style={{ flexDirection: 'row', justifyContent: 'flex-start', marginBottom: 2 }}>
+                        <Text style={{ fontSize: 9, fontWeight: '700', color: tipoCor, backgroundColor: tipoCor + '20', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
+                          {tipoLabel}
+                        </Text>
+                      </View>
                       <View style={cupom.itemRow}>
                         <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
-                        <Text style={cupom.itemCat} numberOfLines={1}>{clienteNome}</Text>
-                        <Text style={[cupom.itemVal, { color: '#10B981' }]}>+{fmt(parseFloat(emp.valor_principal))}</Text>
+                        <Text style={cupom.itemCat} numberOfLines={1}>{clienteCodigo ? `#${clienteCodigo} ` : ''}{clienteNome}</Text>
+                        {/* ⭐ Sinal NEGATIVO e cor VERMELHA (é saída de caixa) */}
+                        <Text style={[cupom.itemVal, { color: '#EF4444' }]}>-{fmt(parseFloat(emp.valor_principal))}</Text>
                       </View>
                       <Text style={[cupom.itemSub, { fontSize: 9 }]}>
                         {'   '}{lang === 'es' ? '1° pago' : '1° pgto'}: {primeiroPgto}
@@ -607,15 +635,15 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                       </Text>
                       <View style={cupom.itemMeta}>
                         <Text style={cupom.itemHora}>   {fmtHora(emp.created_at)}</Text>
-                        <Text style={cupom.itemHora}>{emp.tipo_emprestimo}</Text>
                       </View>
                       {idx < vendasDia.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
                     </View>
                   );
                 })}
                 <View style={cupom.linha}>
-                  <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{lang === 'es' ? 'TOTAL VENTAS' : 'TOTAL VENDAS'}</Text>
-                  <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{fmt(vendasDia.reduce((s, e) => s + parseFloat(e.valor_principal), 0))}</Text>
+                  {/* ⭐ Total em VERMELHO (é saída) */}
+                  <Text style={[cupom.txtVerm, { fontSize: 10 }]}>{lang === 'es' ? 'TOTAL PRÉSTAMOS' : 'TOTAL EMPRÉSTIMOS'}</Text>
+                  <Text style={[cupom.txtVerm, { fontSize: 10 }]}>-{fmt(vendasDia.reduce((s, e) => s + parseFloat(e.valor_principal), 0))}</Text>
                 </View>
                 <Text style={cupom.div1}>{DIV}</Text>
               </>
@@ -706,27 +734,16 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                         {pagamentos.map((p, idx) => {
                           const nomeCliente = (p.clientes as any)?.nome || (p.cliente as any)?.nome || `Parcela ${p.numero_parcela}`;
                           const excedente = parseFloat(p.valor_credito_gerado || 0);
-                          const creditoUsado = parseFloat(p.valor_credito_usado || 0);
                           const valorParcela = parseFloat(p.valor_parcela || 0);
                           const totalRealPago = parseFloat(p.valor_pago_total || 0);
-                          // ⭐ Valor efetivamente recebido em DINHEIRO neste dia
-                          const valorDinheiro = totalRealPago - creditoUsado;
                           const temExcedente = excedente > 0;
-                          const temCreditoUsado = creditoUsado > 0;
                           return (
                             <View key={p.id}>
                               <View style={cupom.itemRow}>
                                 <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
                                 <Text style={cupom.itemCat} numberOfLines={1}>{nomeCliente}</Text>
-                                {/* ⭐ Mostra valor DINHEIRO (não o total com crédito) */}
-                                <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(valorDinheiro)}</Text>
+                                <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(totalRealPago)}</Text>
                               </View>
-                              {/* ⭐ Indicar quando usou crédito */}
-                              {temCreditoUsado && (
-                                <Text style={[cupom.itemSub, { color: '#2563EB', fontSize: 9 }]}>
-                                  {'   '}💳 {t.creditoUsado}: {fmt(creditoUsado)} · Total: {fmt(totalRealPago)}
-                                </Text>
-                              )}
                               {temExcedente && (
                                 <Text style={[cupom.itemSub, { color: '#6B7280', fontSize: 9 }]}>
                                   {'   '}
@@ -903,6 +920,7 @@ interface ClienteGrupo {
   clienteCod: string;
   totalPago: number;
   parcelas: any[];
+  quitado: boolean; // ⭐ Indica se empréstimo foi quitado
 }
 
 export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, totalNaoPagos, lang = 'pt-BR' }: PagamentosProps) {
@@ -926,7 +944,7 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
           forma_pagamento, valor_credito_usado, valor_credito_gerado,
           status_parcela_atual, created_at, cliente_id,
           cliente:cliente_id(nome, consecutivo),
-          emprestimo:emprestimo_id(valor_principal, numero_parcelas)
+          emprestimo:emprestimo_id(valor_principal, numero_parcelas, status)
         `)
         .eq('liquidacao_id', liquidacaoId)
         .eq('estornado', false)
@@ -952,6 +970,7 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
           clienteCod: r.cliente?.consecutivo || '',
           totalPago: 0,
           parcelas: [],
+          quitado: false,
         });
       }
       const grupo = map.get(cId)!;
@@ -962,29 +981,20 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
       } else if (parseFloat(r.valor_pago_total || 0) > parseFloat(grupo.parcelas[existIdx].valor_pago_total || 0)) {
         grupo.parcelas[existIdx] = r;
       }
+      // ⭐ Verificar se empréstimo foi quitado
+      if (r.emprestimo?.status === 'QUITADO') {
+        grupo.quitado = true;
+      }
     });
-    // Recalcular totalPago após deduplicação — ⭐ APENAS DINHEIRO (sem crédito usado)
+    // Recalcular totalPago após deduplicação
     map.forEach(grupo => {
-      grupo.totalPago = grupo.parcelas.reduce((s: number, p: any) => {
-        const total = parseFloat(p.valor_pago_total || 0);
-        const creditoUsado = parseFloat(p.valor_credito_usado || 0);
-        return s + (total - creditoUsado); // Só o dinheiro efetivamente recebido
-      }, 0);
+      grupo.totalPago = grupo.parcelas.reduce((s: number, p: any) => s + parseFloat(p.valor_pago_total || 0), 0);
     });
     return Array.from(map.values());
   }, [registros]);
 
-  // ⭐ Calcular totais apenas com DINHEIRO (descontando crédito usado)
-  const totalDinheiro = registros.filter(r => r.forma_pagamento === 'DINHEIRO').reduce((s, r) => {
-    const total = parseFloat(r.valor_pago_total || 0);
-    const creditoUsado = parseFloat(r.valor_credito_usado || 0);
-    return s + (total - creditoUsado);
-  }, 0);
-  const totalTransf = registros.filter(r => r.forma_pagamento !== 'DINHEIRO').reduce((s, r) => {
-    const total = parseFloat(r.valor_pago_total || 0);
-    const creditoUsado = parseFloat(r.valor_credito_usado || 0);
-    return s + (total - creditoUsado);
-  }, 0);
+  const totalDinheiro = registros.filter(r => r.forma_pagamento === 'DINHEIRO').reduce((s, r) => s + parseFloat(r.valor_pago_total || 0), 0);
+  const totalTransf = registros.filter(r => r.forma_pagamento !== 'DINHEIRO').reduce((s, r) => s + parseFloat(r.valor_pago_total || 0), 0);
 
   const renderCliente = ({ item: grupo }: { item: ClienteGrupo }) => {
     const isExpanded = expandido === grupo.clienteId;
@@ -998,7 +1008,17 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
         {/* Header do cliente */}
         <View style={dStyles.pagItemTop}>
           <View style={{ flex: 1 }}>
-            <Text style={dStyles.pagClienteNome}>{grupo.clienteNome}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={dStyles.pagClienteNome}>{grupo.clienteNome}</Text>
+              {/* ⭐ Badge QUITADO */}
+              {grupo.quitado && (
+                <View style={{ backgroundColor: '#10B981', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 }}>
+                  <Text style={{ color: '#FFF', fontSize: 9, fontWeight: '700' }}>
+                    {lang === 'es' ? '✓ LIQUIDADO' : '✓ QUITADO'}
+                  </Text>
+                </View>
+              )}
+            </View>
             {grupo.clienteCod ? <Text style={dStyles.pagClienteCod}>#{grupo.clienteCod}</Text> : null}
           </View>
           <View style={{ alignItems: 'flex-end' }}>
@@ -1010,11 +1030,7 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
         {/* Parcelas (expandido) */}
         {isExpanded && (
           <View style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6', paddingTop: 8 }}>
-            {grupo.parcelas.map((p) => {
-              const totalPago = parseFloat(p.valor_pago_total || 0);
-              const creditoUsado = parseFloat(p.valor_credito_usado || 0);
-              const valorDinheiro = totalPago - creditoUsado;
-              return (
+            {grupo.parcelas.map((p) => (
               <View key={p.id} style={{ paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#F9FAFB' }}>
                 <View style={dStyles.pagItemBottom}>
                   <View style={dStyles.pagDetail}>
@@ -1023,8 +1039,7 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
                   </View>
                   <View style={dStyles.pagDetail}>
                     <Text style={dStyles.pagDetailLabel}>{t.valor}</Text>
-                    {/* ⭐ Mostra valor DINHEIRO, não o total */}
-                    <Text style={[dStyles.pagDetailValue, { color: '#059669', fontWeight: '700' }]}>{fmt(valorDinheiro)}</Text>
+                    <Text style={[dStyles.pagDetailValue, { color: '#059669', fontWeight: '700' }]}>{fmt(parseFloat(p.valor_pago_total || 0))}</Text>
                   </View>
                   <View style={dStyles.pagDetail}>
                     <Text style={dStyles.pagDetailLabel}>Forma</Text>
@@ -1035,19 +1050,15 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
                     <Text style={dStyles.pagDetailValue}>{fmtHora(p.created_at)}</Text>
                   </View>
                 </View>
-                {/* ⭐ Mostrar crédito usado e total quando relevante */}
-                {creditoUsado > 0 && (
+                {/* ⭐ Crédito: mostrar usado sempre, mas gerado só se NÃO quitou */}
+                {(p.valor_credito_usado > 0 || (p.valor_credito_gerado > 0 && !grupo.quitado)) && (
                   <View style={dStyles.pagCredito}>
-                    <Text style={[dStyles.pagCreditoText, { color: '#2563EB' }]}>💳 {t.creditoUsado}: {fmt(creditoUsado)} · Total parcela: {fmt(totalPago)}</Text>
-                  </View>
-                )}
-                {p.valor_credito_gerado > 0 && (
-                  <View style={dStyles.pagCredito}>
-                    <Text style={dStyles.pagCreditoText}>{t.creditoGerado}: {fmt(p.valor_credito_gerado)}</Text>
+                    {p.valor_credito_usado > 0 && <Text style={dStyles.pagCreditoText}>{t.creditoUsado}: {fmt(p.valor_credito_usado)}</Text>}
+                    {p.valor_credito_gerado > 0 && !grupo.quitado && <Text style={dStyles.pagCreditoText}>{t.creditoGerado}: {fmt(p.valor_credito_gerado)}</Text>}
                   </View>
                 )}
               </View>
-            )})}
+            ))}
           </View>
         )}
 

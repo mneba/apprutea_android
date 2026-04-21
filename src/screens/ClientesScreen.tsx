@@ -376,7 +376,10 @@ export default function ClientesScreen({ navigation, route }: any) {
     || _liqAtual?.data_liquidacao?.substring(0, 10)
     || (_liqAtual?.data_abertura ? _liqAtual.data_abertura.substring(0, 10) : null)
     || (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`; })();
-  const liqId = liqCtx.liquidacaoIdVisualizacao || route?.params?.liquidacaoId || (liqCtx.temLiquidacaoAberta ? liqCtx.liquidacaoAtual?.id : null);
+  // ⭐ FIX: Fallback direto pelo status (evita problema de timing com temLiquidacaoAberta)
+  const statusLiq = liqCtx.liquidacaoAtual?.status;
+  const liqIdFallback = (statusLiq === 'ABERTO' || statusLiq === 'ABERTA' || statusLiq === 'REABERTO') ? liqCtx.liquidacaoAtual?.id : null;
+  const liqId = liqCtx.liquidacaoIdVisualizacao || route?.params?.liquidacaoId || (liqCtx.temLiquidacaoAberta ? liqCtx.liquidacaoAtual?.id : null) || liqIdFallback;
   const isViz = liqCtx.modoVisualizacao || route?.params?.isVisualizacao || false;
   const {
     raw, setRaw,
@@ -484,6 +487,20 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [modalDetalhesVisible, setModalDetalhesVisible] = useState(false);
   const [detalhesCliente, setDetalhesCliente] = useState<{ id: string; nome: string; telefone?: string | null; documento?: string | null; endereco?: string | null; codigo_cliente?: string | number | null } | null>(null);
 
+  // ⭐ Estados para "Não Pago"
+  const [naoPagosSet, setNaoPagosSet] = useState<Set<string>>(new Set());
+  const [modalNaoPagoVisible, setModalNaoPagoVisible] = useState(false);
+  const [naoPagoParcelaInfo, setNaoPagoParcelaInfo] = useState<{
+    parcela_id: string;
+    numero_parcela: number;
+    valor_parcela: number;
+    valor_saldo: number;
+    emprestimo_id: string;
+  } | null>(null);
+  const [naoPagoClienteInfo, setNaoPagoClienteInfo] = useState<{ id: string; nome: string } | null>(null);
+  const [naoPagoObservacao, setNaoPagoObservacao] = useState('');
+  const [salvandoNaoPago, setSalvandoNaoPago] = useState(false);
+
   const [parcelaEstorno, setParcelaEstorno] = useState<ParcelaModal | null>(null);
   const [motivoEstorno, setMotivoEstorno] = useState('');
 
@@ -587,6 +604,77 @@ export default function ClientesScreen({ navigation, route }: any) {
     }
   }, [rotaId, listaReordenar]);
 
+  // ⭐ Carregar não pagos da liquidação atual
+  const carregarNaoPagos = useCallback(async () => {
+    if (!liqId) {
+      setNaoPagosSet(new Set());
+      return;
+    }
+    try {
+      const { data, error } = await supabase.rpc('fn_listar_nao_pagos_liquidacao', {
+        p_liquidacao_id: liqId
+      });
+      if (!error && data) {
+        const set = new Set<string>();
+        data.forEach((np: any) => set.add(np.parcela_id));
+        setNaoPagosSet(set);
+      }
+    } catch (e) {
+      console.error('Erro ao carregar não pagos:', e);
+    }
+  }, [liqId]);
+
+  // Carregar não pagos quando liquidação mudar
+  useEffect(() => {
+    carregarNaoPagos();
+  }, [carregarNaoPagos]);
+
+  // ⭐ Abrir modal de não pago
+  const abrirNaoPago = useCallback((
+    parcelaInfo: { parcela_id: string; numero_parcela: number; valor_parcela: number; valor_saldo: number; emprestimo_id: string },
+    clienteInfo: { id: string; nome: string }
+  ) => {
+    setNaoPagoParcelaInfo(parcelaInfo);
+    setNaoPagoClienteInfo(clienteInfo);
+    setNaoPagoObservacao('');
+    setModalNaoPagoVisible(true);
+  }, []);
+
+  // ⭐ Registrar não pago
+  const registrarNaoPago = useCallback(async () => {
+    if (!liqId || !naoPagoParcelaInfo || !naoPagoClienteInfo) return;
+    
+    setSalvandoNaoPago(true);
+    try {
+      const { data, error } = await supabase.rpc('fn_registrar_nao_pago', {
+        p_liquidacao_id: liqId,
+        p_cliente_id: naoPagoClienteInfo.id,
+        p_emprestimo_id: naoPagoParcelaInfo.emprestimo_id,
+        p_parcela_id: naoPagoParcelaInfo.parcela_id,
+        p_observacao: naoPagoObservacao.trim() || null,
+        p_latitude: coords?.lat || null,
+        p_longitude: coords?.lng || null,
+        p_user_id: vendedor?.user_id || null,
+      });
+
+      if (error) throw error;
+
+      const res = Array.isArray(data) ? data[0] : data;
+      if (res?.sucesso) {
+        // Atualizar set local
+        setNaoPagosSet(prev => new Set([...prev, naoPagoParcelaInfo.parcela_id]));
+        setModalNaoPagoVisible(false);
+        showAlert('✓', res.mensagem || (lang === 'es' ? 'Cliente registrado como no pagó' : 'Cliente registrado como não pagou'));
+      } else {
+        showAlert('Erro', res?.mensagem || 'Erro ao registrar');
+      }
+    } catch (e: any) {
+      showAlert('Erro', e.message || 'Erro ao registrar não pago');
+    } finally {
+      setSalvandoNaoPago(false);
+    }
+  }, [liqId, naoPagoParcelaInfo, naoPagoClienteInfo, naoPagoObservacao, coords, vendedor?.user_id, lang, showAlert]);
+
 
   // Buscar contagem de notas por cliente quando lista muda
   useEffect(() => {
@@ -606,14 +694,6 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   // ⭐ Recarregar lista ao voltar para a tela (após criar novo empréstimo, renovar, etc)
   const isFirstMount = useRef(true);
-  const lastFocusTime = useRef(0); // ⭐ Debounce para evitar chamadas repetidas
-  // ⭐ Refs para evitar que mudanças nas funções causem re-execução do useFocusEffect
-  const loadLiqRef = useRef(loadLiq);
-  const loadTodosClientesRef = useRef(loadTodosClientes);
-  
-  // Manter refs atualizadas
-  useEffect(() => { loadLiqRef.current = loadLiq; }, [loadLiq]);
-  useEffect(() => { loadTodosClientesRef.current = loadTodosClientes; }, [loadTodosClientes]);
   
   useFocusEffect(
     useCallback(() => {
@@ -623,23 +703,15 @@ export default function ClientesScreen({ navigation, route }: any) {
         return;
       }
       
-      // ⭐ Debounce: evitar múltiplas chamadas em menos de 1 segundo
-      const now = Date.now();
-      if (now - lastFocusTime.current < 1000) {
-        console.log('🔄 useFocusEffect: Ignorando (debounce)');
-        return;
-      }
-      lastFocusTime.current = now;
-      
       // Ao voltar para a tela, recarrega a lista ativa
       console.log('🔄 useFocusEffect: Tela recebeu foco, recarregando lista...');
       if (tab === 'liquidacao') {
-        loadLiqRef.current();
+        loadLiq();
       } else {
         setTodosList([]);
-        loadTodosClientesRef.current(true);
+        loadTodosClientes(true);
       }
-    }, [tab, setTodosList]) // ⭐ Removidas as funções das dependências
+    }, [tab, loadLiq, loadTodosClientes])
   );
 
   const onRefresh = useCallback(() => {
@@ -1213,6 +1285,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         emprestimo={e}
         expanded={expanded === c.cliente_id}
         pagasSet={pagasSet}
+        naoPagosSet={naoPagosSet}
         liqId={liqId}
         isViz={isViz}
         lang={lang}
@@ -1223,6 +1296,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         onAbrirParcelas={abrirParcelas}
         onAbrirNotas={(id, nome) => { setNotasClienteId(id); setNotasClienteNome(nome); setModalNotasClienteVisible(true); }}
         onAbrirDetalhes={(cli) => { setDetalhesCliente(cli); setModalDetalhesVisible(true); }}
+        onNaoPago={abrirNaoPago}
       />
     );
   };
@@ -1586,7 +1660,8 @@ return (
         vendedorId={vendedor?.id || ''}
         autorNome={vendedor?.nome || ''}
         autorTipo="VENDEDOR"
-        liquidacaoId={liqId || undefined}
+        liquidacaoId={liqId || liqCtx.liquidacaoAtual?.id || undefined}
+        liquidacaoStatus={liqCtx.liquidacaoAtual?.status || null}
         clienteId={notaClienteId}
         clienteNome={notaClienteNome}
         emprestimoId={notaEmprestimoId}
@@ -1609,12 +1684,13 @@ return (
         vendedorId={vendedor?.id || ''}
         autorNome={vendedor?.nome || ''}
         autorTipo="VENDEDOR"
-        liquidacaoId={liqId || undefined}
+        liquidacaoId={liqId || liqCtx.liquidacaoAtual?.id || undefined}
+        liquidacaoStatus={liqCtx.liquidacaoAtual?.status || null}
         clienteId={notasClienteId}
         clienteNome={notasClienteNome}
         lang={lang}
         coords={coords}
-        permitirCriar={!!liqId}
+        permitirCriar={!!(liqId || liqCtx.liquidacaoAtual?.id)}
         mensagemSemLiq={lang === 'es' ? 'Abra una liquidación para crear notas' : 'Abra uma liquidação para criar notas'}
         obsLocalPadrao="Cliente"
       />
@@ -1626,6 +1702,60 @@ return (
         cliente={detalhesCliente}
         lang={lang}
       />
+
+      {/* ⭐ Modal Não Pago */}
+      {modalNaoPagoVisible && (
+        <View style={S.naoPagoOverlay}>
+          <View style={S.naoPagoModal}>
+            <View style={S.naoPagoHeader}>
+              <Text style={S.naoPagoTitle}>{lang === 'es' ? '✗ Registrar No Pago' : '✗ Registrar Não Pago'}</Text>
+              <TouchableOpacity onPress={() => setModalNaoPagoVisible(false)} style={S.naoPagoClose}>
+                <Text style={S.naoPagoCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={S.naoPagoBody}>
+              <Text style={S.naoPagoCliente}>{naoPagoClienteInfo?.nome}</Text>
+              <Text style={S.naoPagoParcela}>
+                {lang === 'es' ? 'Cuota' : 'Parcela'} {naoPagoParcelaInfo?.numero_parcela} — $ {naoPagoParcelaInfo?.valor_parcela?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </Text>
+              
+              <Text style={S.naoPagoLabel}>{lang === 'es' ? 'Observación (opcional):' : 'Observação (opcional):'}</Text>
+              <TextInput
+                style={S.naoPagoInput}
+                placeholder={lang === 'es' ? 'Motivo por el que no pagó...' : 'Motivo pelo qual não pagou...'}
+                placeholderTextColor="#9CA3AF"
+                value={naoPagoObservacao}
+                onChangeText={setNaoPagoObservacao}
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
+              />
+            </View>
+            
+            <View style={S.naoPagoFooter}>
+              <TouchableOpacity 
+                style={S.naoPagoBtnCancelar} 
+                onPress={() => setModalNaoPagoVisible(false)}
+                disabled={salvandoNaoPago}
+              >
+                <Text style={S.naoPagoBtnCancelarText}>{lang === 'es' ? 'Cancelar' : 'Cancelar'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[S.naoPagoBtnConfirmar, salvandoNaoPago && { opacity: 0.6 }]} 
+                onPress={registrarNaoPago}
+                disabled={salvandoNaoPago}
+              >
+                {salvandoNaoPago ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Text style={S.naoPagoBtnConfirmarText}>{lang === 'es' ? 'Confirmar' : 'Confirmar'}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -1774,4 +1904,111 @@ const S = StyleSheet.create({
   // Alphabet sidebar indicator
   alphaIndicator: { position: 'absolute', left: '50%', top: '45%', marginLeft: -30, marginTop: -30, width: 60, height: 60, borderRadius: 12, backgroundColor: 'rgba(59,130,246,0.9)', justifyContent: 'center', alignItems: 'center', zIndex: 200 },
   alphaIndicatorText: { color: '#fff', fontSize: 28, fontWeight: '800' },
+
+  // ⭐ Modal Não Pago
+  naoPagoOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  naoPagoModal: {
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    width: '90%',
+    maxWidth: 400,
+    overflow: 'hidden',
+  },
+  naoPagoHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#6B7280',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  naoPagoTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFF',
+  },
+  naoPagoClose: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  naoPagoCloseText: {
+    fontSize: 16,
+    color: '#FFF',
+    fontWeight: '600',
+  },
+  naoPagoBody: {
+    padding: 16,
+  },
+  naoPagoCliente: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1F2937',
+    marginBottom: 4,
+  },
+  naoPagoParcela: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginBottom: 16,
+  },
+  naoPagoLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 8,
+  },
+  naoPagoInput: {
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    color: '#1F2937',
+    minHeight: 80,
+    backgroundColor: '#F9FAFB',
+  },
+  naoPagoFooter: {
+    flexDirection: 'row',
+    gap: 12,
+    padding: 16,
+    paddingTop: 0,
+  },
+  naoPagoBtnCancelar: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    alignItems: 'center',
+  },
+  naoPagoBtnCancelarText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  naoPagoBtnConfirmar: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#6B7280',
+    alignItems: 'center',
+  },
+  naoPagoBtnConfirmarText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFF',
+  },
 });

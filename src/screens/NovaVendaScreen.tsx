@@ -468,6 +468,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   const [docBusca, setDocBusca] = useState('');
   const [buscandoDoc, setBuscandoDoc] = useState(false);
   const [clienteEncontradoId, setClienteEncontradoId] = useState<string | null>(null);
+  const [clienteEncontradoCodigo, setClienteEncontradoCodigo] = useState<string | null>(null);
   const [tipoEmprestimoDetectado, setTipoEmprestimoDetectado] = useState<'RENOVACAO' | 'ADICIONAL' | null>(null);
   const [emprestimOrigemId, setEmprestimoOrigemId] = useState<string | null>(null);
 
@@ -562,6 +563,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         setDocumento(cli.documento || docBusca);
         setEndereco(cli.endereco || '');
         setClienteEncontradoId(cli.id);
+        setClienteEncontradoCodigo(cli.codigo_cliente || null); // ⭐ Guardar código
         setTipoEmprestimoDetectado('RENOVACAO');
         setModalDocVisible(false);
         const msg = lang === 'es'
@@ -580,6 +582,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
           setDocumento(cli.documento || docBusca);
           setEndereco(cli.endereco || '');
           setClienteEncontradoId(cli.id);
+          setClienteEncontradoCodigo(cli.codigo_cliente || null); // ⭐ Guardar código
           setEmprestimoOrigemId(emp.id); // ID do empréstimo com atraso — necessário para fn_renegociar_emprestimo
           setTipoEmprestimoDetectado('RENOVACAO');
           setModalDocVisible(false);
@@ -605,6 +608,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
           setDocumento(cli.documento || docBusca);
           setEndereco(cli.endereco || '');
           setClienteEncontradoId(cli.id);
+          setClienteEncontradoCodigo(cli.codigo_cliente || null); // ⭐ Guardar código
           setTipoEmprestimoDetectado('ADICIONAL');
           setModalDocVisible(false);
           const msg = lang === 'es'
@@ -1001,17 +1005,23 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   // -----------------------------------------------------------
   // VALIDAÇÃO
   // -----------------------------------------------------------
+  // ⭐ Verifica se é fluxo de cliente existente (não precisa validar dados cadastrais)
+  const isClienteExistente = !!(clienteExistente?.id || clienteEncontradoId || isRenegociacao);
+  
   const isValido = (): boolean => {
-    // ⭐ Campos obrigatórios do cliente (novos)
-    const clienteValido = !!(
-      nome.trim() &&
-      documento.trim() &&
-      telefoneCelular.trim() &&
-      endereco.trim() &&
-      enderecoComercial.trim()
-    );
+    // ⭐ Para cliente existente, só valida nome (que sempre é carregado)
+    // Para cliente novo, valida todos os campos cadastrais obrigatórios
+    const clienteValido = isClienteExistente 
+      ? !!(nome.trim()) // Cliente existente: só nome é necessário
+      : !!(
+          nome.trim() &&
+          documento.trim() &&
+          telefoneCelular.trim() &&
+          endereco.trim() &&
+          enderecoComercial.trim()
+        );
     
-    // Campos obrigatórios do empréstimo (existentes)
+    // Campos obrigatórios do empréstimo (sempre validados)
     const emprestimoValido = !!(
       valorPrincipal > 0 &&
       taxaJuros &&
@@ -1028,14 +1038,17 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   const validarCamposComFeedback = (): boolean => {
     const erros = new Set<string>();
     
-    // Campos do cliente
+    // Campos do cliente - só valida todos se for cliente NOVO
     if (!nome.trim()) erros.add('nome');
-    if (!documento.trim()) erros.add('documento');
-    if (!telefoneCelular.trim()) erros.add('telefoneCelular');
-    if (!endereco.trim()) erros.add('endereco');
-    if (!enderecoComercial.trim()) erros.add('enderecoComercial');
+    if (!isClienteExistente) {
+      // ⭐ Só valida campos cadastrais para cliente NOVO
+      if (!documento.trim()) erros.add('documento');
+      if (!telefoneCelular.trim()) erros.add('telefoneCelular');
+      if (!endereco.trim()) erros.add('endereco');
+      if (!enderecoComercial.trim()) erros.add('enderecoComercial');
+    }
     
-    // Campos do empréstimo
+    // Campos do empréstimo (sempre validados)
     if (!valorPrincipal || valorPrincipal <= 0) erros.add('valorEmprestimo');
     if (!numeroParcelas || parseInt(numeroParcelas) <= 0) erros.add('numeroParcelas');
     if (!taxaJuros) erros.add('taxaJuros');
@@ -1093,6 +1106,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     setValorMicroseguro('');
     setResultado(null);
     setCamposComErro(new Set()); // ⭐ Limpar erros de validação
+    setClienteEncontradoCodigo(null); // ⭐ Limpar código do cliente
   };
 
   // -----------------------------------------------------------
@@ -1364,15 +1378,13 @@ export default function NovaVendaScreen({ navigation, route }: any) {
       // ETAPA 6 - Tratamento da resposta
       const raw = Array.isArray(data) ? data[0] : data;
       
-      // Normaliza campos - fn_renovar/renegociar retornam com campos diferentes
-      let codigoCliente = renegociacao?.codigo_cliente || null;
-      if (isRenegociacao && !codigoCliente) {
-        const { data: cliData } = await supabase.from('clientes').select('codigo_cliente').eq('id', renegociacao.cliente_id).single();
-        codigoCliente = cliData?.codigo_cliente || null;
-      }
-      // Buscar código do cliente para renegociação via busca de documento
-      if (!isRenegociacao && emprestimOrigemId && clienteEncontradoId && !codigoCliente) {
-        const { data: cliData } = await supabase.from('clientes').select('codigo_cliente').eq('id', clienteEncontradoId).single();
+      // ⭐ Normaliza campos - busca código do cliente para todos os fluxos de cliente existente
+      let codigoCliente = renegociacao?.codigo_cliente || clienteExistente?.codigo_cliente || clienteEncontradoCodigo || null;
+      
+      // Buscar código do cliente se não tiver (fallback - não deveria ser necessário agora)
+      const clienteIdParaBuscarCodigo = renegociacao?.cliente_id || clienteExistente?.id || clienteEncontradoId;
+      if (!codigoCliente && clienteIdParaBuscarCodigo) {
+        const { data: cliData } = await supabase.from('clientes').select('codigo_cliente').eq('id', clienteIdParaBuscarCodigo).single();
         codigoCliente = cliData?.codigo_cliente || null;
       }
 
