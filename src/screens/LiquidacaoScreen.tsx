@@ -1738,6 +1738,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
             tipo="RECEITAS"
             totalValor={receitasFinanceiras.total}
             totalQtd={receitasFinanceiras.qtd}
+            isLiquidacaoAberta={isAberto || isReaberto}
+            onRefresh={carregarLiquidacoes}
           />
           <ModalFinanceiro
             visible={modalDespesasVisible}
@@ -1746,6 +1748,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
             tipo="DESPESAS"
             totalValor={liquidacao.total_despesas_dia || 0}
             totalQtd={liquidacao.qtd_despesas_dia || 0}
+            isLiquidacaoAberta={isAberto || isReaberto}
+            onRefresh={carregarLiquidacoes}
           />
           <ModalMicroseguro
             visible={modalMicroseguroVisible}

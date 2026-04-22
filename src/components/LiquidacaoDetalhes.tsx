@@ -3,11 +3,13 @@
 // Arquivo: src/components/LiquidacaoDetalhes.tsx
 // =====================================================
 
+import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
   FlatList,
   Modal,
@@ -74,6 +76,15 @@ const i18n: Record<Lang, Record<string, string>> = {
     cuotas: 'parcela(s)', verParcelas: 'ver parcelas', ocultar: 'ocultar',
     vendasTitulo: 'Vendas / Empréstimos', receitasTitulo: 'Receitas', despesasTitulo: 'Despesas',
     empAbrev: 'emp.',
+    // Exclusão de movimentação
+    excluir: 'Excluir', anular: 'Anular',
+    confirmarExclusao: 'Confirmar Exclusão',
+    confirmarExclusaoMsg: 'Deseja realmente excluir esta movimentação? O valor será revertido do caixa.',
+    motivoExclusao: 'Motivo (opcional)',
+    excluindo: 'Excluindo...', sim: 'Sim', nao: 'Não', cancelar: 'Cancelar',
+    exclusaoSucesso: 'Movimentação excluída com sucesso!',
+    exclusaoErro: 'Erro ao excluir movimentação',
+    anulado: 'ANULADO',
   },
   'es': {
     extratoDia: 'EXTRACTO DEL DÍA', extratoLiq: 'EXTRACTO LIQUIDACIÓN DIARIA',
@@ -100,6 +111,15 @@ const i18n: Record<Lang, Record<string, string>> = {
     cuotas: 'cuota(s)', verParcelas: 'ver cuotas', ocultar: 'ocultar',
     vendasTitulo: 'Ventas / Préstamos', receitasTitulo: 'Ingresos', despesasTitulo: 'Egresos',
     empAbrev: 'prést.',
+    // Exclusão de movimentação
+    excluir: 'Eliminar', anular: 'Anular',
+    confirmarExclusao: 'Confirmar Eliminación',
+    confirmarExclusaoMsg: '¿Desea realmente eliminar este movimiento? El valor será revertido de la caja.',
+    motivoExclusao: 'Motivo (opcional)',
+    excluindo: 'Eliminando...', sim: 'Sí', nao: 'No', cancelar: 'Cancelar',
+    exclusaoSucesso: '¡Movimiento eliminado con éxito!',
+    exclusaoErro: 'Error al eliminar movimiento',
+    anulado: 'ANULADO',
   },
 };
 
@@ -209,7 +229,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
       const { data: pags, error: errPag } = await supabase
         .from('pagamentos_parcelas')
         .select(`
-          id, numero_parcela, valor_pago_total, valor_parcela, valor_credito_gerado,
+          id, numero_parcela, valor_pago_total, valor_pago_atual, valor_parcela, valor_credito_gerado, valor_credito_usado,
           forma_pagamento, created_at, cliente_id, parcela_id, emprestimo_id,
           clientes!pagamentos_parcelas_cliente_id_fkey(nome, consecutivo)
         `)
@@ -222,7 +242,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         // Fallback: busca sem join se foreign key falhar
         const { data: pagsSem, error: errSem } = await supabase
           .from('pagamentos_parcelas')
-          .select('id, numero_parcela, valor_pago_total, valor_parcela, valor_credito_gerado, forma_pagamento, created_at, cliente_id')
+          .select('id, numero_parcela, valor_pago_total, valor_pago_atual, valor_parcela, valor_credito_gerado, valor_credito_usado, forma_pagamento, created_at, cliente_id')
           .eq('liquidacao_id', liquidacaoId)
           .eq('estornado', false)
           .order('created_at', { ascending: true });
@@ -289,7 +309,20 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   // ⭐ Total de saídas = despesas + empréstimos/renovações (não inclui renegociações)
   const totalSaidas = totalSaidasDespesas + totalVendasEmprestimos;
   const totalEntradas = registros.filter(r => r.tipo === 'RECEBER').reduce((s, r) => s + parseFloat(r.valor), 0);
-  const totalPagamentos = pagamentos.reduce((s, p) => s + parseFloat(p.valor_pago_total || 0), 0);
+  
+  // ⭐ CORREÇÃO: Filtrar pagamentos que entraram dinheiro no caixa
+  // Exclui pagamentos feitos APENAS com crédito (forma_pagamento = 'CREDITO')
+  // Pagamentos com dinheiro/transferência contam o valor_pago_atual (não valor_pago_total que inclui crédito usado)
+  const pagamentosDinheiro = pagamentos.filter(p => p.forma_pagamento !== 'CREDITO');
+  const totalPagamentos = pagamentosDinheiro.reduce((s, p) => {
+    // valor_pago_atual = dinheiro + crédito usado neste pagamento
+    // valor_pago_total = valor aplicado na parcela (pode ser diferente se gerou excedente)
+    // Para caixa, queremos o dinheiro que entrou = valor_pago_atual - valor_credito_usado
+    const valorPagoAtual = parseFloat(p.valor_pago_atual || p.valor_pago_total || 0);
+    const creditoUsado = parseFloat(p.valor_credito_usado || 0);
+    return s + (valorPagoAtual - creditoUsado);
+  }, 0);
+  
   const registrosEntradas = registros.filter(r => r.tipo === 'RECEBER' && r.status !== 'CANCELADO');
   const registrosSaidas = registros.filter(r => r.tipo === 'PAGAR' && r.status !== 'CANCELADO' && r.categoria !== 'ESTORNO_PAGAMENTO' && r.categoria !== 'EMPRESTIMO' && !['RETIRO_MICROSEGURO', 'SAIDA_MICROSEGURO'].includes(r.categoria));
 
@@ -297,7 +330,9 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const entradasCobrancas = registrosEntradas.filter(r => ['COBRANCA_PARCELAS', 'COBRANCA_CUOTAS'].includes(r.categoria));
   const entradasMicroseguro = registrosEntradas.filter(r => ['VENDA_MICROSEGURO', 'MICROSEGURO'].includes(r.categoria));
   const entradasOutras = registrosEntradas.filter(r => !['COBRANCA_PARCELAS', 'COBRANCA_CUOTAS', 'VENDA_MICROSEGURO', 'MICROSEGURO'].includes(r.categoria));
-  const totalCobrancas = entradasCobrancas.reduce((s, r) => s + parseFloat(r.valor), 0);
+  // ⭐ CORREÇÃO: Usar totalPagamentos (de pagamentos_parcelas) pois inclui auto-quitações
+  // O financeiro não registra parcelas quitadas automaticamente
+  const totalCobrancas = totalPagamentos;
   const totalMicroseguros = entradasMicroseguro.reduce((s, r) => s + parseFloat(r.valor), 0);
   const totalOutrasReceitas = entradasOutras.reduce((s, r) => s + parseFloat(r.valor), 0);
 
@@ -367,19 +402,21 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   <hr class="sep2">
   ` : ''}
 
-  <div class="secao">${t.detalheEntradas} (${registrosEntradas.length})</div>
+  <div class="secao">${t.detalheEntradas} (${pagamentosDinheiro.length + entradasOutras.length})</div>
   <hr class="sep">
-  ${registrosEntradas.length === 0 ? `<div class="c cinza">${t.nenhumaEntrada}</div>` : `
-    ${pagamentos.length > 0 ? `
-      <div class="c cinza" style="font-size:10px">── ${t.cobrancasParcelas} (${pagamentos.length}) ──</div>
-      ${pagamentos.map((p, idx) => {
+  ${pagamentosDinheiro.length === 0 && entradasOutras.length === 0 ? `<div class="c cinza">${t.nenhumaEntrada}</div>` : `
+    ${pagamentosDinheiro.length > 0 ? `
+      <div class="c cinza" style="font-size:10px">── ${t.cobrancasParcelas} (${pagamentosDinheiro.length}) ──</div>
+      ${pagamentosDinheiro.map((p, idx) => {
         const nomeCliente = (p.clientes as any)?.nome || (p.cliente as any)?.nome || `Parcela ${p.numero_parcela}`;
         const excedente = parseFloat(p.valor_credito_gerado || 0);
-        const valorParcela = parseFloat(p.valor_parcela || 0);
-        const totalRealPago = parseFloat(p.valor_pago_total || 0);
+        // ⭐ Mostrar o valor que entrou no caixa (dinheiro), não o valor_pago_total
+        const valorPagoAtual = parseFloat(p.valor_pago_atual || p.valor_pago_total || 0);
+        const creditoUsado = parseFloat(p.valor_credito_usado || 0);
+        const dinheiroRecebido = valorPagoAtual - creditoUsado;
         return `<div class="mov">
-          <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${nomeCliente}</span><span class="mov-val verde">+${fmt(totalRealPago)}</span></div>
-          ${excedente > 0 ? `<div class="mov-sub" style="color:#6B7280">${lang === 'es' ? 'Cuota' : 'Parcela'}: ${fmt(valorParcela)} · ${lang === 'es' ? 'Excedente' : 'Excedente'}: ${fmt(excedente)}</div>` : ''}
+          <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${nomeCliente}</span><span class="mov-val verde">+${fmt(dinheiroRecebido)}</span></div>
+          ${excedente > 0 ? `<div class="mov-sub" style="color:#6B7280">${lang === 'es' ? 'Cuota' : 'Parcela'}: ${fmt(parseFloat(p.valor_parcela || 0))} · ${lang === 'es' ? 'Excedente' : 'Excedente'}: ${fmt(excedente)}</div>` : ''}
           <div class="mov-meta"><span>${fmtHora(p.created_at)}</span>${p.forma_pagamento ? `<span>${p.forma_pagamento}</span>` : ''}</div>
         </div>`;
       }).join('')}
@@ -719,42 +756,43 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
             ) : (
               <>
                 {/* ═══ DETALHES ENTRADAS ═══ */}
-                <Text style={[cupom.centro, { marginTop: 14 }]}>{t.detalheEntradas} ({pagamentos.length + entradasOutras.length})</Text>
+                <Text style={[cupom.centro, { marginTop: 14 }]}>{t.detalheEntradas} ({pagamentosDinheiro.length + entradasOutras.length})</Text>
                 <Text style={cupom.div1}>{DIV}</Text>
 
-                {registrosEntradas.length === 0 ? (
+                {pagamentosDinheiro.length === 0 && entradasOutras.length === 0 ? (
                   <Text style={cupom.centro}>{t.nenhumaEntrada}</Text>
                 ) : (
                   <>
-                    {/* ── COBRANÇAS DE PARCELAS ── */}
                     {/* ── COBRANÇAS DE PARCELAS — usa pagamentos_parcelas diretamente ── */}
-                    {pagamentos.length > 0 && (
+                    {pagamentosDinheiro.length > 0 && (
                       <>
-                        <Text style={[cupom.centro, { fontSize: 10, marginTop: 6, color: '#6B7280' }]}>── {t.cobrancasParcelas} ({pagamentos.length}) ──</Text>
-                        {pagamentos.map((p, idx) => {
+                        <Text style={[cupom.centro, { fontSize: 10, marginTop: 6, color: '#6B7280' }]}>── {t.cobrancasParcelas} ({pagamentosDinheiro.length}) ──</Text>
+                        {pagamentosDinheiro.map((p, idx) => {
                           const nomeCliente = (p.clientes as any)?.nome || (p.cliente as any)?.nome || `Parcela ${p.numero_parcela}`;
                           const excedente = parseFloat(p.valor_credito_gerado || 0);
-                          const valorParcela = parseFloat(p.valor_parcela || 0);
-                          const totalRealPago = parseFloat(p.valor_pago_total || 0);
+                          // ⭐ Mostrar o valor que entrou no caixa (dinheiro), não o valor_pago_total
+                          const valorPagoAtual = parseFloat(p.valor_pago_atual || p.valor_pago_total || 0);
+                          const creditoUsado = parseFloat(p.valor_credito_usado || 0);
+                          const dinheiroRecebido = valorPagoAtual - creditoUsado;
                           const temExcedente = excedente > 0;
                           return (
                             <View key={p.id}>
                               <View style={cupom.itemRow}>
                                 <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
                                 <Text style={cupom.itemCat} numberOfLines={1}>{nomeCliente}</Text>
-                                <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(totalRealPago)}</Text>
+                                <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(dinheiroRecebido)}</Text>
                               </View>
                               {temExcedente && (
                                 <Text style={[cupom.itemSub, { color: '#6B7280', fontSize: 9 }]}>
                                   {'   '}
-                                  {lang === 'es' ? 'Cuota' : 'Parcela'}: {fmt(valorParcela)} · {lang === 'es' ? 'Excedente' : 'Excedente'}: {fmt(excedente)}
+                                  {lang === 'es' ? 'Cuota' : 'Parcela'}: {fmt(parseFloat(p.valor_parcela || 0))} · {lang === 'es' ? 'Excedente' : 'Excedente'}: {fmt(excedente)}
                                 </Text>
                               )}
                               <View style={cupom.itemMeta}>
                                 <Text style={cupom.itemHora}>   {fmtHora(p.created_at)}</Text>
                                 {p.forma_pagamento && <Text style={cupom.itemHora}>{p.forma_pagamento}</Text>}
                               </View>
-                              {idx < pagamentos.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
+                              {idx < pagamentosDinheiro.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
                             </View>
                           );
                         })}
@@ -940,7 +978,7 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
       const { data, error } = await supabase
         .from('pagamentos_parcelas')
         .select(`
-          id, numero_parcela, valor_pago_total, valor_parcela, valor_saldo,
+          id, numero_parcela, valor_pago_total, valor_pago_atual, valor_parcela, valor_saldo,
           forma_pagamento, valor_credito_usado, valor_credito_gerado,
           status_parcela_atual, created_at, cliente_id,
           cliente:cliente_id(nome, consecutivo),
@@ -958,10 +996,17 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
     }
   };
 
+  // ⭐ CORREÇÃO: Filtrar pagamentos que não são apenas crédito
+  // e calcular o valor em dinheiro (descontando crédito usado)
+  const pagamentosDinheiro = React.useMemo(() => {
+    return registros.filter(r => r.forma_pagamento !== 'CREDITO');
+  }, [registros]);
+
   // Agrupar por cliente — deduplicar parcelas pelo maior valor_pago_total
+  // Usar apenas pagamentosDinheiro
   const clientesAgrupados: ClienteGrupo[] = React.useMemo(() => {
     const map = new Map<string, ClienteGrupo>();
-    registros.forEach(r => {
+    pagamentosDinheiro.forEach(r => {
       const cId = r.cliente_id || 'unknown';
       if (!map.has(cId)) {
         map.set(cId, {
@@ -986,15 +1031,32 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
         grupo.quitado = true;
       }
     });
-    // Recalcular totalPago após deduplicação
+    // ⭐ CORREÇÃO: Recalcular totalPago como dinheiro efetivo (valor_pago_atual - credito_usado)
     map.forEach(grupo => {
-      grupo.totalPago = grupo.parcelas.reduce((s: number, p: any) => s + parseFloat(p.valor_pago_total || 0), 0);
+      grupo.totalPago = grupo.parcelas.reduce((s: number, p: any) => {
+        const valorPagoAtual = parseFloat(p.valor_pago_atual || p.valor_pago_total || 0);
+        const creditoUsado = parseFloat(p.valor_credito_usado || 0);
+        return s + (valorPagoAtual - creditoUsado);
+      }, 0);
     });
     return Array.from(map.values());
-  }, [registros]);
+  }, [pagamentosDinheiro]);
 
-  const totalDinheiro = registros.filter(r => r.forma_pagamento === 'DINHEIRO').reduce((s, r) => s + parseFloat(r.valor_pago_total || 0), 0);
-  const totalTransf = registros.filter(r => r.forma_pagamento !== 'DINHEIRO').reduce((s, r) => s + parseFloat(r.valor_pago_total || 0), 0);
+  // ⭐ CORREÇÃO: Calcular totais considerando apenas dinheiro efetivo
+  const totalDinheiro = pagamentosDinheiro
+    .filter(r => r.forma_pagamento === 'DINHEIRO')
+    .reduce((s, r) => {
+      const valorPagoAtual = parseFloat(r.valor_pago_atual || r.valor_pago_total || 0);
+      const creditoUsado = parseFloat(r.valor_credito_usado || 0);
+      return s + (valorPagoAtual - creditoUsado);
+    }, 0);
+  const totalTransf = pagamentosDinheiro
+    .filter(r => r.forma_pagamento && r.forma_pagamento !== 'DINHEIRO' && r.forma_pagamento !== 'CREDITO')
+    .reduce((s, r) => {
+      const valorPagoAtual = parseFloat(r.valor_pago_atual || r.valor_pago_total || 0);
+      const creditoUsado = parseFloat(r.valor_credito_usado || 0);
+      return s + (valorPagoAtual - creditoUsado);
+    }, 0);
 
   const renderCliente = ({ item: grupo }: { item: ClienteGrupo }) => {
     const isExpanded = expandido === grupo.clienteId;
@@ -1138,6 +1200,8 @@ interface FinanceiroProps {
   totalValor: number;
   totalQtd: number;
   lang?: Lang;
+  isLiquidacaoAberta?: boolean;
+  onRefresh?: () => void;
 }
 
 const getConfigFinanceiro = (lang: Lang): Record<TipoFinanceiro, { titulo: string; icone: string; cor: string; filtro: any }> => ({
@@ -1146,10 +1210,11 @@ const getConfigFinanceiro = (lang: Lang): Record<TipoFinanceiro, { titulo: strin
   DESPESAS: { titulo: i18n[lang].despesasTitulo, icone: '📤', cor: '#EF4444', filtro: { tipo: 'PAGAR' } },
 });
 
-export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalValor, totalQtd, lang = 'pt-BR' }: FinanceiroProps) {
+export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalValor, totalQtd, lang = 'pt-BR', isLiquidacaoAberta = false, onRefresh }: FinanceiroProps) {
   const t = i18n[lang];
   const [registros, setRegistros] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [excluindo, setExcluindo] = useState<string | null>(null);
 
   const config = getConfigFinanceiro(lang)[tipo];
 
@@ -1192,7 +1257,7 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
         .from('financeiro')
         .select('id, tipo, categoria, descricao, valor, created_at, forma_pagamento, cliente_nome, vendedor_nome, status')
         .eq('liquidacao_id', liquidacaoId)
-        .eq('status', 'PAGO')
+        .in('status', ['PAGO', 'ANULADO'])  // Inclui anulados para mostrar riscados
         .order('created_at', { ascending: false });
 
       if (tipo === 'RECEITAS') {
@@ -1211,6 +1276,63 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
       console.error(`Erro ${tipo}:`, e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ⭐ Função para excluir/anular movimentação
+  const handleExcluir = async (item: any) => {
+    const confirmar = async () => {
+      setExcluindo(item.id);
+      try {
+        const { data, error } = await supabase.rpc('fn_anular_lancamento_financeiro', {
+          p_financeiro_id: item.id,
+          p_motivo: 'Excluído pelo vendedor via app',
+          p_user_id: null,
+        });
+
+        if (error) throw error;
+
+        const res = Array.isArray(data) ? data[0] : data;
+        if (res?.sucesso) {
+          // Recarregar lista
+          await carregarRegistros();
+          // Notificar parent para atualizar totais
+          if (onRefresh) onRefresh();
+          
+          if (Platform.OS === 'web') {
+            window.alert(t.exclusaoSucesso || 'Movimentação excluída!');
+          } else {
+            Alert.alert('✓', res.mensagem || t.exclusaoSucesso);
+          }
+        } else {
+          throw new Error(res?.mensagem || t.exclusaoErro);
+        }
+      } catch (e: any) {
+        console.error('Erro ao excluir:', e);
+        if (Platform.OS === 'web') {
+          window.alert(e.message || t.exclusaoErro);
+        } else {
+          Alert.alert('Erro', e.message || t.exclusaoErro);
+        }
+      } finally {
+        setExcluindo(null);
+      }
+    };
+
+    // Confirmação
+    if (Platform.OS === 'web') {
+      if (window.confirm(`${t.confirmarExclusaoMsg}\n\n${formatarCategoria(item.categoria)}: ${fmt(item.valor)}`)) {
+        confirmar();
+      }
+    } else {
+      Alert.alert(
+        t.confirmarExclusao,
+        `${t.confirmarExclusaoMsg}\n\n${formatarCategoria(item.categoria)}: ${fmt(item.valor)}`,
+        [
+          { text: t.cancelar || 'Cancelar', style: 'cancel' },
+          { text: t.sim || 'Sim', style: 'destructive', onPress: confirmar },
+        ]
+      );
     }
   };
 
@@ -1252,31 +1374,77 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
       );
     }
 
+    // Se item está anulado, mostrar com estilo diferente
+    const isAnulado = item.status === 'ANULADO';
+    const isExcluindoEste = excluindo === item.id;
+    const podeExcluir = isLiquidacaoAberta && !isAnulado && tipo !== 'VENDAS';
+
     return (
-    <View style={dStyles.finItem}>
+    <View style={[dStyles.finItem, isAnulado && { opacity: 0.5, backgroundColor: '#F9FAFB' }]}>
       <View style={dStyles.finItemTop}>
-        <View style={[dStyles.finItemDot, { backgroundColor: config.cor }]} />
+        <View style={[dStyles.finItemDot, { backgroundColor: isAnulado ? '#9CA3AF' : config.cor }]} />
         <View style={{ flex: 1 }}>
-          <Text style={dStyles.finItemCategoria}>{formatarCategoria(item.categoria)}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={[dStyles.finItemCategoria, isAnulado && { textDecorationLine: 'line-through', color: '#9CA3AF' }]}>
+              {formatarCategoria(item.categoria)}
+            </Text>
+            {isAnulado && (
+              <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                <Text style={{ fontSize: 9, fontWeight: '700', color: '#DC2626' }}>{t.anulado || 'ANULADO'}</Text>
+              </View>
+            )}
+          </View>
           {item.cliente_nome && <Text style={dStyles.finItemCliente}>{item.cliente_nome}</Text>}
           {item.descricao && !item.cliente_nome && <Text style={dStyles.finItemCliente}>{item.descricao}</Text>}
         </View>
-        <Text style={[dStyles.finItemValor, { color: config.cor }]}>{fmt(parseFloat(item.valor))}</Text>
+        <Text style={[dStyles.finItemValor, { color: isAnulado ? '#9CA3AF' : config.cor }, isAnulado && { textDecorationLine: 'line-through' }]}>
+          {fmt(parseFloat(item.valor))}
+        </Text>
       </View>
-      <View style={dStyles.finItemBottom}>
-        <Text style={dStyles.finItemHora}>{fmtHora(item.created_at)}</Text>
-        {item.forma_pagamento && <Text style={dStyles.finItemForma}>{item.forma_pagamento}</Text>}
+      <View style={[dStyles.finItemBottom, { justifyContent: 'space-between' }]}>
+        <View style={{ flexDirection: 'row', gap: 16 }}>
+          <Text style={dStyles.finItemHora}>{fmtHora(item.created_at)}</Text>
+          {item.forma_pagamento && <Text style={dStyles.finItemForma}>{item.forma_pagamento}</Text>}
+        </View>
+        {podeExcluir && (
+          <TouchableOpacity 
+            onPress={() => handleExcluir(item)} 
+            disabled={isExcluindoEste}
+            style={{ 
+              flexDirection: 'row', 
+              alignItems: 'center', 
+              backgroundColor: '#FEE2E2', 
+              paddingHorizontal: 10, 
+              paddingVertical: 5, 
+              borderRadius: 6,
+              opacity: isExcluindoEste ? 0.5 : 1,
+            }}
+          >
+            {isExcluindoEste ? (
+              <ActivityIndicator size="small" color="#DC2626" />
+            ) : (
+              <>
+                <Ionicons name="trash-outline" size={14} color="#DC2626" />
+                <Text style={{ fontSize: 12, fontWeight: '600', color: '#DC2626', marginLeft: 4 }}>
+                  {t.excluir || 'Excluir'}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
     </View>
     );
   };
 
   // Para VENDAS: total = soma de valor_principal dos empréstimos listados (igual ao total_emprestado_dia do banco)
-  // Para outros: soma dos registros filtrados
+  // Para outros: soma dos registros filtrados (excluindo anulados)
   const totalReal = tipo === 'VENDAS'
     ? registros.reduce((s, r) => s + parseFloat(r.valor_principal || 0), 0)
-    : registros.reduce((s, r) => s + parseFloat(r.valor || 0), 0);
-  const qtdReal = registros.length;
+    : registros.filter(r => r.status !== 'ANULADO').reduce((s, r) => s + parseFloat(r.valor || 0), 0);
+  const qtdReal = tipo === 'VENDAS' 
+    ? registros.length 
+    : registros.filter(r => r.status !== 'ANULADO').length;
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>

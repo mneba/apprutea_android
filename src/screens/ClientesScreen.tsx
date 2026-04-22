@@ -967,6 +967,8 @@ export default function ClientesScreen({ navigation, route }: any) {
           setUsarCredito(false);
           if (clienteModal?.emprestimo_id) { atualizarSaldoLocalLiq(clienteModal.emprestimo_id); atualizarSaldoLocalTodos(clienteModal.emprestimo_id); }
           setClienteModal(null);
+          // ⭐ Aguardar 300ms para o banco processar triggers antes de recarregar
+          await new Promise(resolve => setTimeout(resolve, 300));
           loadLiq();
           showAlert(t.sucessoGenerico || 'Sucesso', res.mensagem || t.sucesso);
         } else { showAlert(t.erroGenerico, res?.mensagem || t.erro); }
@@ -1190,6 +1192,8 @@ export default function ClientesScreen({ navigation, route }: any) {
         Alert.alert(t.sucessoGenerico, res.mensagem || t.estornoSucesso);
         if (clienteModal?.emprestimo_id) { atualizarSaldoLocalLiq(clienteModal.emprestimo_id); atualizarSaldoLocalTodos(clienteModal.emprestimo_id); }
         if (clienteModal) abrirParcelas(clienteModal.id, clienteModal.nome, clienteModal.emprestimo_id);
+        // ⭐ Aguardar 300ms para o banco processar triggers antes de recarregar
+        await new Promise(resolve => setTimeout(resolve, 300));
         loadLiq();
       } else { 
         setModalEstornoVisible(false);
