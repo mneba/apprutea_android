@@ -1283,6 +1283,7 @@ export default function ClientesScreen({ navigation, route }: any) {
 
  const renderCard = (c: ClienteAgrupado) => {
     const e = eAtual(c);
+    const clienteEstaPago = isCliPago(c);
     return (
       <ClienteCardLiquidacao
         key={c.cliente_id}
@@ -1293,6 +1294,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         naoPagosSet={naoPagosSet}
         liqId={liqId}
         isViz={isViz}
+        isClientePago={clienteEstaPago}
         lang={lang}
         notasCount={notasCountMap.get(c.cliente_id) || 0}
         t={t}
@@ -1609,6 +1611,7 @@ return (
         creditoDisponivel={creditoDisponivel}
         liqId={liqId}
         isViz={isViz}
+        isClientePago={clienteModal ? clientesPagosNaLiq.has(clienteModal.id) : false}
         onPagar={abrirPagamento}
         onEstornar={abrirEstorno}
         t={t}

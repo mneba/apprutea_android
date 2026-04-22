@@ -391,7 +391,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   <div class="row"><span>${lang === 'es' ? 'Caja inicial' : 'Caixa inicial'}</span><span class="r">${fmt(caixaInicial)}</span></div>
   <div class="row"><span class="verde">(+) ${lang === 'es' ? 'Cobros del día' : 'Cobrança do dia'}</span><span class="r verde">${fmt(totalCobrancas)}</span></div>
   <div class="row"><span class="verde">(+) ${lang === 'es' ? 'Ingresos del día' : 'Receitas do dia'}</span><span class="r verde">${fmt(totalOutrasReceitas)}</span></div>
-  <div class="row"><span class="verm">(-) ${lang === 'es' ? 'Gastos del día' : 'Despesas do dia'}</span><span class="r verm">${fmt(totalSaidas)}</span></div>
+  <div class="row"><span class="verm">(-) ${lang === 'es' ? 'Gastos del día' : 'Despesas do dia'}</span><span class="r verm">${fmt(totalSaidasDespesas)}</span></div>
   <hr class="sep2">
   <div class="row"><span class="lg">(=) ${lang === 'es' ? 'Caja final' : 'Caixa final'}</span><span class="r lg">${fmt(caixaFinal)}</span></div>
   <hr class="sep2">
@@ -451,7 +451,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
       </div>`;
     }).join('')}
   <hr class="sep">
-  <div class="row"><span class="verm b">${t.totalSaidas}</span><span class="r verm b">${fmt(totalSaidas)}</span></div>
+  <div class="row"><span class="verm b">${t.totalSaidas}</span><span class="r verm b">${fmt(totalSaidasDespesas)}</span></div>
 
   ${entradasMicroseguro.length > 0 ? `
   <hr class="sep2">
@@ -550,7 +550,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         let txt = `${rotaNome || 'Rota'} - ${t.extratoDia} ${dataHoje}\n`;
         txt += `${t.caixaInicial}: ${fmt(caixaInicial)}\n`;
         txt += `${t.cobrancas}: ${fmt(totalEntradas)}\n`;
-        txt += `${t.saidas}: ${fmt(totalSaidas)}\n`;
+        txt += `${t.saidas}: ${fmt(totalSaidasDespesas)}\n`;
         txt += `${t.caixaFinal}: ${fmt(caixaFinal)}`;
         await Share.share({ message: txt });
       } catch {}
@@ -593,7 +593,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
             </View>
             <View style={cupom.linha}>
               <Text style={cupom.txtVerm}>(-) {lang === 'es' ? 'Gastos del día' : 'Despesas do dia'}</Text>
-              <Text style={cupom.txtVerm}>{fmt(totalSaidas)}</Text>
+              <Text style={cupom.txtVerm}>{fmt(totalSaidasDespesas)}</Text>
             </View>
             <Text style={cupom.div2}>{DDIV}</Text>
             <View style={cupom.linha}>
@@ -874,7 +874,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                 <Text style={cupom.div1}>{DIV}</Text>
                 <View style={cupom.linha}>
                   <Text style={cupom.txtVerm}>{t.totalSaidas}</Text>
-                  <Text style={cupom.txtVerm}>{fmt(totalSaidas)}</Text>
+                  <Text style={cupom.txtVerm}>{fmt(totalSaidasDespesas)}</Text>
                 </View>
 
                 {/* ═══ SALDO FINAL ═══ */}

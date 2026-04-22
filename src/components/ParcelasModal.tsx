@@ -85,6 +85,7 @@ interface ParcelasModalProps {
   creditoDisponivel: number;
   liqId: string | null;
   isViz: boolean;
+  isClientePago?: boolean; // ⭐ Cliente está pago na liquidação - desabilita pagamento
   onPagar: (parcela: ParcelaModal) => void;
   onEstornar: (parcela: ParcelaModal) => void;
   t: {
@@ -128,6 +129,7 @@ export default function ParcelasModal({
   creditoDisponivel,
   liqId,
   isViz,
+  isClientePago = false,
   onPagar,
   onEstornar,
   t,
@@ -301,9 +303,9 @@ export default function ParcelasModal({
           <View style={S.mParcelaBtns}>
             {!isPago && p.parcela_id && !['RENEGOCIADO', 'QUITADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '') && p.status !== 'CANCELADO' && (
               <TouchableOpacity
-                style={[S.mBtnPagar, (!liqId || isViz) && S.mBtnPagarDisabled]}
+                style={[S.mBtnPagar, (!liqId || isViz || isClientePago) && S.mBtnPagarDisabled]}
                 onPress={() => onPagar(p)}
-                disabled={!liqId || isViz}
+                disabled={!liqId || isViz || isClientePago}
               >
                 <Text style={S.mBtnPagarIcon}>💰</Text>
                 <Text style={S.mBtnPagarTx}>{t.pagar}</Text>

@@ -81,6 +81,7 @@ interface ClienteCardLiquidacaoProps {
   naoPagosSet?: Set<string>;
   liqId: string | null;
   isViz: boolean;
+  isClientePago?: boolean; // ⭐ Cliente está no filtro "Pagas" - desabilita pagamento
   lang: Language;
   notasCount: number;
   t: {
@@ -114,6 +115,7 @@ export default function ClienteCardLiquidacao({
   naoPagosSet,
   liqId,
   isViz,
+  isClientePago = false,
   lang,
   notasCount,
   t,
@@ -126,7 +128,8 @@ export default function ClienteCardLiquidacao({
 }: ClienteCardLiquidacaoProps) {
   const swipeableRef = useRef<Swipeable>(null);
   
-  const pg = isPagaFn(e.parcela_id, e.status_dia, pagasSet);
+  // ⭐ Se isClientePago é true, forçar pg = true para desabilitar pagamento
+  const pg = isClientePago || isPagaFn(e.parcela_id, e.status_dia, pagasSet);
   const np = naoPagosSet?.has(e.parcela_id) || false;
   const bc = borderOf(e, pg);
   const bg = bgOf(e, pg);
