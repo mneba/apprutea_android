@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../services/supabase';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -49,8 +49,15 @@ export default function useClientesTodos({ rotaId, tab, setOrdemRotaMap, setRefr
   const [loadTodos, setLoadTodos] = useState(false);
   const [todosCount, setTodosCount] = useState<number | null>(null);
 
+  // ⭐ Ref espelhando o tamanho da lista — lemos sem criar dependência no useCallback
+  const todosListLenRef = useRef(0);
+  useEffect(() => { todosListLenRef.current = todosList.length; }, [todosList.length]);
+
   const loadTodosClientes = useCallback(async (forceReload = false) => {
-    if (!rotaId || (!forceReload && todosList.length > 0)) { setRefreshing(false); return; }
+    if (!rotaId || (!forceReload && todosListLenRef.current > 0)) { 
+      setRefreshing(false); 
+      return; 
+    }
     setLoadTodos(true);
     try {
       // Query 1: Todos os empréstimos da rota com dados do cliente
@@ -152,7 +159,7 @@ export default function useClientesTodos({ rotaId, tab, setOrdemRotaMap, setRefr
       setLoadTodos(false);
       setRefreshing(false);
     }
-  }, [rotaId, todosList.length, setOrdemRotaMap, setRefreshing]);
+  }, [rotaId, setOrdemRotaMap, setRefreshing]);
 
   // Carga quando muda para aba todos
   useEffect(() => {

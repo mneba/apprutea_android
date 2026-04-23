@@ -1778,6 +1778,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
             autorNome={vendedor?.nome || ''}
             autorTipo="VENDEDOR"
             liquidacaoId={liquidacao.id}
+            liquidacaoStatus={liquidacao.status}
             dataReferencia={liquidacao.data_abertura?.split('T')[0]}
             lang={language}
             permitirCriar={true}

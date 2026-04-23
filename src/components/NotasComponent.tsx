@@ -147,7 +147,7 @@ export function ModalNotasLista({
   // ⭐ NOVO: Verificar se pode criar nota (liquidação aberta ou reaberta)
   const podeCriarNota = permitirCriar && 
     liquidacaoId && 
-    (liquidacaoStatus === 'ABERTO' || liquidacaoStatus === 'REABERTO');
+    ['ABERTO', 'ABERTA', 'REABERTO', 'REABERTA'].includes(liquidacaoStatus || '');
 
   const carregarNotas = useCallback(async () => {
     if (!rotaId) return;
@@ -290,7 +290,7 @@ export function ModalNotasLista({
     return nota.autor_id === vendedorId && 
            liquidacaoId && 
            nota.liquidacao_id === liquidacaoId &&
-           (liquidacaoStatus === 'ABERTO' || liquidacaoStatus === 'REABERTO');
+           ['ABERTO', 'ABERTA', 'REABERTO', 'REABERTA'].includes(liquidacaoStatus || '');
   };
 
   const renderNota = ({ item: n }: { item: Nota }) => {
@@ -551,7 +551,7 @@ export function ModalCriarNota({
 
   // ⭐ NOVO: Verificar se pode criar nota
   const podeCriarNota = liquidacaoId && 
-    (liquidacaoStatus === 'ABERTO' || liquidacaoStatus === 'REABERTO');
+    ['ABERTO', 'ABERTA', 'REABERTO', 'REABERTA'].includes(liquidacaoStatus || '');
 
   // Focar no input ao abrir
   useEffect(() => {

@@ -392,6 +392,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   <div class="row"><span class="verde">(+) ${lang === 'es' ? 'Cobros del día' : 'Cobrança do dia'}</span><span class="r verde">${fmt(totalCobrancas)}</span></div>
   <div class="row"><span class="verde">(+) ${lang === 'es' ? 'Ingresos del día' : 'Receitas do dia'}</span><span class="r verde">${fmt(totalOutrasReceitas)}</span></div>
   <div class="row"><span class="verm">(-) ${lang === 'es' ? 'Gastos del día' : 'Despesas do dia'}</span><span class="r verm">${fmt(totalSaidasDespesas)}</span></div>
+  ${totalVendasEmprestimos > 0 ? `<div class="row"><span class="verm">(-) ${lang === 'es' ? 'Préstamos del día' : 'Empréstimos do dia'}</span><span class="r verm">${fmt(totalVendasEmprestimos)}</span></div>` : ''}
   <hr class="sep2">
   <div class="row"><span class="lg">(=) ${lang === 'es' ? 'Caja final' : 'Caixa final'}</span><span class="r lg">${fmt(caixaFinal)}</span></div>
   <hr class="sep2">
@@ -595,6 +596,12 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
               <Text style={cupom.txtVerm}>(-) {lang === 'es' ? 'Gastos del día' : 'Despesas do dia'}</Text>
               <Text style={cupom.txtVerm}>{fmt(totalSaidasDespesas)}</Text>
             </View>
+            {totalVendasEmprestimos > 0 && (
+              <View style={cupom.linha}>
+                <Text style={cupom.txtVerm}>(-) {lang === 'es' ? 'Préstamos del día' : 'Empréstimos do dia'}</Text>
+                <Text style={cupom.txtVerm}>{fmt(totalVendasEmprestimos)}</Text>
+              </View>
+            )}
             <Text style={cupom.div2}>{DDIV}</Text>
             <View style={cupom.linha}>
               <Text style={cupom.txtBold}>(=) {lang === 'es' ? 'Caja final' : 'Caixa final'}</Text>

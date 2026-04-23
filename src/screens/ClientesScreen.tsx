@@ -687,8 +687,17 @@ export default function ClientesScreen({ navigation, route }: any) {
   }, [raw.length, todosList.length]);
   
   // Quando o contexto carrega a liquidação aberta, ativar aba liquidação
+  // ⭐ CORREÇÃO: só força a troca UMA vez (primeira detecção) — senão pisca quando
+  // o usuário escolhe 'Todos' manualmente e o contexto recarrega a liquidação.
+  const jaAutoSelecionouLiquidacao = useRef(false);
   useEffect(() => {
-    if (liqCtx.temLiquidacaoAberta && liqCtx.liquidacaoAtual?.id && tab === 'todos') {
+    if (
+      !jaAutoSelecionouLiquidacao.current &&
+      liqCtx.temLiquidacaoAberta &&
+      liqCtx.liquidacaoAtual?.id &&
+      tab === 'todos'
+    ) {
+      jaAutoSelecionouLiquidacao.current = true;
       setTab('liquidacao');
     }
   }, [liqCtx.temLiquidacaoAberta, liqCtx.liquidacaoAtual?.id]);
@@ -709,7 +718,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       if (tab === 'liquidacao') {
         loadLiq();
       } else {
-        setTodosList([]);
+        // Não esvaziar a lista — loadTodosClientes(true) já recarrega sem piscar
         loadTodosClientes(true);
       }
     }, [tab, loadLiq, loadTodosClientes])
