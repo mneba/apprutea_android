@@ -528,6 +528,16 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         .limit(1);
       const emp = emps?.[0];
 
+      // Verificar se cliente tem histórico real (empréstimo QUITADO)
+      // — empréstimos CANCELADOS não contam como histórico, pois nunca aconteceram de fato
+      const { data: empsQuitados } = await supabase
+        .from('emprestimos')
+        .select('id')
+        .eq('cliente_id', cli.id)
+        .eq('status', 'QUITADO')
+        .limit(1);
+      const temHistoricoQuitado = !!(empsQuitados && empsQuitados.length > 0);
+
       // Determinar situação baseado no retorno da function + dados reais
       const temEmprestimoAtivo = !!emp;
 
@@ -556,22 +566,42 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
 
       if (!temEmprestimoAtivo) {
-        // Já teve empréstimo mas não tem ativo — renovação
-        // Preenche dados do cliente e fecha popup com aviso
-        setNome(cli.nome || '');
-        setTelefoneCelular(cli.telefone_celular || '');
-        setDocumento(cli.documento || docBusca);
-        setEndereco(cli.endereco || '');
-        setClienteEncontradoId(cli.id);
-        setClienteEncontradoCodigo(cli.codigo_cliente || null); // ⭐ Guardar código
-        setTipoEmprestimoDetectado('RENOVACAO');
-        setModalDocVisible(false);
-        const msg = lang === 'es'
-          ? `Cliente encontrado: ${cli.nome}. Este es un préstamo de renovación.`
-          : `Cliente encontrado: ${cli.nome}. Este é um empréstimo de renovação.`;
-        if (Platform.OS === 'web') window.alert(msg);
-        else Alert.alert(lang === 'es' ? 'Renovación' : 'Renovação', msg, [{ text: 'OK' }]);
-        return;
+        // Sem empréstimo ativo — pode ser RENOVAÇÃO (se já teve quitado)
+        // ou VENDA NOVA (se nunca teve quitado, ex: empréstimos anteriores cancelados)
+        if (temHistoricoQuitado) {
+          // Já teve empréstimo QUITADO — renovação
+          // Preenche dados do cliente e fecha popup com aviso
+          setNome(cli.nome || '');
+          setTelefoneCelular(cli.telefone_celular || '');
+          setDocumento(cli.documento || docBusca);
+          setEndereco(cli.endereco || '');
+          setClienteEncontradoId(cli.id);
+          setClienteEncontradoCodigo(cli.codigo_cliente || null); // ⭐ Guardar código
+          setTipoEmprestimoDetectado('RENOVACAO');
+          setModalDocVisible(false);
+          const msg = lang === 'es'
+            ? `Cliente encontrado: ${cli.nome}. Este es un préstamo de renovación.`
+            : `Cliente encontrado: ${cli.nome}. Este é um empréstimo de renovação.`;
+          if (Platform.OS === 'web') window.alert(msg);
+          else Alert.alert(lang === 'es' ? 'Renovación' : 'Renovação', msg, [{ text: 'OK' }]);
+          return;
+        } else {
+          // Cliente cadastrado mas sem histórico real (todos cancelados ou nenhum) — venda nova normal
+          setNome(cli.nome || '');
+          setTelefoneCelular(cli.telefone_celular || '');
+          setDocumento(cli.documento || docBusca);
+          setEndereco(cli.endereco || '');
+          setClienteEncontradoId(cli.id);
+          setClienteEncontradoCodigo(cli.codigo_cliente || null);
+          setTipoEmprestimoDetectado('NOVO');
+          setModalDocVisible(false);
+          const msg = lang === 'es'
+            ? `Cliente encontrado: ${cli.nome}. Complete los datos del préstamo.`
+            : `Cliente encontrado: ${cli.nome}. Preencha os dados do empréstimo.`;
+          if (Platform.OS === 'web') window.alert(msg);
+          else Alert.alert(lang === 'es' ? 'Cliente encontrado' : 'Cliente encontrado', msg, [{ text: 'OK' }]);
+          return;
+        }
       }
 
       if (temAtraso) {
