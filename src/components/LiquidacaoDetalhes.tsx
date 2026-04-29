@@ -18,6 +18,7 @@ import {
   Share,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -85,6 +86,17 @@ const i18n: Record<Lang, Record<string, string>> = {
     exclusaoSucesso: 'Movimentação excluída com sucesso!',
     exclusaoErro: 'Erro ao excluir movimentação',
     anulado: 'ANULADO',
+    // Cancelamento de empréstimo
+    cancelarEmprestimo: 'Cancelar empréstimo',
+    cancelarEmprestimoTitulo: 'Cancelar empréstimo?',
+    cancelarEmprestimoAviso: 'Esta ação não pode ser desfeita. O valor será revertido do caixa.',
+    cancelarEmprestimoMotivo: 'Motivo (opcional)',
+    cancelarEmprestimoMotivoPlaceholder: 'Ex.: erro de digitação, cliente desistiu...',
+    cancelarConfirmar: 'Confirmar cancelamento',
+    cancelarVoltar: 'Voltar',
+    cancelando: 'Cancelando...',
+    cancelamentoSucesso: 'Empréstimo cancelado com sucesso!',
+    cancelamentoErro: 'Erro ao cancelar',
   },
   'es': {
     extratoDia: 'EXTRACTO DEL DÍA', extratoLiq: 'EXTRACTO LIQUIDACIÓN DIARIA',
@@ -120,6 +132,17 @@ const i18n: Record<Lang, Record<string, string>> = {
     exclusaoSucesso: '¡Movimiento eliminado con éxito!',
     exclusaoErro: 'Error al eliminar movimiento',
     anulado: 'ANULADO',
+    // Cancelamento de empréstimo
+    cancelarEmprestimo: 'Cancelar préstamo',
+    cancelarEmprestimoTitulo: '¿Cancelar préstamo?',
+    cancelarEmprestimoAviso: 'Esta acción no se puede deshacer. El valor será revertido de la caja.',
+    cancelarEmprestimoMotivo: 'Motivo (opcional)',
+    cancelarEmprestimoMotivoPlaceholder: 'Ej.: error de digitación, cliente desistió...',
+    cancelarConfirmar: 'Confirmar cancelación',
+    cancelarVoltar: 'Volver',
+    cancelando: 'Cancelando...',
+    cancelamentoSucesso: '¡Préstamo cancelado con éxito!',
+    cancelamentoErro: 'Error al cancelar',
   },
 };
 
@@ -1209,6 +1232,7 @@ interface FinanceiroProps {
   lang?: Lang;
   isLiquidacaoAberta?: boolean;
   onRefresh?: () => void;
+  userId?: string | null;        // ⭐ NOVO: id do usuário logado, p/ validar autoria do empréstimo no cancelamento
 }
 
 const getConfigFinanceiro = (lang: Lang): Record<TipoFinanceiro, { titulo: string; icone: string; cor: string; filtro: any }> => ({
@@ -1217,11 +1241,16 @@ const getConfigFinanceiro = (lang: Lang): Record<TipoFinanceiro, { titulo: strin
   DESPESAS: { titulo: i18n[lang].despesasTitulo, icone: '📤', cor: '#EF4444', filtro: { tipo: 'PAGAR' } },
 });
 
-export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalValor, totalQtd, lang = 'pt-BR', isLiquidacaoAberta = false, onRefresh }: FinanceiroProps) {
+export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalValor, totalQtd, lang = 'pt-BR', isLiquidacaoAberta = false, onRefresh, userId }: FinanceiroProps) {
   const t = i18n[lang];
   const [registros, setRegistros] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [excluindo, setExcluindo] = useState<string | null>(null);
+  
+  // ⭐ NOVO: estado do modal de cancelamento de empréstimo
+  const [cancelandoEmprestimo, setCancelandoEmprestimo] = useState<any | null>(null);
+  const [motivoCancelamento, setMotivoCancelamento] = useState('');
+  const [confirmandoCancelamento, setConfirmandoCancelamento] = useState(false);
 
   const config = getConfigFinanceiro(lang)[tipo];
 
@@ -1248,6 +1277,7 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
             id, valor_principal, valor_total, valor_parcela, numero_parcelas,
             taxa_juros, frequencia_pagamento, data_primeiro_vencimento,
             tipo_emprestimo, created_at, data_emprestimo,
+            status, criado_por_user_id, total_pago, numero_parcelas_pagas,
             cliente:cliente_id(nome, codigo_cliente)
           `)
           .eq('liquidacao_id', liquidacaoId)
@@ -1283,6 +1313,55 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
       console.error(`Erro ${tipo}:`, e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ⭐ NOVO: Função para cancelar empréstimo do vendedor
+  const handleCancelarEmprestimo = async () => {
+    if (!cancelandoEmprestimo || !userId) return;
+    
+    setConfirmandoCancelamento(true);
+    try {
+      const { data, error } = await supabase.rpc('fn_cancelar_emprestimo_vendedor', {
+        p_emprestimo_id: cancelandoEmprestimo.id,
+        p_user_id: userId,
+        p_motivo: motivoCancelamento.trim() || null,
+      });
+      
+      if (error) throw error;
+      
+      const res = Array.isArray(data) ? data[0] : data;
+      if (res?.sucesso) {
+        // Limpar estado e fechar modal de confirmação
+        setCancelandoEmprestimo(null);
+        setMotivoCancelamento('');
+        // Recarregar lista
+        await carregarRegistros();
+        if (onRefresh) onRefresh();
+        
+        if (Platform.OS === 'web') {
+          window.alert(t.cancelamentoSucesso);
+        } else {
+          Alert.alert(t.cancelamentoSucesso);
+        }
+      } else {
+        const msg = res?.mensagem || t.cancelamentoErro;
+        if (Platform.OS === 'web') {
+          window.alert(msg);
+        } else {
+          Alert.alert(t.cancelamentoErro, msg);
+        }
+      }
+    } catch (e: any) {
+      console.error('Erro ao cancelar empréstimo:', e);
+      const msg = e?.message || t.cancelamentoErro;
+      if (Platform.OS === 'web') {
+        window.alert(msg);
+      } else {
+        Alert.alert(t.cancelamentoErro, msg);
+      }
+    } finally {
+      setConfirmandoCancelamento(false);
     }
   };
 
@@ -1358,6 +1437,15 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
       const primeiroPgto = item.data_primeiro_vencimento
         ? new Date(item.data_primeiro_vencimento + 'T00:00:00').toLocaleDateString(lang === 'es' ? 'es-CO' : 'pt-BR')
         : '—';
+      
+      // ⭐ NOVO: regras de cancelamento de venda
+      // Vendedor pode cancelar se: liquidação aberta + autor do empréstimo + zero pagamentos
+      const semPagamentos = (item.numero_parcelas_pagas || 0) === 0 
+        && parseFloat(item.total_pago || 0) === 0;
+      const ehAutor = userId && item.criado_por_user_id === userId;
+      const statusOk = item.status === 'ATIVO' || item.status === 'VENCIDO';
+      const podeCancelarVenda = isLiquidacaoAberta && ehAutor && semPagamentos && statusOk;
+      
       return (
         <View style={dStyles.finItem}>
           <View style={dStyles.finItemTop}>
@@ -1373,9 +1461,34 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
             </View>
             <Text style={[dStyles.finItemValor, { color: config.cor }]}>{fmt(parseFloat(item.valor_principal || 0))}</Text>
           </View>
-          <View style={dStyles.finItemBottom}>
-            <Text style={dStyles.finItemHora}>{fmtHora(item.created_at)}</Text>
-            <Text style={dStyles.finItemForma}>{item.tipo_emprestimo || 'NOVO'}</Text>
+          <View style={[dStyles.finItemBottom, { justifyContent: 'space-between' }]}>
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <Text style={dStyles.finItemHora}>{fmtHora(item.created_at)}</Text>
+              <Text style={dStyles.finItemForma}>{item.tipo_emprestimo || 'NOVO'}</Text>
+            </View>
+            {podeCancelarVenda && (
+              <TouchableOpacity
+                onPress={() => {
+                  setCancelandoEmprestimo(item);
+                  setMotivoCancelamento('');
+                }}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                  paddingHorizontal: 8,
+                  paddingVertical: 4,
+                  borderRadius: 6,
+                  backgroundColor: '#FEE2E2',
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="trash-outline" size={14} color="#DC2626" />
+                <Text style={{ fontSize: 11, fontWeight: '600', color: '#DC2626' }}>
+                  {t.cancelar}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       );
@@ -1486,6 +1599,97 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
           />
         )}
       </View>
+
+      {/* ⭐ MODAL DE CONFIRMAÇÃO DE CANCELAMENTO DE EMPRÉSTIMO */}
+      <Modal
+        visible={!!cancelandoEmprestimo}
+        animationType="fade"
+        transparent
+        onRequestClose={() => {
+          if (!confirmandoCancelamento) {
+            setCancelandoEmprestimo(null);
+            setMotivoCancelamento('');
+          }
+        }}
+      >
+        <View style={cancelStyles.overlay}>
+          <View style={cancelStyles.dialog}>
+            <View style={cancelStyles.header}>
+              <Ionicons name="warning" size={20} color="#DC2626" />
+              <Text style={cancelStyles.title}>{t.cancelarEmprestimoTitulo}</Text>
+            </View>
+            
+            {cancelandoEmprestimo && (
+              <View style={cancelStyles.body}>
+                <View style={cancelStyles.row}>
+                  <Text style={cancelStyles.label}>{t.cliente}:</Text>
+                  <Text style={cancelStyles.value} numberOfLines={1}>
+                    {cancelandoEmprestimo.cliente?.nome || '—'}
+                  </Text>
+                </View>
+                <View style={cancelStyles.row}>
+                  <Text style={cancelStyles.label}>{t.valor}:</Text>
+                  <Text style={cancelStyles.value}>
+                    {fmt(parseFloat(cancelandoEmprestimo.valor_principal || 0))}
+                  </Text>
+                </View>
+                <View style={cancelStyles.row}>
+                  <Text style={cancelStyles.label}>{lang === 'es' ? 'Tipo' : 'Tipo'}:</Text>
+                  <Text style={cancelStyles.value}>
+                    {cancelandoEmprestimo.tipo_emprestimo || 'NOVO'}
+                  </Text>
+                </View>
+                
+                <Text style={cancelStyles.aviso}>
+                  ⚠️ {t.cancelarEmprestimoAviso}
+                </Text>
+                
+                <Text style={cancelStyles.motivoLabel}>
+                  {t.cancelarEmprestimoMotivo}
+                </Text>
+                <TextInput
+                  style={cancelStyles.input}
+                  value={motivoCancelamento}
+                  onChangeText={setMotivoCancelamento}
+                  placeholder={t.cancelarEmprestimoMotivoPlaceholder}
+                  placeholderTextColor="#9CA3AF"
+                  multiline
+                  numberOfLines={3}
+                  maxLength={500}
+                  editable={!confirmandoCancelamento}
+                />
+              </View>
+            )}
+            
+            <View style={cancelStyles.footer}>
+              <TouchableOpacity
+                style={[cancelStyles.btnVoltar, confirmandoCancelamento && { opacity: 0.5 }]}
+                onPress={() => {
+                  setCancelandoEmprestimo(null);
+                  setMotivoCancelamento('');
+                }}
+                disabled={confirmandoCancelamento}
+              >
+                <Text style={cancelStyles.btnVoltarTx}>{t.cancelarVoltar}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[cancelStyles.btnConfirmar, confirmandoCancelamento && { opacity: 0.7 }]}
+                onPress={handleCancelarEmprestimo}
+                disabled={confirmandoCancelamento}
+              >
+                {confirmandoCancelamento ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <Text style={cancelStyles.btnConfirmarTx}>{t.cancelando}</Text>
+                  </View>
+                ) : (
+                  <Text style={cancelStyles.btnConfirmarTx}>{t.cancelarConfirmar}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 }
@@ -1730,4 +1934,125 @@ const dStyles = StyleSheet.create({
   microItemHora: { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
   microItemCancelado: { backgroundColor: '#FEE2E2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginTop: 4 },
   microItemCanceladoText: { fontSize: 9, fontWeight: '700', color: '#DC2626' },
+});
+
+// =====================================================
+// ESTILOS DO MODAL DE CANCELAMENTO DE EMPRÉSTIMO
+// =====================================================
+const cancelStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  dialog: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    width: '100%',
+    maxWidth: 420,
+    overflow: 'hidden',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1F2937',
+  },
+  body: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  label: {
+    fontSize: 13,
+    color: '#6B7280',
+    width: 80,
+  },
+  value: {
+    fontSize: 13,
+    color: '#1F2937',
+    fontWeight: '600',
+    flex: 1,
+  },
+  aviso: {
+    fontSize: 12,
+    color: '#92400E',
+    backgroundColor: '#FEF3C7',
+    padding: 10,
+    borderRadius: 8,
+    marginTop: 12,
+    marginBottom: 14,
+  },
+  motivoLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 6,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+    color: '#1F2937',
+    minHeight: 70,
+    textAlignVertical: 'top',
+    backgroundColor: '#F9FAFB',
+  },
+  footer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+    gap: 10,
+  },
+  btnVoltar: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnVoltarTx: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  btnConfirmar: {
+    flex: 1.4,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#DC2626',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnConfirmarTx: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
 });

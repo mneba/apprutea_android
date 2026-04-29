@@ -1730,6 +1730,9 @@ export default function LiquidacaoScreen({ navigation }: any) {
             tipo="VENDAS"
             totalValor={vendasReal}
             totalQtd={qtdVendasReal}
+            isLiquidacaoAberta={isAberto || isReaberto}
+            onRefresh={carregarLiquidacoes}
+            userId={vendedor?.user_id || null}
           />
           <ModalFinanceiro
             visible={modalReceitasVisible}
