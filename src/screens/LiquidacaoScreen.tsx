@@ -663,6 +663,15 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
   const formatarData = (data: string | Date | null) => {
     if (!data) return '-';
+    // Trata strings 'YYYY-MM-DD' (sem hora) sem cair na armadilha do UTC
+    if (typeof data === 'string') {
+      const datePart = data.substring(0, 10); // pega YYYY-MM-DD
+      const partes = datePart.split('-');
+      if (partes.length === 3) {
+        const [ano, mes, dia] = partes;
+        return `${dia}/${mes}/${ano}`;
+      }
+    }
     const d = typeof data === 'string' ? new Date(data) : data;
     return d.toLocaleDateString('pt-BR');
   };
@@ -1366,7 +1375,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
               <View style={styles.statusRow}>
                 <View style={styles.dataContainer}>
                   <Text style={styles.statusIcon}>{isAberto ? '🔓' : isReaberto ? '🔄' : '🔒'}</Text>
-                  <Text style={styles.dataText}>{formatarData(liquidacao.data_abertura)}</Text>
+                  <Text style={styles.dataText}>{formatarData(liquidacao.data_liquidacao || liquidacao.data_abertura)}</Text>
                 </View>
                 <View style={[styles.statusBadge, { backgroundColor: isReaberto ? '#FEF3C7' : isAberto ? '#D1FAE5' : '#FEE2E2' }]}>
                   <Text style={[styles.statusText, { color: isReaberto ? '#D97706' : isAberto ? '#047857' : '#DC2626' }]}>
@@ -1782,7 +1791,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
             autorTipo="VENDEDOR"
             liquidacaoId={liquidacao.id}
             liquidacaoStatus={liquidacao.status}
-            dataReferencia={liquidacao.data_abertura?.split('T')[0]}
+            dataReferencia={liquidacao.data_liquidacao || liquidacao.data_abertura?.split('T')[0]}
             lang={language}
             permitirCriar={true}
             obsLocalPadrao="Geral"
