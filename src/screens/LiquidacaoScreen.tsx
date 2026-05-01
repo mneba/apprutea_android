@@ -310,7 +310,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
         setNotasCount(res?.total || 0);
       } catch { }
     })();
-  }, [liquidacao?.id, vendedor?.rota_id, vendedor?.id]);
+  }, [liquidacao?.id, liquidacao?.updated_at, vendedor?.rota_id, vendedor?.id]);
 
   // Buscar totais de receitas financeiras (sem cobranças) e total parcelas pagas
   useEffect(() => {
