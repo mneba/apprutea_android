@@ -687,17 +687,8 @@ export default function ClientesScreen({ navigation, route }: any) {
   }, [raw.length, todosList.length]);
   
   // Quando o contexto carrega a liquidação aberta, ativar aba liquidação
-  // ⭐ CORREÇÃO: só força a troca UMA vez (primeira detecção) — senão pisca quando
-  // o usuário escolhe 'Todos' manualmente e o contexto recarrega a liquidação.
-  const jaAutoSelecionouLiquidacao = useRef(false);
   useEffect(() => {
-    if (
-      !jaAutoSelecionouLiquidacao.current &&
-      liqCtx.temLiquidacaoAberta &&
-      liqCtx.liquidacaoAtual?.id &&
-      tab === 'todos'
-    ) {
-      jaAutoSelecionouLiquidacao.current = true;
+    if (liqCtx.temLiquidacaoAberta && liqCtx.liquidacaoAtual?.id && tab === 'todos') {
       setTab('liquidacao');
     }
   }, [liqCtx.temLiquidacaoAberta, liqCtx.liquidacaoAtual?.id]);
@@ -718,7 +709,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       if (tab === 'liquidacao') {
         loadLiq();
       } else {
-        // Não esvaziar a lista — loadTodosClientes(true) já recarrega sem piscar
+        setTodosList([]);
         loadTodosClientes(true);
       }
     }, [tab, loadLiq, loadTodosClientes])
@@ -1732,6 +1723,42 @@ return (
         onClose={() => { setModalDetalhesVisible(false); setDetalhesCliente(null); }}
         cliente={detalhesCliente}
         lang={lang}
+        onNovoEmprestimo={(cli) => {
+          // Mesmo fluxo do onNovoEmprestimo do ClienteCardTodos
+          const confirmar = () => { 
+            const nav = navigation.getParent() || navigation; 
+            nav.navigate('NovoCliente', { 
+              clienteExistente: { 
+                id: cli.id, 
+                nome: cli.nome, 
+                telefone_celular: (cli as any).telefone_celular || '', 
+                documento: (cli as any).codigo_cliente?.toString() || '' 
+              } 
+            }); 
+          };
+          if (Platform.OS === 'web') { 
+            if (window.confirm(t.confirmarNovoEmprestimo)) confirmar(); 
+          } else { 
+            Alert.alert(t.novoEmprestimo, t.confirmarNovoEmprestimo, [
+              { text: t.nao, style: 'cancel' }, 
+              { text: t.sim, onPress: confirmar }
+            ]); 
+          }
+        }}
+        onRenegociar={(cli, emp) => {
+          // Mesmo fluxo do onRenegociar do ClienteCardTodos
+          const nav = navigation.getParent() || navigation;
+          nav.navigate('NovoCliente', { 
+            renegociacao: { 
+              emprestimo_id: emp.id, 
+              cliente_id: cli.id, 
+              cliente_nome: cli.nome, 
+              saldo_devedor: (emp as any).valor_saldo || 0,
+              telefone_celular: (cli as any).telefone_celular || '', 
+              codigo_cliente: (cli as any).codigo_cliente 
+            } 
+          });
+        }}
       />
 
       {/* ⭐ Modal Não Pago */}

@@ -97,6 +97,8 @@ const i18n: Record<Lang, Record<string, string>> = {
     cancelando: 'Cancelando...',
     cancelamentoSucesso: 'Empréstimo cancelado com sucesso!',
     cancelamentoErro: 'Erro ao cancelar',
+    microseguroCancelado: 'Microseguro:',
+    microseguroSeraCancelado: 'também será cancelado',
   },
   'es': {
     extratoDia: 'EXTRACTO DEL DÍA', extratoLiq: 'EXTRACTO LIQUIDACIÓN DIARIA',
@@ -143,6 +145,8 @@ const i18n: Record<Lang, Record<string, string>> = {
     cancelando: 'Cancelando...',
     cancelamentoSucesso: '¡Préstamo cancelado con éxito!',
     cancelamentoErro: 'Error al cancelar',
+    microseguroCancelado: 'Microseguro:',
+    microseguroSeraCancelado: 'también será cancelado',
   },
 };
 
@@ -1251,6 +1255,8 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
   const [cancelandoEmprestimo, setCancelandoEmprestimo] = useState<any | null>(null);
   const [motivoCancelamento, setMotivoCancelamento] = useState('');
   const [confirmandoCancelamento, setConfirmandoCancelamento] = useState(false);
+  // Microseguro vinculado ao empréstimo (se houver) — null = ainda buscando, undefined = não tem
+  const [microseguroVinculado, setMicroseguroVinculado] = useState<number | null | undefined>(undefined);
 
   const config = getConfigFinanceiro(lang)[tipo];
 
@@ -1316,6 +1322,30 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
     }
   };
 
+  // ⭐ NOVO: Abrir modal de cancelamento — busca microseguro vinculado primeiro
+  const abrirModalCancelamento = async (emprestimo: any) => {
+    setCancelandoEmprestimo(emprestimo);
+    setMotivoCancelamento('');
+    setMicroseguroVinculado(null); // sinal de "buscando..."
+    
+    try {
+      const { data } = await supabase
+        .from('microseguro_vendas')
+        .select('valor')
+        .eq('emprestimo_id', emprestimo.id)
+        .limit(1);
+      
+      if (data && data.length > 0) {
+        setMicroseguroVinculado(parseFloat(data[0].valor));
+      } else {
+        setMicroseguroVinculado(undefined); // não tem microseguro
+      }
+    } catch (e) {
+      console.error('Erro ao buscar microseguro vinculado:', e);
+      setMicroseguroVinculado(undefined); // em caso de erro, assume sem microseguro
+    }
+  };
+
   // ⭐ NOVO: Função para cancelar empréstimo do vendedor
   const handleCancelarEmprestimo = async () => {
     if (!cancelandoEmprestimo || !userId) return;
@@ -1335,6 +1365,7 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
         // Limpar estado e fechar modal de confirmação
         setCancelandoEmprestimo(null);
         setMotivoCancelamento('');
+        setMicroseguroVinculado(undefined);
         // Recarregar lista
         await carregarRegistros();
         if (onRefresh) onRefresh();
@@ -1468,10 +1499,7 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
             </View>
             {podeCancelarVenda && (
               <TouchableOpacity
-                onPress={() => {
-                  setCancelandoEmprestimo(item);
-                  setMotivoCancelamento('');
-                }}
+                onPress={() => abrirModalCancelamento(item)}
                 style={{
                   flexDirection: 'row',
                   alignItems: 'center',
@@ -1609,6 +1637,7 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
           if (!confirmandoCancelamento) {
             setCancelandoEmprestimo(null);
             setMotivoCancelamento('');
+            setMicroseguroVinculado(undefined);
           }
         }}
       >
@@ -1640,6 +1669,21 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
                   </Text>
                 </View>
                 
+                {/* ⭐ Linha de microseguro vinculado (se houver) */}
+                {microseguroVinculado !== undefined && microseguroVinculado !== null && (
+                  <View style={cancelStyles.microseguroBox}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name="shield-checkmark-outline" size={14} color="#7C3AED" />
+                      <Text style={cancelStyles.microseguroLabel}>
+                        {t.microseguroCancelado} {fmt(microseguroVinculado)}
+                      </Text>
+                    </View>
+                    <Text style={cancelStyles.microseguroAviso}>
+                      {t.microseguroSeraCancelado}
+                    </Text>
+                  </View>
+                )}
+                
                 <Text style={cancelStyles.aviso}>
                   ⚠️ {t.cancelarEmprestimoAviso}
                 </Text>
@@ -1667,6 +1711,7 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
                 onPress={() => {
                   setCancelandoEmprestimo(null);
                   setMotivoCancelamento('');
+                  setMicroseguroVinculado(undefined);
                 }}
                 disabled={confirmandoCancelamento}
               >
@@ -2002,6 +2047,26 @@ const cancelStyles = StyleSheet.create({
     borderRadius: 8,
     marginTop: 12,
     marginBottom: 14,
+  },
+  microseguroBox: {
+    backgroundColor: '#F3E8FF',
+    borderLeftWidth: 3,
+    borderLeftColor: '#7C3AED',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 6,
+    marginTop: 10,
+  },
+  microseguroLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#5B21B6',
+  },
+  microseguroAviso: {
+    fontSize: 11,
+    color: '#7C3AED',
+    marginTop: 2,
+    marginLeft: 20,
   },
   motivoLabel: {
     fontSize: 12,

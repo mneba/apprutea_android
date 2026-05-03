@@ -75,6 +75,8 @@ const T = {
     ativo: 'ATIVO', quitado: 'QUITADO', cancelado: 'CANCELADO', renegociado: 'RENEGOCIADO',
     vencido: 'VENCIDO', pendente: 'PENDENTE', parcial: 'PARCIAL', pago: 'PAGO',
     restantes: 'restantes',
+    novoEmprestimo: 'Novo empréstimo',
+    renegociar: 'Renegociar',
   },
   'es': {
     pessoais: 'Personales', emprestimo: 'Préstamo', historico: 'Historial',
@@ -89,6 +91,8 @@ const T = {
     ativo: 'ACTIVO', quitado: 'LIQUIDADO', cancelado: 'CANCELADO', renegociado: 'RENEGOCIADO',
     vencido: 'VENCIDO', pendente: 'PENDIENTE', parcial: 'PARCIAL', pago: 'PAGADO',
     restantes: 'restantes',
+    novoEmprestimo: 'Nuevo préstamo',
+    renegociar: 'Renegociar',
   },
 };
 
@@ -156,10 +160,12 @@ interface Props {
   onClose: () => void;
   cliente: ClienteInfo | null;
   lang?: Language;
+  onNovoEmprestimo?: (cliente: ClienteInfo) => void;
+  onRenegociar?: (cliente: ClienteInfo, emprestimo: Emprestimo) => void;
 }
 
 // ==================== COMPONENTE ====================
-export default function ClienteDetalhesModal({ visible, onClose, cliente, lang = 'pt-BR' }: Props) {
+export default function ClienteDetalhesModal({ visible, onClose, cliente, lang = 'pt-BR', onNovoEmprestimo, onRenegociar }: Props) {
   const t = T[lang];
   const [aba, setAba] = useState<Aba>('pessoais');
   const [loading, setLoading] = useState(false);
@@ -177,7 +183,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       // 1. Dados completos do cliente
       const { data: cliData } = await supabase
         .from('clientes')
-        .select('id, nome, documento, telefone_celular, endereco, status, codigo_cliente, created_at')
+        .select('id, nome, documento, telefone_celular, endereco, status, codigo_cliente, created_at, permite_emprestimo_adicional, permite_renegociacao')
         .eq('id', cliente.id)
         .single();
       setClienteCompleto(cliData);
@@ -390,6 +396,44 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           <View style={[S.empBarFill, { width: `${pct}%`, backgroundColor: pct >= 100 ? '#10B981' : pct >= 50 ? '#3B82F6' : '#F59E0B' }]} />
         </View>
 
+        {/* ⭐ Botão Renegociar — só aparece quando empréstimo tem atraso E cliente está autorizado */}
+        {(() => {
+          if (somenteLeitura || !cliente || !onRenegociar) return null;
+          const temAtraso = (emp.parcelas_vencidas || 0) > 0 || emp.status === 'VENCIDO';
+          const permiteReneg = clienteCompleto?.permite_renegociacao === true 
+            || clienteCompleto?.permite_renegociacao === 'true';
+          
+          if (!temAtraso) return null;
+          
+          if (!permiteReneg) {
+            // Mostrar aviso em vez do botão
+            return (
+              <View style={S.avisoAutorizacao}>
+                <Text style={S.avisoIcone}>🔒</Text>
+                <Text style={S.avisoTexto}>
+                  {lang === 'es' 
+                    ? 'Para renegociar, solicite autorización al administrador.' 
+                    : 'Para renegociar, solicite autorização ao administrador.'}
+                </Text>
+              </View>
+            );
+          }
+          
+          return (
+            <TouchableOpacity 
+              style={S.btnRenegociar} 
+              onPress={() => {
+                onClose();
+                onRenegociar(cliente, emp);
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={S.btnRenegociarIcon}>↻</Text>
+              <Text style={S.btnRenegociarText}>{t.renegociar}</Text>
+            </TouchableOpacity>
+          );
+        })()}
+
         {/* Expandido */}
         {isExp && (
           <View style={S.empExpanded}>
@@ -528,20 +572,63 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       </View>
     );
   };
-  const renderEmprestimo = () => (
-    <ScrollView style={S.abaContent} showsVerticalScrollIndicator={false}>
-      {loading ? (
-        <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
-      ) : empAtivos.length === 0 ? (
-        <View style={S.emptyBox}>
-          <Text style={S.emptyIcon}>📋</Text>
-          <Text style={S.emptyText}>{t.semEmprestimo}</Text>
-        </View>
-      ) : (
-        empAtivos.map(emp => renderEmprestimoCard(emp, false))
-      )}
-    </ScrollView>
-  );
+  const renderEmprestimo = () => {
+    // ⭐ Cliente está em dia se nenhum empréstimo ativo tem parcelas vencidas
+    const totalVencidas = empAtivos.reduce((s, e) => s + (e.parcelas_vencidas || 0), 0);
+    const clienteEmDia = totalVencidas === 0;
+    const temEmprestimoAtivo = empAtivos.length > 0;
+    
+    // Permissões do cliente (vindas do banco via clienteCompleto)
+    const permiteAdicional = clienteCompleto?.permite_emprestimo_adicional === true 
+      || clienteCompleto?.permite_emprestimo_adicional === 'true';
+    
+    // ⭐ Botão "Novo empréstimo" aparece quando:
+    //   - Sem empréstimo ativo (renovação livre) OU
+    //   - Com empréstimo ativo em dia + cliente autorizado para adicional
+    const podeMostrarNovoEmprestimo = clienteEmDia && (!temEmprestimoAtivo || permiteAdicional);
+    
+    return (
+      <ScrollView style={S.abaContent} showsVerticalScrollIndicator={false}>
+        {/* ⭐ Botão Novo Empréstimo (cliente-level) */}
+        {podeMostrarNovoEmprestimo && cliente && onNovoEmprestimo && (
+          <TouchableOpacity 
+            style={S.btnNovoEmprestimo} 
+            onPress={() => {
+              onClose();
+              onNovoEmprestimo(cliente);
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={S.btnNovoEmprestimoIcon}>➕</Text>
+            <Text style={S.btnNovoEmprestimoText}>{t.novoEmprestimo}</Text>
+          </TouchableOpacity>
+        )}
+        
+        {/* ⭐ Aviso quando precisa de autorização */}
+        {clienteEmDia && temEmprestimoAtivo && !permiteAdicional && (
+          <View style={S.avisoAutorizacao}>
+            <Text style={S.avisoIcone}>🔒</Text>
+            <Text style={S.avisoTexto}>
+              {lang === 'es' 
+                ? 'Para nuevo préstamo, solicite autorización al administrador.' 
+                : 'Para novo empréstimo, solicite autorização ao administrador.'}
+            </Text>
+          </View>
+        )}
+        
+        {loading ? (
+          <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
+        ) : empAtivos.length === 0 ? (
+          <View style={S.emptyBox}>
+            <Text style={S.emptyIcon}>📋</Text>
+            <Text style={S.emptyText}>{t.semEmprestimo}</Text>
+          </View>
+        ) : (
+          empAtivos.map(emp => renderEmprestimoCard(emp, false))
+        )}
+      </ScrollView>
+    );
+  };
 
   // ==================== ABA HISTÓRICO ====================
   const renderHistorico = () => (
@@ -716,4 +803,60 @@ const S = StyleSheet.create({
   emptyBox: { alignItems: 'center', paddingTop: 50 },
   emptyIcon: { fontSize: 40, marginBottom: 10 },
   emptyText: { fontSize: 14, color: '#9CA3AF' },
+  // ⭐ Botão Novo Empréstimo (cliente-level, no topo da aba)
+  btnNovoEmprestimo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#10B981',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    marginBottom: 16,
+    gap: 8,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  btnNovoEmprestimoIcon: { fontSize: 18, color: '#FFFFFF', fontWeight: '700' },
+  btnNovoEmprestimoText: { fontSize: 15, color: '#FFFFFF', fontWeight: '700' },
+  // ⭐ Botão Renegociar (empréstimo-level, dentro do card)
+  btnRenegociar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FED7AA',
+    borderWidth: 1,
+    borderColor: '#FB923C',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    marginTop: 10,
+    gap: 6,
+  },
+  btnRenegociarIcon: { fontSize: 14, color: '#C2410C', fontWeight: '700' },
+  btnRenegociarText: { fontSize: 13, color: '#C2410C', fontWeight: '600' },
+  // ⭐ Aviso quando precisa de autorização
+  avisoAutorizacao: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF3C7',
+    borderLeftWidth: 3,
+    borderLeftColor: '#F59E0B',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 6,
+    marginTop: 10,
+    marginBottom: 10,
+    gap: 8,
+  },
+  avisoIcone: { fontSize: 14 },
+  avisoTexto: { 
+    fontSize: 12, 
+    color: '#92400E', 
+    flex: 1,
+    fontStyle: 'italic',
+  },
 });

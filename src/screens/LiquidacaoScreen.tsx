@@ -346,7 +346,16 @@ export default function LiquidacaoScreen({ navigation }: any) {
         setTotalParcelasPagas(pagTotal);
       } catch { }
     })();
-  }, [liquidacao?.id, liquidacao?.valor_recebido_dia, (liquidacao as any)?.clientes_pagos]);
+  }, [
+    liquidacao?.id, 
+    liquidacao?.updated_at, 
+    liquidacao?.valor_recebido_dia, 
+    (liquidacao as any)?.clientes_pagos,
+    (liquidacao as any)?.total_receitas_dia,    // ⭐ trigger atualiza após nova receita
+    (liquidacao as any)?.qtd_receitas_dia,
+    (liquidacao as any)?.total_despesas_dia,
+    (liquidacao as any)?.qtd_despesas_dia,
+  ]);
   
   // Dados do modo visualização (dias sem liquidação)
   const [dadosVisualizacao, setDadosVisualizacao] = useState<{

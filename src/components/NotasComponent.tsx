@@ -60,6 +60,14 @@ const textos = {
     cliente: 'Cliente', observacao: 'Observação de resolução...',
     confirmarResolver: 'Confirmar resolução?',
     liquidacaoFechada: 'Abra a liquidação para criar notas',
+    excluir: 'Excluir',
+    excluirNotaTitulo: 'Excluir esta nota?',
+    excluirNotaAviso: 'Esta ação não pode ser desfeita. A nota será removida permanentemente.',
+    excluirVoltar: 'Voltar',
+    excluirConfirmar: 'Excluir',
+    excluindo: 'Excluindo...',
+    notaExcluida: 'Nota excluída com sucesso',
+    erroExcluir: 'Erro ao excluir nota',
   },
   'es': {
     notas: 'Notas', notasDoDia: 'Notas del Día', novaNota: '+ Nueva Nota',
@@ -75,6 +83,14 @@ const textos = {
     cliente: 'Cliente', observacao: 'Observación de resolución...',
     confirmarResolver: '¿Confirmar resolución?',
     liquidacaoFechada: 'Abra la liquidación para crear notas',
+    excluir: 'Eliminar',
+    excluirNotaTitulo: '¿Eliminar esta nota?',
+    excluirNotaAviso: 'Esta acción no se puede deshacer. La nota será eliminada permanentemente.',
+    excluirVoltar: 'Volver',
+    excluirConfirmar: 'Eliminar',
+    excluindo: 'Eliminando...',
+    notaExcluida: 'Nota eliminada con éxito',
+    erroExcluir: 'Error al eliminar nota',
   },
 };
 
@@ -184,6 +200,10 @@ export function ModalNotasLista({
   const [editandoTexto, setEditandoTexto] = useState('');
   const [salvandoEdicao, setSalvandoEdicao] = useState(false);
 
+  // ⭐ NOVO: Exclusão de nota
+  const [notaParaExcluir, setNotaParaExcluir] = useState<Nota | null>(null);
+  const [excluindoNota, setExcluindoNota] = useState(false);
+
   const handleEditar = useCallback(async (notaId: string) => {
     if (!editandoTexto.trim()) return;
     setSalvandoEdicao(true);
@@ -199,6 +219,23 @@ export function ModalNotasLista({
       setSalvandoEdicao(false);
     }
   }, [editandoTexto, carregarNotas]);
+
+  // ⭐ NOVO: Excluir nota (HARD delete)
+  const handleExcluirNota = useCallback(async () => {
+    if (!notaParaExcluir) return;
+    setExcluindoNota(true);
+    try {
+      const { error } = await supabase.from('notas').delete().eq('id', notaParaExcluir.id);
+      if (error) throw error;
+      setNotaParaExcluir(null);
+      carregarNotas();
+      showAlert('✅', t.notaExcluida);
+    } catch (e: any) {
+      showAlert('❌', e?.message || t.erroExcluir);
+    } finally {
+      setExcluindoNota(false);
+    }
+  }, [notaParaExcluir, carregarNotas, t]);
 
   // Locais únicos para breadcrumbs
   const locaisUnicos = [...new Set(notas.map(n => n.obs_local).filter(Boolean))];
@@ -293,10 +330,25 @@ export function ModalNotasLista({
            ['ABERTO', 'ABERTA', 'REABERTO', 'REABERTA'].includes(liquidacaoStatus || '');
   };
 
+  // ⭐ NOVO: Detectar nota automática (gerada pelo sistema)
+  // Por enquanto, identificamos pelo prefixo do texto. Quando houver mais
+  // tipos automáticos, vale considerar adicionar campo "origem" na tabela.
+  const ehNotaAutomatica = (nota: Nota) => {
+    return (nota.nota || '').startsWith('[CANCELAMENTO DE EMPRÉSTIMO');
+  };
+
+  // ⭐ NOVO: Verificar se pode excluir nota
+  // Mesma regra de edição + não pode ser nota automática do sistema
+  const podeExcluirNota = (nota: Nota) => {
+    if (ehNotaAutomatica(nota)) return false;
+    return podeEditarNota(nota);
+  };
+
   const renderNota = ({ item: n }: { item: Nota }) => {
     const isExpanded = expanded === n.id;
     const isEditando = editandoId === n.id;
     const podeEditar = podeEditarNota(n);
+    const podeExcluir = podeExcluirNota(n);
 
     return (
       <TouchableOpacity
@@ -369,14 +421,26 @@ export function ModalNotasLista({
           </View>
         )}
 
-        {/* Editar (expandido) */}
-        {isExpanded && podeEditar && !isEditando && (
-          <TouchableOpacity 
-            style={S.notaBtnEditar} 
-            onPress={() => { setEditandoId(n.id); setEditandoTexto(n.nota); }}
-          >
-            <Text style={S.notaBtnEditarTx}>{lang === 'es' ? '✏ Editar' : '✏ Editar'}</Text>
-          </TouchableOpacity>
+        {/* Editar e Excluir (expandido) */}
+        {isExpanded && !isEditando && (podeEditar || podeExcluir) && (
+          <View style={S.notaAcoesRow}>
+            {podeEditar && (
+              <TouchableOpacity 
+                style={S.notaBtnEditar} 
+                onPress={() => { setEditandoId(n.id); setEditandoTexto(n.nota); }}
+              >
+                <Text style={S.notaBtnEditarTx}>{lang === 'es' ? '✏ Editar' : '✏ Editar'}</Text>
+              </TouchableOpacity>
+            )}
+            {podeExcluir && (
+              <TouchableOpacity 
+                style={S.notaBtnExcluir} 
+                onPress={() => setNotaParaExcluir(n)}
+              >
+                <Text style={S.notaBtnExcluirTx}>🗑 {t.excluir}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         )}
       </TouchableOpacity>
     );
@@ -508,6 +572,57 @@ export function ModalNotasLista({
           )}
         </View>
       </View>
+
+      {/* ⭐ MODAL DE CONFIRMAÇÃO DE EXCLUSÃO DE NOTA */}
+      <Modal
+        visible={!!notaParaExcluir}
+        animationType="fade"
+        transparent
+        onRequestClose={() => {
+          if (!excluindoNota) setNotaParaExcluir(null);
+        }}
+      >
+        <View style={S.delOverlay}>
+          <View style={S.delDialog}>
+            <View style={S.delHeader}>
+              <Text style={S.delIcon}>⚠️</Text>
+              <Text style={S.delTitle}>{t.excluirNotaTitulo}</Text>
+            </View>
+            
+            {notaParaExcluir && (
+              <View style={S.delBody}>
+                <Text style={S.delPreview} numberOfLines={4}>
+                  "{notaParaExcluir.nota}"
+                </Text>
+                <Text style={S.delAviso}>
+                  {t.excluirNotaAviso}
+                </Text>
+              </View>
+            )}
+            
+            <View style={S.delFooter}>
+              <TouchableOpacity
+                style={[S.delBtnVoltar, excluindoNota && { opacity: 0.5 }]}
+                onPress={() => setNotaParaExcluir(null)}
+                disabled={excluindoNota}
+              >
+                <Text style={S.delBtnVoltarTx}>{t.excluirVoltar}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[S.delBtnConfirmar, excluindoNota && { opacity: 0.7 }]}
+                onPress={handleExcluirNota}
+                disabled={excluindoNota}
+              >
+                {excluindoNota ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={S.delBtnConfirmarTx}>🗑 {t.excluirConfirmar}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 }
@@ -729,8 +844,25 @@ const S = StyleSheet.create({
   notaLocalBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: '#F3F4F6' },
   notaLocalText: { fontSize: 10, fontWeight: '600', color: '#6B7280' },
   notaHora: { fontSize: 11, color: '#9CA3AF' },
-  notaBtnEditar: { marginTop: 8, paddingVertical: 6, paddingHorizontal: 12, backgroundColor: '#EFF6FF', borderRadius: 6, alignSelf: 'flex-start' },
+  notaBtnEditar: { paddingVertical: 6, paddingHorizontal: 12, backgroundColor: '#EFF6FF', borderRadius: 6 },
   notaBtnEditarTx: { fontSize: 12, fontWeight: '500', color: '#2563EB' },
+  notaAcoesRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  notaBtnExcluir: { paddingVertical: 6, paddingHorizontal: 12, backgroundColor: '#FEE2E2', borderRadius: 6 },
+  notaBtnExcluirTx: { fontSize: 12, fontWeight: '500', color: '#DC2626' },
+  // Modal de confirmação de exclusão
+  delOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
+  delDialog: { backgroundColor: '#FFFFFF', borderRadius: 14, width: '100%', maxWidth: 380, overflow: 'hidden', elevation: 8 },
+  delHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  delIcon: { fontSize: 18 },
+  delTitle: { fontSize: 16, fontWeight: '700', color: '#1F2937', flex: 1 },
+  delBody: { paddingHorizontal: 20, paddingVertical: 16 },
+  delPreview: { fontSize: 13, color: '#374151', backgroundColor: '#F9FAFB', padding: 10, borderRadius: 8, fontStyle: 'italic', borderLeftWidth: 3, borderLeftColor: '#9CA3AF' },
+  delAviso: { fontSize: 12, color: '#92400E', backgroundColor: '#FEF3C7', padding: 10, borderRadius: 8, marginTop: 12 },
+  delFooter: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 14, borderTopWidth: 1, borderTopColor: '#F3F4F6', gap: 10 },
+  delBtnVoltar: { flex: 1, paddingVertical: 12, borderRadius: 8, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' },
+  delBtnVoltarTx: { fontSize: 14, fontWeight: '600', color: '#374151' },
+  delBtnConfirmar: { flex: 1.4, paddingVertical: 12, borderRadius: 8, backgroundColor: '#DC2626', alignItems: 'center', justifyContent: 'center' },
+  delBtnConfirmarTx: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
   notaEditBox: { marginBottom: 8 },
   notaEditInput: { borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 8, padding: 8, fontSize: 14, color: '#1F2937', backgroundColor: '#F9FAFB', minHeight: 60, textAlignVertical: 'top' },
   notaEditBtns: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 6 },
