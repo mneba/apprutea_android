@@ -196,7 +196,29 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
         .order('data_emprestimo', { ascending: false });
 
       const all = (emps || []) as any[];
-      setEmpAtivos(all.filter(e => e.status === 'ATIVO' || e.status === 'VENCIDO'));
+      const ativos = all.filter(e => e.status === 'ATIVO' || e.status === 'VENCIDO');
+      
+      // ⭐ Calcular atraso REAL para cada empréstimo ativo
+      // A view nem sempre retorna parcelas_vencidas correto (pode contar só status='VENCIDO',
+      // ignorando parcelas PENDENTE com data passada). Aqui buscamos a verdade.
+      if (ativos.length > 0) {
+        const hoje = new Date().toISOString().split('T')[0];
+        const empIds = ativos.map(e => e.id);
+        const { data: parcAtrasadas } = await supabase
+          .from('emprestimo_parcelas')
+          .select('emprestimo_id')
+          .in('emprestimo_id', empIds)
+          .lt('data_vencimento', hoje)
+          .neq('status', 'PAGO')
+          .neq('status', 'CANCELADO');
+        
+        const empIdsComAtraso = new Set((parcAtrasadas || []).map(p => p.emprestimo_id));
+        ativos.forEach(e => {
+          e._temAtraso = empIdsComAtraso.has(e.id) || e.status === 'VENCIDO';
+        });
+      }
+      
+      setEmpAtivos(ativos);
       setEmpHistorico(all.filter(e => e.status !== 'ATIVO' && e.status !== 'VENCIDO'));
     } catch (e) {
       console.error('Erro ao carregar detalhes:', e);
@@ -399,7 +421,10 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
         {/* ⭐ Botão Renegociar — só aparece quando empréstimo tem atraso E cliente está autorizado */}
         {(() => {
           if (somenteLeitura || !cliente || !onRenegociar) return null;
-          const temAtraso = (emp.parcelas_vencidas || 0) > 0 || emp.status === 'VENCIDO';
+          // ⭐ usa _temAtraso (calculado em carregarDados) — mais confiável que parcelas_vencidas
+          const temAtraso = (emp as any)._temAtraso === true 
+            || (emp.parcelas_vencidas || 0) > 0 
+            || emp.status === 'VENCIDO';
           const permiteReneg = clienteCompleto?.permite_renegociacao === true 
             || clienteCompleto?.permite_renegociacao === 'true';
           
@@ -573,9 +598,14 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
     );
   };
   const renderEmprestimo = () => {
-    // ⭐ Cliente está em dia se nenhum empréstimo ativo tem parcelas vencidas
-    const totalVencidas = empAtivos.reduce((s, e) => s + (e.parcelas_vencidas || 0), 0);
-    const clienteEmDia = totalVencidas === 0;
+    // ⭐ Cliente está em dia se nenhum empréstimo ativo tem atraso (parcelas vencidas)
+    // Usa _temAtraso (calculado em carregarDados) que detecta atraso real, não só status='VENCIDO'
+    const temAlgumAtraso = empAtivos.some(e => 
+      (e as any)._temAtraso === true 
+      || (e.parcelas_vencidas || 0) > 0 
+      || e.status === 'VENCIDO'
+    );
+    const clienteEmDia = !temAlgumAtraso;
     const temEmprestimoAtivo = empAtivos.length > 0;
     
     // Permissões do cliente (vindas do banco via clienteCompleto)

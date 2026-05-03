@@ -1530,8 +1530,10 @@ export default function NovaVendaScreen({ navigation, route }: any) {
       const isRenegociacaoViaDoc = !isRenegociacao && !!emprestimOrigemId && !!clienteEncontradoId;
 
       // Calcular valor_parcela para renegociação (fn_renegociar_emprestimo não retorna valor_parcela)
+      // Usa novo_valor (valor_total com juros) retornado pela function, não valor_principal
+      const valorTotalReneg = parseFloat(raw?.novo_valor) || valorPrincipal * (1 + (parseFloat(taxaJuros.replace(',', '.')) || 0) / 100);
       const valorParcelaReneg = parseInt(numeroParcelas) > 0
-        ? valorPrincipal / parseInt(numeroParcelas)
+        ? valorTotalReneg / parseInt(numeroParcelas)
         : 0;
 
       const res = isRenegociacao ? {
