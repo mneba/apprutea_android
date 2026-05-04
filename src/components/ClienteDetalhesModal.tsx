@@ -200,7 +200,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       // 1. Dados completos do cliente
       const { data: cliData } = await supabase
         .from('clientes')
-        .select('id, nome, documento, telefone_celular, endereco, status, codigo_cliente, created_at, permite_emprestimo_adicional, permite_renegociacao')
+        .select('id, nome, documento, telefone_celular, endereco, status, codigo_cliente, created_at, permite_emprestimo_adicional, permite_renegociacao, rotas_ids, empresa_id')
         .eq('id', cliente.id)
         .single();
       setClienteCompleto(cliData);
@@ -328,7 +328,8 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
     if (!solicitando || !cliente) return;
     
     // Buscar vendedor da rota — pegar a primeira rota do cliente
-    const rotasIds = (cliente as any).rotas_ids;
+    // Importante: rotas_ids só está em clienteCompleto (não em cliente prop)
+    const rotasIds = clienteCompleto?.rotas_ids || (cliente as any).rotas_ids;
     let rotaId: string | null = null;
     
     if (Array.isArray(rotasIds) && rotasIds.length > 0) {
@@ -907,12 +908,24 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                   </Text>
                 </View>
                 {solicitando.emprestimo && (
-                  <View style={S.solRow}>
-                    <Text style={S.solLabel}>{lang === 'es' ? 'Préstamo' : 'Empréstimo'}:</Text>
-                    <Text style={S.solValue}>
-                      {fmt(parseFloat((solicitando.emprestimo as any).valor_principal || 0))}
-                    </Text>
-                  </View>
+                  <>
+                    <View style={S.solRow}>
+                      <Text style={S.solLabel}>
+                        {lang === 'es' ? 'Valor original:' : 'Valor original:'}
+                      </Text>
+                      <Text style={S.solValue}>
+                        {fmt(parseFloat((solicitando.emprestimo as any).valor_principal || 0))}
+                      </Text>
+                    </View>
+                    <View style={S.solRow}>
+                      <Text style={S.solLabel}>
+                        {lang === 'es' ? 'Saldo a renegociar:' : 'Saldo a renegociar:'}
+                      </Text>
+                      <Text style={[S.solValue, { color: '#DC2626' }]}>
+                        {fmt(parseFloat((solicitando.emprestimo as any).valor_saldo || 0))}
+                      </Text>
+                    </View>
+                  </>
                 )}
                 
                 <Text style={S.solInfo}>

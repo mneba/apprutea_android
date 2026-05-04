@@ -1371,15 +1371,6 @@ export default function ClientesScreen({ navigation, route }: any) {
         onAbrirParcelas={abrirParcelas}
         onAbrirNotas={(id, nome) => { setNotasClienteId(id); setNotasClienteNome(nome); setModalNotasClienteVisible(true); }}
         onAbrirDetalhes={(cli) => { setDetalhesCliente(cli); setModalDetalhesVisible(true); }}
-        onNovoEmprestimo={(cli) => {
-          const confirmar = () => { const nav = navigation.getParent() || navigation; nav.navigate('NovoCliente', { clienteExistente: { id: cli.id, nome: cli.nome, telefone_celular: cli.telefone_celular, documento: cli.codigo_cliente?.toString() || '' } }); };
-          if (Platform.OS === 'web') { if (window.confirm(t.confirmarNovoEmprestimo)) confirmar(); }
-          else { Alert.alert(t.novoEmprestimo, t.confirmarNovoEmprestimo, [{ text: t.nao, style: 'cancel' }, { text: t.sim, onPress: confirmar }]); }
-        }}
-        onRenegociar={(cli, empR) => {
-          const nav = navigation.getParent() || navigation;
-          nav.navigate('NovoCliente', { renegociacao: { emprestimo_id: empR.id, cliente_id: cli.id, cliente_nome: cli.nome, saldo_devedor: empR.saldo_emprestimo, telefone_celular: cli.telefone_celular, codigo_cliente: cli.codigo_cliente } });
-        }}
       />
     );
   };

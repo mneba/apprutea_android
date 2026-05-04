@@ -1,9 +1,9 @@
 import React from 'react';
 import {
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { Language } from '../contexts/LiquidacaoContext';
 
@@ -68,12 +68,6 @@ interface ClienteCardTodosProps {
     parcelasVencidas: string;
     totalAtraso: string;
     emprestimo: string;
-    novoEmprestimo: string;
-    confirmarNovoEmprestimo: string;
-    sim: string;
-    nao: string;
-    renegociar: string;
-    renegociacaoNaoPermitida: string;
     toqueDetalhes: string;
   };
   onToggleExpand: () => void;
@@ -83,8 +77,6 @@ interface ClienteCardTodosProps {
   onAbrirParcelas: (clienteId: string, clienteNome: string, emprestimoId: string, empStatus: string) => void;
   onAbrirNotas: (clienteId: string, clienteNome: string) => void;
   onAbrirDetalhes: (cliente: { id: string; nome: string; telefone?: string | null; codigo_cliente?: string | number | null }) => void;
-  onNovoEmprestimo: (cliente: ClienteTodos) => void;
-  onRenegociar: (cliente: ClienteTodos, emprestimo: EmprestimoTodos) => void;
 }
 
 // ─── Componente ─────────────────────────────────────────────────────────────
@@ -105,8 +97,6 @@ export default function ClienteCardTodos({
   onAbrirParcelas,
   onAbrirNotas,
   onAbrirDetalhes,
-  onNovoEmprestimo,
-  onRenegociar,
 }: ClienteCardTodosProps) {
   const a = c.tem_atraso;
   const vencidas = emp?.total_parcelas_vencidas || 0;
@@ -185,37 +175,6 @@ export default function ClienteCardTodos({
             </View>
           )}
 
-          {/* Ações: Renovação / Renegociação */}
-          {(() => {
-            const temAtivo = c.emprestimos.some(e => e.status === 'ATIVO' || e.status === 'VENCIDO');
-            const temAtraso = c.tem_atraso;
-            if (!temAtivo) {
-              return (
-                <TouchableOpacity style={S.tAddRowActive} onPress={() => onNovoEmprestimo(c)}>
-                  <Text style={S.tAddIconActive}>＋</Text>
-                  <Text style={S.tAddTextActive}>{t.novoEmprestimo}</Text>
-                </TouchableOpacity>
-              );
-            }
-            if (temAtivo && temAtraso) {
-              if (!c.permite_renegociacao) {
-                return (
-                  <View style={[S.btReneg, { opacity: 0.4 }]}>
-                    <Text style={S.btRenegI}>🔄</Text>
-                    <Text style={S.btRenegT}>{t.renegociar}</Text>
-                  </View>
-                );
-              }
-              return (
-                <TouchableOpacity style={S.btReneg} onPress={() => onRenegociar(c, emp)}>
-                  <Text style={S.btRenegI}>🔄</Text>
-                  <Text style={S.btRenegT}>{t.renegociar}</Text>
-                </TouchableOpacity>
-              );
-            }
-            return null;
-          })()}
-
           {/* Parcelas + Notas na mesma linha */}
           <View style={S.expActRow}>
             <TouchableOpacity style={S.btSecVerde} onPress={() => onAbrirParcelas(c.id, c.nome, emp.id, emp.status)}>
@@ -282,10 +241,4 @@ const S = StyleSheet.create({
   btSecBadgeT: { fontSize: 9, fontWeight: '700', color: '#FFF' },
   linkDetalhes: { alignItems: 'center', paddingVertical: 4 },
   linkDetalhesTx: { fontSize: 12, color: '#9CA3AF' },
-  tAddRowActive: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, marginBottom: 10, backgroundColor: '#EFF6FF', borderRadius: 8, borderWidth: 1, borderColor: '#3B82F6' },
-  tAddIconActive: { fontSize: 16, color: '#3B82F6', marginRight: 6, fontWeight: '700' as const },
-  tAddTextActive: { fontSize: 13, color: '#3B82F6', fontWeight: '600' as const },
-  btReneg: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, marginBottom: 10, backgroundColor: '#FFF7ED', borderRadius: 8, borderWidth: 1, borderColor: '#F97316' },
-  btRenegI: { fontSize: 16, marginRight: 6 },
-  btRenegT: { fontSize: 13, color: '#F97316', fontWeight: '600' as const },
 });
