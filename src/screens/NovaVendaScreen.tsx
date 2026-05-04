@@ -1536,9 +1536,18 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         ? valorTotalReneg / parseInt(numeroParcelas)
         : 0;
 
+      // Mensagem de sucesso da renegociação: a function retorna o ID do novo empréstimo
+      // no texto, mas o usuário não precisa ver isso. Remover ID da mensagem em caso de sucesso.
+      const limparIdDaMensagem = (msg: string | undefined): string => {
+        if (!msg) return 'Renegociação registrada com sucesso';
+        // Remove "Novo empréstimo: <uuid>" do final da mensagem
+        return msg.replace(/\s*Novo empréstimo:\s*[a-f0-9-]+\s*\.?\s*$/i, '').replace(/!\s*$/, '!').trim() 
+          || 'Renegociação registrada com sucesso';
+      };
+
       const res = isRenegociacao ? {
         sucesso: raw?.sucesso,
-        mensagem: raw?.mensagem || 'Renegociação registrada com sucesso',
+        mensagem: raw?.sucesso ? limparIdDaMensagem(raw?.mensagem) : (raw?.mensagem || 'Renegociação registrada com sucesso'),
         cliente_id: renegociacao.cliente_id,
         cliente_nome: renegociacao.cliente_nome,
         cliente_codigo: codigoCliente,
@@ -1552,7 +1561,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         parcelas_canceladas: raw?.parcelas_canceladas,
       } : isRenegociacaoViaDoc ? {
         sucesso: raw?.sucesso,
-        mensagem: raw?.mensagem || 'Renegociação registrada com sucesso',
+        mensagem: raw?.sucesso ? limparIdDaMensagem(raw?.mensagem) : (raw?.mensagem || 'Renegociação registrada com sucesso'),
         cliente_id: clienteEncontradoId,
         cliente_nome: nome,
         cliente_codigo: codigoCliente,
