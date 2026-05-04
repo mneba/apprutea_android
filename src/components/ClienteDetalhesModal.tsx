@@ -1,12 +1,15 @@
+import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Linking,
   Modal,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View
 } from 'react-native';
@@ -175,6 +178,20 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
   const [parcelas, setParcelas] = useState<Map<string, Parcela[]>>(new Map());
   const [loadingParcelas, setLoadingParcelas] = useState<string | null>(null);
   const [clienteCompleto, setClienteCompleto] = useState<any>(null);
+  
+  // ⭐ Solicitações pendentes do cliente (para mostrar "aguardando aprovação")
+  const [solicitacoesPendentes, setSolicitacoesPendentes] = useState<{
+    renegociacao: boolean;
+    adicional: boolean;
+  }>({ renegociacao: false, adicional: false });
+  
+  // ⭐ Modal de confirmação de solicitação
+  const [solicitando, setSolicitando] = useState<{
+    tipo: 'RENEGOCIACAO' | 'EMPRESTIMO_ADICIONAL';
+    emprestimo?: Emprestimo;
+  } | null>(null);
+  const [motivoSolicitacao, setMotivoSolicitacao] = useState('');
+  const [enviandoSolicitacao, setEnviandoSolicitacao] = useState(false);
 
   const carregarDados = useCallback(async () => {
     if (!cliente?.id) return;
@@ -220,6 +237,20 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       
       setEmpAtivos(ativos);
       setEmpHistorico(all.filter(e => e.status !== 'ATIVO' && e.status !== 'VENCIDO'));
+      
+      // ⭐ Buscar solicitações PENDENTES do cliente (para mostrar "aguardando")
+      const { data: solicData } = await supabase
+        .from('solicitacoes_autorizacao')
+        .select('tipo_solicitacao')
+        .eq('cliente_id', cliente.id)
+        .eq('status', 'PENDENTE')
+        .in('tipo_solicitacao', ['RENEGOCIACAO', 'EMPRESTIMO_ADICIONAL']);
+      
+      const tipos = new Set((solicData || []).map(s => s.tipo_solicitacao));
+      setSolicitacoesPendentes({
+        renegociacao: tipos.has('RENEGOCIACAO'),
+        adicional: tipos.has('EMPRESTIMO_ADICIONAL'),
+      });
     } catch (e) {
       console.error('Erro ao carregar detalhes:', e);
     } finally {
@@ -291,6 +322,88 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
   if (!cliente) return null;
 
   const cli = clienteCompleto || cliente;
+
+  // ⭐ Enviar solicitação de autorização (RENEGOCIACAO ou EMPRESTIMO_ADICIONAL)
+  const enviarSolicitacao = async () => {
+    if (!solicitando || !cliente) return;
+    
+    // Buscar vendedor da rota — pegar a primeira rota do cliente
+    const rotasIds = (cliente as any).rotas_ids;
+    let rotaId: string | null = null;
+    
+    if (Array.isArray(rotasIds) && rotasIds.length > 0) {
+      rotaId = rotasIds[0];
+    } else if (typeof rotasIds === 'string') {
+      try {
+        const arr = JSON.parse(rotasIds);
+        if (Array.isArray(arr) && arr.length > 0) rotaId = arr[0];
+      } catch {}
+    }
+    
+    if (!rotaId) {
+      const msg = lang === 'es' ? 'Cliente sin ruta vinculada' : 'Cliente sem rota vinculada';
+      if (Platform.OS === 'web') window.alert(msg);
+      else Alert.alert('Erro', msg);
+      return;
+    }
+    
+    // Buscar vendedor atual da rota
+    const { data: rotaData } = await supabase
+      .from('rotas')
+      .select('vendedor_id')
+      .eq('id', rotaId)
+      .single();
+    
+    if (!rotaData?.vendedor_id) {
+      const msg = lang === 'es' ? 'Ruta sin vendedor' : 'Rota sem vendedor';
+      if (Platform.OS === 'web') window.alert(msg);
+      else Alert.alert('Erro', msg);
+      return;
+    }
+    
+    setEnviandoSolicitacao(true);
+    try {
+      const { data, error } = await supabase.rpc('fn_solicitar_autorizacao', {
+        p_vendedor_id: rotaData.vendedor_id,
+        p_rota_id: rotaId,
+        p_tipo: solicitando.tipo,
+        p_cliente_id: cliente.id,
+        p_emprestimo_id: solicitando.emprestimo?.id || null,
+        p_motivo: motivoSolicitacao.trim() || null,
+      });
+      
+      if (error) throw error;
+      
+      const res = Array.isArray(data) ? data[0] : data;
+      
+      if (res?.sucesso) {
+        // Sucesso — atualizar estado pendente local e fechar modal
+        setSolicitacoesPendentes(prev => ({
+          ...prev,
+          renegociacao: solicitando.tipo === 'RENEGOCIACAO' ? true : prev.renegociacao,
+          adicional: solicitando.tipo === 'EMPRESTIMO_ADICIONAL' ? true : prev.adicional,
+        }));
+        setSolicitando(null);
+        setMotivoSolicitacao('');
+        
+        const msg = res.mensagem || (lang === 'es' 
+          ? 'Solicitud enviada. Espere la aprobación del administrador.' 
+          : 'Solicitação enviada. Aguarde a aprovação do administrador.');
+        if (Platform.OS === 'web') window.alert(msg);
+        else Alert.alert('✓', msg);
+      } else {
+        const msg = res?.mensagem || (lang === 'es' ? 'Error al solicitar' : 'Erro ao solicitar');
+        if (Platform.OS === 'web') window.alert(msg);
+        else Alert.alert('Erro', msg);
+      }
+    } catch (e: any) {
+      const msg = e?.message || (lang === 'es' ? 'Error al solicitar' : 'Erro ao solicitar');
+      if (Platform.OS === 'web') window.alert(msg);
+      else Alert.alert('Erro', msg);
+    } finally {
+      setEnviandoSolicitacao(false);
+    }
+  };
 
   // ==================== ABA PESSOAIS ====================
   const renderPessoais = () => (
@@ -418,43 +531,58 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           <View style={[S.empBarFill, { width: `${pct}%`, backgroundColor: pct >= 100 ? '#10B981' : pct >= 50 ? '#3B82F6' : '#F59E0B' }]} />
         </View>
 
-        {/* ⭐ Botão Renegociar — só aparece quando empréstimo tem atraso E cliente está autorizado */}
+        {/* ⭐ Botão Renegociar / Solicitar autorização — sempre aparece (em dia ou atraso) */}
         {(() => {
           if (somenteLeitura || !cliente || !onRenegociar) return null;
-          // ⭐ usa _temAtraso (calculado em carregarDados) — mais confiável que parcelas_vencidas
-          const temAtraso = (emp as any)._temAtraso === true 
-            || (emp.parcelas_vencidas || 0) > 0 
-            || emp.status === 'VENCIDO';
+          
           const permiteReneg = clienteCompleto?.permite_renegociacao === true 
             || clienteCompleto?.permite_renegociacao === 'true';
           
-          if (!temAtraso) return null;
-          
-          if (!permiteReneg) {
-            // Mostrar aviso em vez do botão
+          // Já tem solicitação pendente? mostra "aguardando"
+          if (solicitacoesPendentes.renegociacao && !permiteReneg) {
             return (
-              <View style={S.avisoAutorizacao}>
-                <Text style={S.avisoIcone}>🔒</Text>
-                <Text style={S.avisoTexto}>
-                  {lang === 'es' 
-                    ? 'Para renegociar, solicite autorización al administrador.' 
-                    : 'Para renegociar, solicite autorização ao administrador.'}
+              <View style={S.btnAguardando}>
+                <Ionicons name="time-outline" size={14} color="#92400E" />
+                <Text style={S.btnAguardandoText}>
+                  {lang === 'es' ? 'Aguardando aprobación' : 'Aguardando aprovação'}
                 </Text>
               </View>
             );
           }
           
+          // Cliente autorizado → botão de renegociar (laranja, vai para tela)
+          if (permiteReneg) {
+            return (
+              <TouchableOpacity 
+                style={S.btnRenegociar} 
+                onPress={() => {
+                  onClose();
+                  onRenegociar(cliente, emp);
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={S.btnRenegociarIcon}>↻</Text>
+                <Text style={S.btnRenegociarText}>{t.renegociar}</Text>
+              </TouchableOpacity>
+            );
+          }
+          
+          // Sem autorização e sem pendente → botão de solicitar (cinza)
           return (
             <TouchableOpacity 
-              style={S.btnRenegociar} 
+              style={S.btnSolicitar}
               onPress={() => {
-                onClose();
-                onRenegociar(cliente, emp);
+                setSolicitando({ tipo: 'RENEGOCIACAO', emprestimo: emp });
+                setMotivoSolicitacao('');
               }}
               activeOpacity={0.7}
             >
-              <Text style={S.btnRenegociarIcon}>↻</Text>
-              <Text style={S.btnRenegociarText}>{t.renegociar}</Text>
+              <Ionicons name="lock-closed-outline" size={14} color="#374151" />
+              <Text style={S.btnSolicitarText}>
+                {lang === 'es' 
+                  ? 'Solicitar autorización para renegociar' 
+                  : 'Solicitar autorização para renegociar'}
+              </Text>
             </TouchableOpacity>
           );
         })()}
@@ -634,16 +762,32 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           </TouchableOpacity>
         )}
         
-        {/* ⭐ Aviso quando precisa de autorização */}
+        {/* ⭐ Aviso quando precisa de autorização — agora é botão clicável */}
         {clienteEmDia && temEmprestimoAtivo && !permiteAdicional && (
-          <View style={S.avisoAutorizacao}>
-            <Text style={S.avisoIcone}>🔒</Text>
-            <Text style={S.avisoTexto}>
-              {lang === 'es' 
-                ? 'Para nuevo préstamo, solicite autorización al administrador.' 
-                : 'Para novo empréstimo, solicite autorização ao administrador.'}
-            </Text>
-          </View>
+          solicitacoesPendentes.adicional ? (
+            <View style={S.btnAguardando}>
+              <Ionicons name="time-outline" size={14} color="#92400E" />
+              <Text style={S.btnAguardandoText}>
+                {lang === 'es' ? 'Aguardando aprobación' : 'Aguardando aprovação'}
+              </Text>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={S.btnSolicitar}
+              onPress={() => {
+                setSolicitando({ tipo: 'EMPRESTIMO_ADICIONAL' });
+                setMotivoSolicitacao('');
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="lock-closed-outline" size={14} color="#374151" />
+              <Text style={S.btnSolicitarText}>
+                {lang === 'es' 
+                  ? 'Solicitar autorización para nuevo préstamo' 
+                  : 'Solicitar autorização para novo empréstimo'}
+              </Text>
+            </TouchableOpacity>
+          )
         )}
         
         {loading ? (
@@ -724,6 +868,108 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           {aba === 'historico' && renderHistorico()}
         </View>
       </View>
+
+      {/* ⭐ MODAL DE CONFIRMAÇÃO DE SOLICITAÇÃO DE AUTORIZAÇÃO */}
+      <Modal
+        visible={!!solicitando}
+        animationType="fade"
+        transparent
+        onRequestClose={() => {
+          if (!enviandoSolicitacao) {
+            setSolicitando(null);
+            setMotivoSolicitacao('');
+          }
+        }}
+      >
+        <View style={S.solOverlay}>
+          <View style={S.solDialog}>
+            <View style={S.solHeader}>
+              <Ionicons name="lock-closed" size={20} color="#374151" />
+              <Text style={S.solTitle}>
+                {lang === 'es' ? 'Solicitar autorización' : 'Solicitar autorização'}
+              </Text>
+            </View>
+            
+            {solicitando && cliente && (
+              <View style={S.solBody}>
+                <View style={S.solRow}>
+                  <Text style={S.solLabel}>{lang === 'es' ? 'Tipo' : 'Tipo'}:</Text>
+                  <Text style={S.solValue}>
+                    {solicitando.tipo === 'RENEGOCIACAO' 
+                      ? (lang === 'es' ? 'Renegociación' : 'Renegociação')
+                      : (lang === 'es' ? 'Préstamo adicional' : 'Empréstimo adicional')}
+                  </Text>
+                </View>
+                <View style={S.solRow}>
+                  <Text style={S.solLabel}>{lang === 'es' ? 'Cliente' : 'Cliente'}:</Text>
+                  <Text style={S.solValue} numberOfLines={1}>
+                    {cliente.nome}
+                  </Text>
+                </View>
+                {solicitando.emprestimo && (
+                  <View style={S.solRow}>
+                    <Text style={S.solLabel}>{lang === 'es' ? 'Préstamo' : 'Empréstimo'}:</Text>
+                    <Text style={S.solValue}>
+                      {fmt(parseFloat((solicitando.emprestimo as any).valor_principal || 0))}
+                    </Text>
+                  </View>
+                )}
+                
+                <Text style={S.solInfo}>
+                  ℹ️ {lang === 'es' 
+                    ? 'El administrador será notificado y deberá aprobar esta solicitud antes de proceder.' 
+                    : 'O administrador será notificado e deverá aprovar esta solicitação antes de prosseguir.'}
+                </Text>
+                
+                <Text style={S.solMotivoLabel}>
+                  {lang === 'es' ? 'Motivo (opcional):' : 'Motivo (opcional):'}
+                </Text>
+                <TextInput
+                  style={S.solInput}
+                  value={motivoSolicitacao}
+                  onChangeText={setMotivoSolicitacao}
+                  placeholder={lang === 'es' 
+                    ? 'Ej.: cliente solicita parcela menor...' 
+                    : 'Ex.: cliente pediu parcela menor...'}
+                  placeholderTextColor="#9CA3AF"
+                  multiline
+                  numberOfLines={3}
+                  maxLength={500}
+                  editable={!enviandoSolicitacao}
+                />
+              </View>
+            )}
+            
+            <View style={S.solFooter}>
+              <TouchableOpacity
+                style={[S.solBtnVoltar, enviandoSolicitacao && { opacity: 0.5 }]}
+                onPress={() => {
+                  setSolicitando(null);
+                  setMotivoSolicitacao('');
+                }}
+                disabled={enviandoSolicitacao}
+              >
+                <Text style={S.solBtnVoltarTx}>
+                  {lang === 'es' ? 'Cancelar' : 'Cancelar'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[S.solBtnConfirmar, enviandoSolicitacao && { opacity: 0.7 }]}
+                onPress={enviarSolicitacao}
+                disabled={enviandoSolicitacao}
+              >
+                {enviandoSolicitacao ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={S.solBtnConfirmarTx}>
+                    {lang === 'es' ? 'Enviar solicitud' : 'Enviar solicitação'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 }
@@ -888,5 +1134,158 @@ const S = StyleSheet.create({
     color: '#92400E', 
     flex: 1,
     fontStyle: 'italic',
+  },
+  // ⭐ Botão "Solicitar autorização" — cinza, clicável
+  btnSolicitar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    marginTop: 10,
+    marginBottom: 10,
+    gap: 6,
+  },
+  btnSolicitarText: { 
+    fontSize: 12, 
+    color: '#374151', 
+    fontWeight: '600',
+  },
+  // ⭐ Estado "aguardando aprovação"
+  btnAguardando: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#FBBF24',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    marginTop: 10,
+    marginBottom: 10,
+    gap: 6,
+  },
+  btnAguardandoText: { 
+    fontSize: 12, 
+    color: '#92400E', 
+    fontWeight: '600',
+  },
+  // ⭐ Modal de confirmação de solicitação
+  solOverlay: { 
+    flex: 1, 
+    backgroundColor: 'rgba(0,0,0,0.5)', 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    paddingHorizontal: 20 
+  },
+  solDialog: { 
+    backgroundColor: '#FFFFFF', 
+    borderRadius: 14, 
+    width: '100%', 
+    maxWidth: 420, 
+    overflow: 'hidden', 
+    elevation: 8 
+  },
+  solHeader: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 8, 
+    paddingHorizontal: 20, 
+    paddingTop: 20, 
+    paddingBottom: 12, 
+    borderBottomWidth: 1, 
+    borderBottomColor: '#F3F4F6' 
+  },
+  solTitle: { 
+    fontSize: 16, 
+    fontWeight: '700', 
+    color: '#1F2937', 
+    flex: 1 
+  },
+  solBody: { 
+    paddingHorizontal: 20, 
+    paddingVertical: 16 
+  },
+  solRow: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    paddingVertical: 4 
+  },
+  solLabel: { 
+    fontSize: 13, 
+    color: '#6B7280', 
+    width: 90 
+  },
+  solValue: { 
+    fontSize: 13, 
+    color: '#1F2937', 
+    fontWeight: '600', 
+    flex: 1 
+  },
+  solInfo: { 
+    fontSize: 12, 
+    color: '#1E40AF', 
+    backgroundColor: '#DBEAFE', 
+    padding: 10, 
+    borderRadius: 8, 
+    marginTop: 12, 
+    marginBottom: 14 
+  },
+  solMotivoLabel: { 
+    fontSize: 12, 
+    fontWeight: '600', 
+    color: '#374151', 
+    marginBottom: 6 
+  },
+  solInput: { 
+    borderWidth: 1, 
+    borderColor: '#E5E7EB', 
+    borderRadius: 8, 
+    paddingHorizontal: 12, 
+    paddingVertical: 10, 
+    fontSize: 13, 
+    color: '#1F2937', 
+    minHeight: 70, 
+    textAlignVertical: 'top', 
+    backgroundColor: '#F9FAFB' 
+  },
+  solFooter: { 
+    flexDirection: 'row', 
+    paddingHorizontal: 16, 
+    paddingVertical: 14, 
+    borderTopWidth: 1, 
+    borderTopColor: '#F3F4F6', 
+    gap: 10 
+  },
+  solBtnVoltar: { 
+    flex: 1, 
+    paddingVertical: 12, 
+    borderRadius: 8, 
+    backgroundColor: '#F3F4F6', 
+    alignItems: 'center', 
+    justifyContent: 'center' 
+  },
+  solBtnVoltarTx: { 
+    fontSize: 14, 
+    fontWeight: '600', 
+    color: '#374151' 
+  },
+  solBtnConfirmar: { 
+    flex: 1.4, 
+    paddingVertical: 12, 
+    borderRadius: 8, 
+    backgroundColor: '#3B82F6', 
+    alignItems: 'center', 
+    justifyContent: 'center' 
+  },
+  solBtnConfirmarTx: { 
+    fontSize: 14, 
+    fontWeight: '700', 
+    color: '#FFFFFF' 
   },
 });
