@@ -180,10 +180,12 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
   const [clienteCompleto, setClienteCompleto] = useState<any>(null);
   
   // ⭐ Solicitações pendentes do cliente (para mostrar "aguardando aprovação")
+  // Granular: para RENEGOCIACAO sabemos qual empréstimo. Adicional é cliente-level.
   const [solicitacoesPendentes, setSolicitacoesPendentes] = useState<{
-    renegociacao: boolean;
+    renegociacao_emprestimo_id: string | null;  // null se não houver pendente
+    renegociacao_id: string | null;              // id do registro (para troca)
     adicional: boolean;
-  }>({ renegociacao: false, adicional: false });
+  }>({ renegociacao_emprestimo_id: null, renegociacao_id: null, adicional: false });
   
   // ⭐ Modal de confirmação de solicitação
   const [solicitando, setSolicitando] = useState<{
@@ -192,6 +194,13 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
   } | null>(null);
   const [motivoSolicitacao, setMotivoSolicitacao] = useState('');
   const [enviandoSolicitacao, setEnviandoSolicitacao] = useState(false);
+  
+  // ⭐ Modal de troca de solicitação (renegociação)
+  const [trocandoSolicitacao, setTrocandoSolicitacao] = useState<{
+    empAtual: Emprestimo;     // o empréstimo atualmente solicitado
+    empNovo: Emprestimo;       // o que o vendedor quer trocar para
+  } | null>(null);
+  const [trocandoEnvio, setTrocandoEnvio] = useState(false);
 
   const carregarDados = useCallback(async () => {
     if (!cliente?.id) return;
@@ -238,18 +247,31 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       setEmpAtivos(ativos);
       setEmpHistorico(all.filter(e => e.status !== 'ATIVO' && e.status !== 'VENCIDO'));
       
-      // ⭐ Buscar solicitações PENDENTES do cliente (para mostrar "aguardando")
+      // ⭐ Buscar solicitações PENDENTES do cliente (granular - guarda emprestimo_id)
       const { data: solicData } = await supabase
         .from('solicitacoes_autorizacao')
-        .select('tipo_solicitacao')
+        .select('id, tipo_solicitacao, emprestimo_id')
         .eq('cliente_id', cliente.id)
         .eq('status', 'PENDENTE')
         .in('tipo_solicitacao', ['RENEGOCIACAO', 'EMPRESTIMO_ADICIONAL']);
       
-      const tipos = new Set((solicData || []).map(s => s.tipo_solicitacao));
+      let renegEmpId: string | null = null;
+      let renegSolicId: string | null = null;
+      let temAdicional = false;
+      
+      (solicData || []).forEach(s => {
+        if (s.tipo_solicitacao === 'RENEGOCIACAO') {
+          renegEmpId = s.emprestimo_id;
+          renegSolicId = s.id;
+        } else if (s.tipo_solicitacao === 'EMPRESTIMO_ADICIONAL') {
+          temAdicional = true;
+        }
+      });
+      
       setSolicitacoesPendentes({
-        renegociacao: tipos.has('RENEGOCIACAO'),
-        adicional: tipos.has('EMPRESTIMO_ADICIONAL'),
+        renegociacao_emprestimo_id: renegEmpId,
+        renegociacao_id: renegSolicId,
+        adicional: temAdicional,
       });
     } catch (e) {
       console.error('Erro ao carregar detalhes:', e);
@@ -381,7 +403,12 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
         // Sucesso — atualizar estado pendente local e fechar modal
         setSolicitacoesPendentes(prev => ({
           ...prev,
-          renegociacao: solicitando.tipo === 'RENEGOCIACAO' ? true : prev.renegociacao,
+          renegociacao_emprestimo_id: solicitando.tipo === 'RENEGOCIACAO' 
+            ? (solicitando.emprestimo?.id || null) 
+            : prev.renegociacao_emprestimo_id,
+          renegociacao_id: solicitando.tipo === 'RENEGOCIACAO'
+            ? res.solicitacao_id
+            : prev.renegociacao_id,
           adicional: solicitando.tipo === 'EMPRESTIMO_ADICIONAL' ? true : prev.adicional,
         }));
         setSolicitando(null);
@@ -403,6 +430,43 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       else Alert.alert('Erro', msg);
     } finally {
       setEnviandoSolicitacao(false);
+    }
+  };
+
+  // ⭐ Prosseguir para troca: apaga a solicitação anterior e abre modal de solicitação normal
+  const prosseguirParaTroca = async () => {
+    if (!trocandoSolicitacao || !cliente || !solicitacoesPendentes.renegociacao_id) return;
+    
+    setTrocandoEnvio(true);
+    try {
+      // Apaga solicitação anterior
+      const { error } = await supabase
+        .from('solicitacoes_autorizacao')
+        .delete()
+        .eq('id', solicitacoesPendentes.renegociacao_id);
+      
+      if (error) throw error;
+      
+      // Atualiza estado local — não tem mais pendente
+      const empNovo = trocandoSolicitacao.empNovo;
+      setSolicitacoesPendentes(prev => ({
+        ...prev,
+        renegociacao_emprestimo_id: null,
+        renegociacao_id: null,
+      }));
+      
+      // Fecha modal de troca
+      setTrocandoSolicitacao(null);
+      
+      // Abre modal de solicitação normal com o empréstimo novo
+      setSolicitando({ tipo: 'RENEGOCIACAO', emprestimo: empNovo });
+      setMotivoSolicitacao('');
+    } catch (e: any) {
+      const msg = e?.message || (lang === 'es' ? 'Error al apagar solicitud' : 'Erro ao apagar solicitação');
+      if (Platform.OS === 'web') window.alert(msg);
+      else Alert.alert('Erro', msg);
+    } finally {
+      setTrocandoEnvio(false);
     }
   };
 
@@ -532,26 +596,20 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           <View style={[S.empBarFill, { width: `${pct}%`, backgroundColor: pct >= 100 ? '#10B981' : pct >= 50 ? '#3B82F6' : '#F59E0B' }]} />
         </View>
 
-        {/* ⭐ Botão Renegociar / Solicitar autorização — sempre aparece (em dia ou atraso) */}
+        {/* ⭐ Botão Renegociar / Solicitar / Aguardando — granular por empréstimo */}
         {(() => {
           if (somenteLeitura || !cliente || !onRenegociar) return null;
           
           const permiteReneg = clienteCompleto?.permite_renegociacao === true 
             || clienteCompleto?.permite_renegociacao === 'true';
           
-          // Já tem solicitação pendente? mostra "aguardando"
-          if (solicitacoesPendentes.renegociacao && !permiteReneg) {
-            return (
-              <View style={S.btnAguardando}>
-                <Ionicons name="time-outline" size={14} color="#92400E" />
-                <Text style={S.btnAguardandoText}>
-                  {lang === 'es' ? 'Aguardando aprobación' : 'Aguardando aprovação'}
-                </Text>
-              </View>
-            );
-          }
+          // Tem solicitação pendente PARA ESTE empréstimo específico?
+          const ehEmpDaSolicitacao = solicitacoesPendentes.renegociacao_emprestimo_id === emp.id;
+          // Tem solicitação pendente para outro empréstimo do cliente?
+          const temPendenteOutroEmp = !!solicitacoesPendentes.renegociacao_emprestimo_id 
+            && !ehEmpDaSolicitacao;
           
-          // Cliente autorizado → botão de renegociar (laranja, vai para tela)
+          // Cliente autorizado → botão de renegociar (laranja)
           if (permiteReneg) {
             return (
               <TouchableOpacity 
@@ -564,6 +622,44 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
               >
                 <Text style={S.btnRenegociarIcon}>↻</Text>
                 <Text style={S.btnRenegociarText}>{t.renegociar}</Text>
+              </TouchableOpacity>
+            );
+          }
+          
+          // Este é o empréstimo da solicitação pendente
+          if (ehEmpDaSolicitacao) {
+            return (
+              <View style={S.btnAguardando}>
+                <Ionicons name="time-outline" size={14} color="#92400E" />
+                <Text style={S.btnAguardandoText}>
+                  {lang === 'es' ? 'Aguardando aprobación' : 'Aguardando aprovação'}
+                </Text>
+              </View>
+            );
+          }
+          
+          // Tem pendente em outro empréstimo → botão para abrir modal de troca
+          if (temPendenteOutroEmp) {
+            return (
+              <TouchableOpacity 
+                style={S.btnSolicitar}
+                onPress={() => {
+                  // Encontrar o empréstimo atual da solicitação
+                  const empAtual = empAtivos.find(
+                    e => e.id === solicitacoesPendentes.renegociacao_emprestimo_id
+                  );
+                  if (empAtual) {
+                    setTrocandoSolicitacao({ empAtual, empNovo: emp });
+                  }
+                }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="swap-horizontal-outline" size={14} color="#374151" />
+                <Text style={S.btnSolicitarText}>
+                  {lang === 'es' 
+                    ? 'Solicitar para este préstamo' 
+                    : 'Solicitar para este empréstimo'}
+                </Text>
               </TouchableOpacity>
             );
           }
@@ -908,24 +1004,14 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                   </Text>
                 </View>
                 {solicitando.emprestimo && (
-                  <>
-                    <View style={S.solRow}>
-                      <Text style={S.solLabel}>
-                        {lang === 'es' ? 'Valor original:' : 'Valor original:'}
-                      </Text>
-                      <Text style={S.solValue}>
-                        {fmt(parseFloat((solicitando.emprestimo as any).valor_principal || 0))}
-                      </Text>
-                    </View>
-                    <View style={S.solRow}>
-                      <Text style={S.solLabel}>
-                        {lang === 'es' ? 'Saldo a renegociar:' : 'Saldo a renegociar:'}
-                      </Text>
-                      <Text style={[S.solValue, { color: '#DC2626' }]}>
-                        {fmt(parseFloat((solicitando.emprestimo as any).valor_saldo || 0))}
-                      </Text>
-                    </View>
-                  </>
+                  <View style={S.solRow}>
+                    <Text style={S.solLabel}>
+                      {lang === 'es' ? 'Préstamo:' : 'Empréstimo:'}
+                    </Text>
+                    <Text style={S.solValue}>
+                      {fmt(parseFloat((solicitando.emprestimo as any).valor_principal || 0))}
+                    </Text>
+                  </View>
                 )}
                 
                 <Text style={S.solInfo}>
@@ -976,6 +1062,99 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                 ) : (
                   <Text style={S.solBtnConfirmarTx}>
                     {lang === 'es' ? 'Enviar solicitud' : 'Enviar solicitação'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ⭐ MODAL DE TROCA DE SOLICITAÇÃO */}
+      <Modal
+        visible={!!trocandoSolicitacao}
+        animationType="fade"
+        transparent
+        onRequestClose={() => {
+          if (!trocandoEnvio) {
+            setTrocandoSolicitacao(null);
+          }
+        }}
+      >
+        <View style={S.solOverlay}>
+          <View style={S.solDialog}>
+            <View style={S.solHeader}>
+              <Ionicons name="swap-horizontal" size={20} color="#374151" />
+              <Text style={S.solTitle}>
+                {lang === 'es' ? 'Trocar solicitação' : 'Trocar solicitação'}
+              </Text>
+            </View>
+            
+            {trocandoSolicitacao && (
+              <View style={S.solBody}>
+                <Text style={S.trocaInfo}>
+                  ℹ️ {lang === 'es' 
+                    ? 'Ya hay una solicitud pendiente para otro préstamo. Al continuar, la solicitud anterior será eliminada y se abrirá una nueva solicitud para el préstamo actual.' 
+                    : 'Já há uma solicitação pendente para outro empréstimo. Ao continuar, a solicitação anterior será apagada e será aberta uma nova solicitação para o empréstimo atual.'}
+                </Text>
+                
+                {/* Empréstimo atual da solicitação */}
+                <View style={S.trocaBoxAntigo}>
+                  <Text style={S.trocaBoxLabel}>
+                    {lang === 'es' ? 'Solicitud actual:' : 'Solicitação atual:'}
+                  </Text>
+                  <Text style={S.trocaEmpValor}>
+                    {fmt(parseFloat((trocandoSolicitacao.empAtual as any).valor_principal || 0))}
+                  </Text>
+                  <Text style={S.trocaEmpInfo}>
+                    {fmtData((trocandoSolicitacao.empAtual as any).data_emprestimo)} · {' '}
+                    {(trocandoSolicitacao.empAtual as any).parcelas_pagas || 0}/{(trocandoSolicitacao.empAtual as any).numero_parcelas} {t.parcelas.toLowerCase()}
+                  </Text>
+                </View>
+                
+                {/* Seta */}
+                <View style={S.trocaSetaBox}>
+                  <Ionicons name="arrow-down" size={20} color="#9CA3AF" />
+                </View>
+                
+                {/* Empréstimo novo */}
+                <View style={S.trocaBoxNovo}>
+                  <Text style={S.trocaBoxLabel}>
+                    {lang === 'es' ? 'Nueva solicitud:' : 'Nova solicitação:'}
+                  </Text>
+                  <Text style={S.trocaEmpValor}>
+                    {fmt(parseFloat((trocandoSolicitacao.empNovo as any).valor_principal || 0))}
+                  </Text>
+                  <Text style={S.trocaEmpInfo}>
+                    {fmtData((trocandoSolicitacao.empNovo as any).data_emprestimo)} · {' '}
+                    {(trocandoSolicitacao.empNovo as any).parcelas_pagas || 0}/{(trocandoSolicitacao.empNovo as any).numero_parcelas} {t.parcelas.toLowerCase()}
+                  </Text>
+                </View>
+              </View>
+            )}
+            
+            <View style={S.solFooter}>
+              <TouchableOpacity
+                style={[S.solBtnVoltar, trocandoEnvio && { opacity: 0.5 }]}
+                onPress={() => {
+                  setTrocandoSolicitacao(null);
+                }}
+                disabled={trocandoEnvio}
+              >
+                <Text style={S.solBtnVoltarTx}>
+                  {lang === 'es' ? 'Cancelar' : 'Cancelar'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[S.solBtnConfirmar, trocandoEnvio && { opacity: 0.7 }]}
+                onPress={prosseguirParaTroca}
+                disabled={trocandoEnvio}
+              >
+                {trocandoEnvio ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={S.solBtnConfirmarTx}>
+                    {lang === 'es' ? 'Prosseguir para trocar' : 'Prosseguir para trocar'}
                   </Text>
                 )}
               </TouchableOpacity>
@@ -1300,5 +1479,51 @@ const S = StyleSheet.create({
     fontSize: 14, 
     fontWeight: '700', 
     color: '#FFFFFF' 
+  },
+  // ⭐ Modal de troca de solicitação
+  trocaInfo: {
+    fontSize: 12,
+    color: '#1E40AF',
+    backgroundColor: '#DBEAFE',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 14,
+  },
+  trocaBoxAntigo: {
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#FBBF24',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 4,
+  },
+  trocaBoxNovo: {
+    backgroundColor: '#D1FAE5',
+    borderWidth: 1,
+    borderColor: '#10B981',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 4,
+  },
+  trocaBoxLabel: {
+    fontSize: 11,
+    color: '#6B7280',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  trocaEmpValor: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1F2937',
+  },
+  trocaEmpInfo: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  trocaSetaBox: {
+    alignItems: 'center',
+    paddingVertical: 4,
   },
 });

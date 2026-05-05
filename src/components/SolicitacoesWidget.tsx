@@ -63,6 +63,8 @@ const translations = {
     reabrirLiquidacao: 'Reabrir Liquidação',
     quitarComDesconto: 'Quitar com Desconto',
     clienteOutraRota: 'Cliente de Outra Rota',
+    renegociacao: 'Renegociação',
+    emprestimoAdicional: 'Empréstimo Adicional',
     parcela: 'Parcela',
     motivo: 'Motivo',
     resolucao: 'Resolução',
@@ -91,6 +93,8 @@ const translations = {
     reabrirLiquidacao: 'Reabrir Liquidación',
     quitarComDesconto: 'Liquidar con Descuento',
     clienteOutraRota: 'Cliente de Otra Ruta',
+    renegociacao: 'Renegociación',
+    emprestimoAdicional: 'Préstamo Adicional',
     parcela: 'Cuota',
     motivo: 'Motivo',
     resolucao: 'Resolución',
@@ -280,8 +284,12 @@ export const SolicitacoesWidget: React.FC<Props> = ({ vendedorId, rotaId, lang =
       'REABRIR_LIQUIDACAO': 'reabrirLiquidacao',
       'QUITAR_COM_DESCONTO': 'quitarComDesconto',
       'CLIENTE_OUTRA_ROTA': 'clienteOutraRota',
+      'RENEGOCIACAO': 'renegociacao',                  // ⭐ NOVO
+      'EMPRESTIMO_ADICIONAL': 'emprestimoAdicional',   // ⭐ NOVO
     };
-    return t[map[tipo] || 'estornoPagamento'] as string;
+    // Se tipo não estiver mapeado, retorna o próprio nome (em vez de "Estorno" enganoso)
+    const chave = map[tipo];
+    return chave ? (t[chave] as string) : tipo.replace(/_/g, ' ');
   };
 
   const getStatusConfig = (status: string) => {
