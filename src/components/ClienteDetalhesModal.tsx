@@ -791,9 +791,48 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                   const isPago = p.status === 'PAGO';
                   const isVencida = p.status === 'VENCIDO' || p.status === 'VENCIDA';
                   const isParcial = p.status === 'PARCIAL';
+                  const isPendente = !isPago && !isVencida && !isParcial;
                   const corP = corStatus[isPago ? 'PAGO' : isVencida ? 'VENCIDO' : isParcial ? 'PARCIAL' : 'PENDENTE'];
                   const valorPagoReal = p.valor_pago_total ?? p.valor_pago;
                   const temCredito = (p.valor_credito_gerado ?? 0) > 0;
+
+                  // ⭐ Pontualidade do pagamento (PAGO ou PARCIAL)
+                  // Usar dias_atraso direto do banco (já calculado em emprestimo_parcelas)
+                  let diasDiferenca: number | null = null;
+                  let quitouAntecipado = false;
+                  if (isPago || isParcial) {
+                    if (typeof p.dias_atraso === 'number') {
+                      diasDiferenca = p.dias_atraso;
+                    }
+                    // Quitação antecipada: pago antes do vencimento (dias_atraso < 0 ou negativo)
+                    // O campo dias_atraso pode ser 0 quando pago no dia
+                    // Tentar detectar quitação antecipada comparando data real do pagamento com vencimento
+                    if (p.data_pagamento && p.data_vencimento) {
+                      const dataRefStr = p.data_pagamento.substring(0, 10);
+                      const [vy, vm, vd] = p.data_vencimento.split('-').map(Number);
+                      const [py, pm, pd] = dataRefStr.split('-').map(Number);
+                      if (vy && vm && vd && py && pm && pd) {
+                        const dtVenc = new Date(vy, vm - 1, vd);
+                        const dtPag = new Date(py, pm - 1, pd);
+                        if (dtPag.getTime() < dtVenc.getTime()) {
+                          quitouAntecipado = true;
+                        }
+                      }
+                    }
+                  }
+                  
+                  // ⭐ Atraso ao vivo para PENDENTE com data passada
+                  let atrasoAoVivo: number | null = null;
+                  if (isPendente && p.data_vencimento) {
+                    const hoje = new Date();
+                    hoje.setHours(0, 0, 0, 0);
+                    const [vy, vm, vd] = p.data_vencimento.split('-').map(Number);
+                    if (vy && vm && vd) {
+                      const dtVenc = new Date(vy, vm - 1, vd);
+                      const diff = Math.round((hoje.getTime() - dtVenc.getTime()) / (1000 * 60 * 60 * 24));
+                      if (diff > 0) atrasoAoVivo = diff;
+                    }
+                  }
 
                   const fmtTs = (ts: string) => {
                     try {
@@ -809,10 +848,21 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                       paddingVertical: 10,
                       paddingHorizontal: 12,
                       marginBottom: 6,
-                      backgroundColor: isPago ? '#F0FDF4' : isVencida ? '#FEF2F2' : '#FAFAFA',
+                      backgroundColor: isPago ? '#F0FDF4' : isVencida ? '#FEF2F2' : (atrasoAoVivo ? '#FEF2F2' : '#FAFAFA'),
                       borderRadius: 8,
-                      borderWidth: 1,
-                      borderColor: isPago ? '#BBF7D0' : isVencida ? '#FECACA' : '#E5E7EB',
+                      borderLeftWidth: 4,
+                      borderLeftColor: isPago && diasDiferenca !== null && diasDiferenca === 0 ? '#10B981'
+                        : isPago && diasDiferenca !== null && diasDiferenca > 0 ? '#F59E0B'
+                        : isPago && quitouAntecipado ? '#10B981'
+                        : isVencida || atrasoAoVivo ? '#EF4444'
+                        : isParcial ? '#F59E0B'
+                        : '#E5E7EB',
+                      borderTopWidth: 1,
+                      borderRightWidth: 1,
+                      borderBottomWidth: 1,
+                      borderTopColor: isPago ? '#BBF7D0' : isVencida || atrasoAoVivo ? '#FECACA' : '#E5E7EB',
+                      borderRightColor: isPago ? '#BBF7D0' : isVencida || atrasoAoVivo ? '#FECACA' : '#E5E7EB',
+                      borderBottomColor: isPago ? '#BBF7D0' : isVencida || atrasoAoVivo ? '#FECACA' : '#E5E7EB',
                     }}>
                       {/* Linha 1: número + vencimento + valor + status */}
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -834,18 +884,55 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                           </View>
                         </View>
                       </View>
+                      
+                      {/* ⭐ Badge de pontualidade (parcela PAGA ou PARCIAL) */}
+                      {(isPago || isParcial) && diasDiferenca !== null && (
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                          {diasDiferenca === 0 ? (
+                            <View style={{ backgroundColor: '#D1FAE5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                              <Text style={{ fontSize: 10, fontWeight: '600', color: '#065F46' }}>
+                                ✓ {lang === 'es' ? 'En el día' : 'No dia'}
+                              </Text>
+                            </View>
+                          ) : diasDiferenca > 0 ? (
+                            <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                              <Text style={{ fontSize: 10, fontWeight: '600', color: '#991B1B' }}>
+                                ⚠ {diasDiferenca} {lang === 'es' ? (diasDiferenca === 1 ? 'día de atraso' : 'días de atraso') : (diasDiferenca === 1 ? 'dia de atraso' : 'dias de atraso')}
+                              </Text>
+                            </View>
+                          ) : null}
+                          {quitouAntecipado && (
+                            <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                              <Text style={{ fontSize: 10, fontWeight: '600', color: '#92400E' }}>
+                                ⚡ {lang === 'es' ? 'Pago anticipado' : 'Quitação antecipada'}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      )}
+                      
+                      {/* ⭐ Badge de atraso ao vivo (parcela PENDENTE com data passada) */}
+                      {atrasoAoVivo !== null && (
+                        <View style={{ marginTop: 6 }}>
+                          <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, alignSelf: 'flex-start' }}>
+                            <Text style={{ fontSize: 10, fontWeight: '600', color: '#991B1B' }}>
+                              ⚠ {atrasoAoVivo} {lang === 'es' ? (atrasoAoVivo === 1 ? 'día atrasada' : 'días atrasada') : (atrasoAoVivo === 1 ? 'dia atrasada' : 'dias atrasada')}
+                            </Text>
+                          </View>
+                        </View>
+                      )}
 
                       {/* Linha 2 (pago/parcial): detalhes do pagamento */}
                       {(isPago || isParcial) && (
                         <View style={{ marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#D1FAE5', flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                           {parseFloat(String(valorPagoReal)) !== p.valor_parcela && (
                             <Text style={{ fontSize: 11, color: '#6B7280' }}>
-                              Parcela: {fmt(p.valor_parcela)}
+                              {lang === 'es' ? 'Cuota:' : 'Parcela:'} {fmt(p.valor_parcela)}
                             </Text>
                           )}
                           {p.data_pagamento && (
                             <Text style={{ fontSize: 11, color: '#6B7280' }}>
-                              {fmtTs(p.data_pagamento)}
+                              {lang === 'es' ? 'Pago en:' : 'Pago em:'} {fmtTs(p.data_pagamento)}
                             </Text>
                           )}
                           {p.forma_pagamento && (
@@ -860,16 +947,16 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                           )}
                           {p.liquidacao_data && (
                             <Text style={{ fontSize: 11, color: '#9CA3AF' }}>
-                              Liq. {fmtData(p.liquidacao_data)}
+                              {lang === 'es' ? 'Liq.' : 'Liq.'} {fmtData(p.liquidacao_data)}
                             </Text>
                           )}
                         </View>
                       )}
 
-                      {/* Linha extra: atraso */}
+                      {/* Linha extra: atraso oficial (status VENCIDO com dias_atraso do banco) */}
                       {isVencida && p.dias_atraso > 0 && (
-                        <Text style={{ fontSize: 11, color: '#EF4444', marginTop: 4 }}>
-                          {p.dias_atraso} {lang === 'es' ? 'días de atraso' : 'dias de atraso'}
+                        <Text style={{ fontSize: 11, color: '#EF4444', marginTop: 4, fontWeight: '600' }}>
+                          ⚠ {p.dias_atraso} {lang === 'es' ? (p.dias_atraso === 1 ? 'día de atraso' : 'días de atraso') : (p.dias_atraso === 1 ? 'dia de atraso' : 'dias de atraso')}
                         </Text>
                       )}
                     </View>

@@ -20,7 +20,8 @@ export interface EmprestimoTodos {
 export interface ClienteTodos {
   id: string; codigo_cliente: number | null; nome: string;
   telefone_celular: string | null; status: string; tem_atraso: boolean;
-  permite_renegociacao: boolean; cliente_created_at?: string;
+  permite_renegociacao: boolean; permite_emprestimo_adicional: boolean;
+  cliente_created_at?: string;
   emprestimos: EmprestimoTodos[];
 }
 
@@ -69,6 +70,7 @@ interface ClienteCardTodosProps {
     totalAtraso: string;
     emprestimo: string;
     toqueDetalhes: string;
+    novoEmprestimo: string;
   };
   onToggleExpand: () => void;
   onLongPressStart: () => void;
@@ -77,6 +79,7 @@ interface ClienteCardTodosProps {
   onAbrirParcelas: (clienteId: string, clienteNome: string, emprestimoId: string, empStatus: string) => void;
   onAbrirNotas: (clienteId: string, clienteNome: string) => void;
   onAbrirDetalhes: (cliente: { id: string; nome: string; telefone?: string | null; codigo_cliente?: string | number | null }) => void;
+  onNovoEmprestimo: (cliente: ClienteTodos) => void;
 }
 
 // ─── Componente ─────────────────────────────────────────────────────────────
@@ -97,6 +100,7 @@ export default function ClienteCardTodos({
   onAbrirParcelas,
   onAbrirNotas,
   onAbrirDetalhes,
+  onNovoEmprestimo,
 }: ClienteCardTodosProps) {
   const a = c.tem_atraso;
   const vencidas = emp?.total_parcelas_vencidas || 0;
@@ -175,6 +179,24 @@ export default function ClienteCardTodos({
             </View>
           )}
 
+          {/* ⭐ Botão "+ Novo Empréstimo" — mesma regra do ClienteDetalhesModal */}
+          {/* Mostra quando cliente em dia E (não tem ativo OU autorizado para adicional) */}
+          {/* Sem autorização → não mostra (vendedor abre detalhes para solicitar) */}
+          {(() => {
+            const temAtivo = c.emprestimos.some(e => e.status === 'ATIVO' || e.status === 'VENCIDO');
+            const clienteEmDia = !c.tem_atraso;
+            const podeNovoEmprestimo = clienteEmDia && (!temAtivo || c.permite_emprestimo_adicional);
+            
+            if (!podeNovoEmprestimo) return null;
+            
+            return (
+              <TouchableOpacity style={S.tAddRowActive} onPress={() => onNovoEmprestimo(c)}>
+                <Text style={S.tAddIconActive}>＋</Text>
+                <Text style={S.tAddTextActive}>{t.novoEmprestimo}</Text>
+              </TouchableOpacity>
+            );
+          })()}
+
           {/* Parcelas + Notas na mesma linha */}
           <View style={S.expActRow}>
             <TouchableOpacity style={S.btSecVerde} onPress={() => onAbrirParcelas(c.id, c.nome, emp.id, emp.status)}>
@@ -241,4 +263,27 @@ const S = StyleSheet.create({
   btSecBadgeT: { fontSize: 9, fontWeight: '700', color: '#FFF' },
   linkDetalhes: { alignItems: 'center', paddingVertical: 4 },
   linkDetalhesTx: { fontSize: 12, color: '#9CA3AF' },
+  // ⭐ Botão Novo Empréstimo
+  tAddRowActive: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    paddingVertical: 10, 
+    marginBottom: 10, 
+    backgroundColor: '#EFF6FF', 
+    borderRadius: 8, 
+    borderWidth: 1, 
+    borderColor: '#3B82F6' 
+  },
+  tAddIconActive: { 
+    fontSize: 16, 
+    color: '#3B82F6', 
+    marginRight: 6, 
+    fontWeight: '700' as const,
+  },
+  tAddTextActive: { 
+    fontSize: 13, 
+    color: '#3B82F6', 
+    fontWeight: '600' as const,
+  },
 });

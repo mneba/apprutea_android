@@ -81,7 +81,8 @@ interface ClienteAgrupado {
 interface ClienteTodos {
   id: string; codigo_cliente: number | null; nome: string;
   telefone_celular: string | null; status: string; tem_atraso: boolean;
-  permite_renegociacao: boolean; cliente_created_at?: string;
+  permite_renegociacao: boolean; permite_emprestimo_adicional: boolean;
+  cliente_created_at?: string;
   emprestimos: EmprestimoTodos[];
 }
 
@@ -1371,6 +1372,17 @@ export default function ClientesScreen({ navigation, route }: any) {
         onAbrirParcelas={abrirParcelas}
         onAbrirNotas={(id, nome) => { setNotasClienteId(id); setNotasClienteNome(nome); setModalNotasClienteVisible(true); }}
         onAbrirDetalhes={(cli) => { setDetalhesCliente(cli); setModalDetalhesVisible(true); }}
+        onNovoEmprestimo={(cli) => {
+          const nav = navigation.getParent() || navigation;
+          nav.navigate('NovoCliente', { 
+            clienteExistente: { 
+              id: cli.id, 
+              nome: cli.nome, 
+              telefone_celular: cli.telefone_celular, 
+              documento: cli.codigo_cliente?.toString() || '' 
+            } 
+          });
+        }}
       />
     );
   };

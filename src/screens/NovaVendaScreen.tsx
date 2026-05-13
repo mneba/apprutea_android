@@ -79,9 +79,15 @@ const DIAS_SEMANA_CURTO = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
 function CalendarioSelector({
   dataSelecionada,
   onSelect,
+  trabalhaDomingo = true,
+  feriadosSet,
+  lang = 'pt-BR',
 }: {
   dataSelecionada: string;
   onSelect: (dateStr: string) => void;
+  trabalhaDomingo?: boolean;
+  feriadosSet?: Set<string>;
+  lang?: 'pt-BR' | 'es';
 }) {
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
@@ -97,6 +103,17 @@ function CalendarioSelector({
       : hoje.getFullYear()
   );
 
+  // ⭐ Helpers para dias não-úteis
+  const ehFeriado = (dateStr: string): boolean => {
+    return feriadosSet ? feriadosSet.has(dateStr) : false;
+  };
+
+  const ehDiaNaoUtil = (dateStr: string, dayOfWeek: number): boolean => {
+    if (!trabalhaDomingo && dayOfWeek === 0) return true;
+    if (ehFeriado(dateStr)) return true;
+    return false;
+  };
+
   // Gerar dias do mês
   const gerarDias = () => {
     const primeiroDia = new Date(anoVis, mesVis, 1);
@@ -104,22 +121,30 @@ function CalendarioSelector({
     const diasNoMes = ultimoDia.getDate();
     const inicioSemana = primeiroDia.getDay(); // 0=Dom
 
-    const dias: Array<{ dia: number; dateStr: string; ehHoje: boolean; ehPassado: boolean } | null> = [];
+    const dias: Array<{ 
+      dia: number; 
+      dateStr: string; 
+      ehHoje: boolean; 
+      ehPassado: boolean;
+      ehFeriadoFlag: boolean;
+      ehNaoUtil: boolean;
+    } | null> = [];
 
-    // Espaços vazios antes do dia 1
     for (let i = 0; i < inicioSemana; i++) {
       dias.push(null);
     }
 
-    // Dias do mês
     for (let d = 1; d <= diasNoMes; d++) {
       const date = new Date(anoVis, mesVis, d);
       const dateStr = `${anoVis}-${String(mesVis + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const dow = date.getDay();
       dias.push({
         dia: d,
         dateStr,
         ehHoje: date.getTime() === hoje.getTime(),
         ehPassado: date < hoje,
+        ehFeriadoFlag: ehFeriado(dateStr),
+        ehNaoUtil: ehDiaNaoUtil(dateStr, dow),
       });
     }
 
@@ -154,7 +179,10 @@ function CalendarioSelector({
       <View style={calStyles.weekRow}>
         {DIAS_SEMANA_CURTO.map((dia, i) => (
           <View key={i} style={calStyles.weekCell}>
-            <Text style={[calStyles.weekText, i === 0 && { color: '#EF4444' }]}>{dia}</Text>
+            <Text style={[
+              calStyles.weekText, 
+              i === 0 && { color: trabalhaDomingo ? '#EF4444' : '#9CA3AF' }
+            ]}>{dia}</Text>
           </View>
         ))}
       </View>
@@ -167,6 +195,7 @@ function CalendarioSelector({
           }
 
           const selecionado = item.dateStr === dataSelecionada;
+          const desabilitado = item.ehPassado || item.ehNaoUtil;
 
           return (
             <TouchableOpacity
@@ -175,36 +204,67 @@ function CalendarioSelector({
                 calStyles.dayCell,
                 item.ehHoje && calStyles.dayCellHoje,
                 selecionado && calStyles.dayCellSelecionado,
+                desabilitado && calStyles.dayCellDesabilitado,
               ]}
-              onPress={() => onSelect(item.dateStr)}
-              activeOpacity={0.6}
+              onPress={() => {
+                if (desabilitado) return;
+                onSelect(item.dateStr);
+              }}
+              activeOpacity={desabilitado ? 1 : 0.6}
+              disabled={desabilitado}
             >
               <Text style={[
                 calStyles.dayText,
                 item.ehPassado && !item.ehHoje && calStyles.dayTextPassado,
                 item.ehHoje && calStyles.dayTextHoje,
                 selecionado && calStyles.dayTextSelecionado,
+                item.ehNaoUtil && !item.ehPassado && calStyles.dayTextNaoUtil,
               ]}>
                 {item.dia}
               </Text>
+              {item.ehFeriadoFlag && !item.ehPassado && (
+                <Text style={calStyles.feriadoDot}>•</Text>
+              )}
             </TouchableOpacity>
           );
         })}
       </View>
 
+      {/* Legenda */}
+      {(!trabalhaDomingo || (feriadosSet && feriadosSet.size > 0)) && (
+        <View style={calStyles.legendaRow}>
+          {!trabalhaDomingo && (
+            <Text style={calStyles.legendaText}>
+              {lang === 'es' ? 'Domingo no laborable' : 'Domingo não é dia útil'}
+            </Text>
+          )}
+          {feriadosSet && feriadosSet.size > 0 && (
+            <Text style={calStyles.legendaText}>
+              • {lang === 'es' ? 'Feriado' : 'Feriado'}
+            </Text>
+          )}
+        </View>
+      )}
+
       {/* Botão Hoje */}
-      <TouchableOpacity
-        style={calStyles.hojeBtn}
-        onPress={() => {
-          const hojeStr = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`;
-          setMesVis(hoje.getMonth());
-          setAnoVis(hoje.getFullYear());
-          onSelect(hojeStr);
-        }}
-        activeOpacity={0.7}
-      >
-        <Text style={calStyles.hojeBtnText}>📅 Hoje ({hoje.toLocaleDateString('pt-BR')})</Text>
-      </TouchableOpacity>
+      {(() => {
+        const hojeStr = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`;
+        const hojeNaoUtil = ehDiaNaoUtil(hojeStr, hoje.getDay());
+        if (hojeNaoUtil) return null;
+        return (
+          <TouchableOpacity
+            style={calStyles.hojeBtn}
+            onPress={() => {
+              setMesVis(hoje.getMonth());
+              setAnoVis(hoje.getFullYear());
+              onSelect(hojeStr);
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={calStyles.hojeBtnText}>📅 {lang === 'es' ? 'Hoy' : 'Hoje'} ({hoje.toLocaleDateString(lang === 'es' ? 'es-CO' : 'pt-BR')})</Text>
+          </TouchableOpacity>
+        );
+      })()}
     </View>
   );
 }
@@ -283,6 +343,37 @@ const calStyles = StyleSheet.create({
   dayTextSelecionado: {
     color: '#fff',
     fontWeight: '700',
+  },
+  // ⭐ Estados não-úteis
+  dayCellDesabilitado: {
+    backgroundColor: '#F3F4F6',
+    opacity: 0.5,
+  },
+  dayTextNaoUtil: {
+    color: '#9CA3AF',
+    textDecorationLine: 'line-through',
+  },
+  feriadoDot: {
+    fontSize: 16,
+    color: '#F59E0B',
+    position: 'absolute',
+    bottom: -2,
+    fontWeight: '700',
+  },
+  legendaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+    justifyContent: 'center',
+  },
+  legendaText: {
+    fontSize: 11,
+    color: '#6B7280',
+    fontStyle: 'italic',
   },
   hojeBtn: {
     marginTop: 12,
@@ -708,6 +799,10 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   const [observacoesEmprestimo, setObservacoesEmprestimo] = useState('');
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showDiaSemanaModal, setShowDiaSemanaModal] = useState(false);
+  
+  // ⭐ Configuração de dias úteis da rota — para bloquear domingos/feriados no DatePicker
+  const [trabalhaDomingo, setTrabalhaDomingo] = useState<boolean>(true);
+  const [feriadosSet, setFeriadosSet] = useState<Set<string>>(new Set());
 
   // -----------------------------------------------------------
   // ESTADOS - MICROSEGURO
@@ -841,6 +936,39 @@ export default function NovaVendaScreen({ navigation, route }: any) {
       }
     })();
   }, [clienteExistente?.id, isRenegociacao, tipoEmprestimoDetectado, clienteEncontradoId, lang, navigation]);
+
+  // -----------------------------------------------------------
+  // ⭐ CARREGAR CONFIG DE DIAS ÚTEIS DA ROTA (domingo + feriados)
+  // -----------------------------------------------------------
+  useEffect(() => {
+    const rotaId = vendedor?.rota_id;
+    if (!rotaId) return;
+    
+    (async () => {
+      try {
+        const { data: rotaData } = await supabase
+          .from('rotas')
+          .select('trabalha_domingo')
+          .eq('id', rotaId)
+          .single();
+        
+        setTrabalhaDomingo(rotaData?.trabalha_domingo !== false);
+        
+        const { data: feriadosData } = await supabase
+          .from('feriados')
+          .select('data')
+          .eq('rota_id', rotaId);
+        
+        const set = new Set<string>();
+        (feriadosData || []).forEach((f: any) => {
+          if (f.data) set.add(f.data);
+        });
+        setFeriadosSet(set);
+      } catch (e) {
+        console.error('Erro ao carregar config de dias úteis:', e);
+      }
+    })();
+  }, [vendedor?.rota_id]);
 
   // -----------------------------------------------------------
   // CARREGAR DADOS DO EMPRÉSTIMO ORIGINAL (RENEGOCIAÇÃO)
@@ -2787,6 +2915,9 @@ export default function NovaVendaScreen({ navigation, route }: any) {
             </View>
             <CalendarioSelector
               dataSelecionada={dataPrimeiroVencimento}
+              trabalhaDomingo={trabalhaDomingo}
+              feriadosSet={feriadosSet}
+              lang={lang}
               onSelect={(dateStr) => {
                 setDataPrimeiroVencimento(dateStr);
                 setShowDatePicker(false);
