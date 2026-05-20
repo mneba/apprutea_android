@@ -804,6 +804,10 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   const [trabalhaDomingo, setTrabalhaDomingo] = useState<boolean>(true);
   const [feriadosSet, setFeriadosSet] = useState<Set<string>>(new Set());
 
+  // ⭐ Restrição de valor máximo de vendas (do vendedor)
+  const [validarMaxVendas, setValidarMaxVendas] = useState<boolean>(false);
+  const [valorMaxVendas, setValorMaxVendas] = useState<number>(0);
+
   // -----------------------------------------------------------
   // ESTADOS - MICROSEGURO
   // -----------------------------------------------------------
@@ -969,6 +973,29 @@ export default function NovaVendaScreen({ navigation, route }: any) {
       }
     })();
   }, [vendedor?.rota_id]);
+
+  // -----------------------------------------------------------
+  // ⭐ CARREGAR RESTRIÇÃO DE VALOR MÁXIMO DE VENDAS
+  // -----------------------------------------------------------
+  useEffect(() => {
+    const vId = vendedor?.id;
+    if (!vId) return;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('restricoes_vendedor')
+          .select('validar_valor_max_vendas, valor_max_vendas')
+          .eq('vendedor_id', vId)
+          .maybeSingle();
+        if (data) {
+          setValidarMaxVendas(data.validar_valor_max_vendas === true);
+          setValorMaxVendas(parseFloat(String(data.valor_max_vendas)) || 0);
+        }
+      } catch (e) {
+        console.error('Erro ao carregar restrição de vendas:', e);
+      }
+    })();
+  }, [vendedor?.id]);
 
   // -----------------------------------------------------------
   // CARREGAR DADOS DO EMPRÉSTIMO ORIGINAL (RENEGOCIAÇÃO)
@@ -1606,6 +1633,89 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         }
       } else {
         // VENDA NOVA - cliente novo
+
+        // ⭐ VALIDAÇÃO: valor máximo de vendas
+        // Só para venda nova de cliente novo (sem clienteExistente/clienteEncontrado).
+        // Se exceder o limite, NÃO cria a venda: grava em vendas_pendentes + solicitação.
+        // Quando vier de uma venda já aprovada (route param), pula esta validação.
+        const vendaJaAprovada = !!route?.params?.vendaPendente;
+        if (
+          !vendaJaAprovada &&
+          validarMaxVendas &&
+          valorMaxVendas > 0 &&
+          valorPrincipal > valorMaxVendas
+        ) {
+          // 1. Grava a venda pendente
+          const { data: vp, error: vpErr } = await supabase
+            .from('vendas_pendentes')
+            .insert({
+              vendedor_id: vendedorId,
+              rota_id: rotaId,
+              empresa_id: empresaId,
+              status: 'PENDENTE',
+              cliente_nome: nome.trim(),
+              cliente_documento: documento.trim() || null,
+              cliente_telefone: telefoneCelular ? `${ddiCelular}${telefoneCelular}` : null,
+              cliente_telefone_fixo: telefoneFixo ? `${ddiFixo}${telefoneFixo}` : null,
+              cliente_email: email.trim() || null,
+              cliente_endereco: endereco.trim() || null,
+              cliente_endereco_comercial: enderecoComercial.trim() || null,
+              cliente_segmento_id: segmentoId || null,
+              cliente_foto_url: fotoCliente || null,
+              cliente_observacoes: observacoesCliente.trim() || null,
+              valor_principal: valorPrincipal,
+              numero_parcelas: parseInt(numeroParcelas),
+              taxa_juros: parseFloat(taxaJuros.replace(',', '.')) || 0,
+              frequencia: frequencia,
+              data_primeiro_vencimento: dataPrimeiroVencimento,
+              dia_semana_cobranca: frequencia === 'SEMANAL' ? parseInt(diaSemanaPagamento) : null,
+              dia_mes_cobranca: frequencia === 'MENSAL' ? parseInt(diaMesPagamento) : null,
+              dias_mes_cobranca: frequencia === 'FLEXIVEL' ? diasMesFlexivel : null,
+              iniciar_proximo_mes: frequencia === 'FLEXIVEL' ? iniciarProximoMes : false,
+              observacoes_emprestimo: observacoesEmprestimo.trim() || null,
+              microseguro_valor: microValor > 0 ? microValor : null,
+              valor_limite: valorMaxVendas,
+            })
+            .select('id')
+            .single();
+
+          if (vpErr) throw vpErr;
+
+          // 2. Cria a solicitação de autorização
+          const { data: sol, error: solErr } = await supabase
+            .from('solicitacoes_autorizacao')
+            .insert({
+              vendedor_id: vendedorId,
+              rota_id: rotaId,
+              tipo_solicitacao: 'VENDA_EXCEDE_LIMITE',
+              valor_solicitado: valorPrincipal,
+              valor_limite: valorMaxVendas,
+              motivo_solicitacao: `Venda nova de ${nome.trim()} no valor de $ ${valorPrincipal.toFixed(2)} excede o limite de $ ${valorMaxVendas.toFixed(2)}.`,
+              status: 'PENDENTE',
+              venda_pendente_id: vp.id,
+            })
+            .select('id')
+            .single();
+
+          if (solErr) throw solErr;
+
+          // 3. Vincula a solicitação na venda pendente
+          await supabase
+            .from('vendas_pendentes')
+            .update({ solicitacao_id: sol.id })
+            .eq('id', vp.id);
+
+          // 4. Feedback e sai
+          setSubmitting(false);
+          const msg = lang === 'es'
+            ? `La venta de $ ${valorPrincipal.toFixed(2)} excede el límite de $ ${valorMaxVendas.toFixed(2)}. Se envió una solicitud al administrador.`
+            : `A venda de $ ${valorPrincipal.toFixed(2)} excede o limite de $ ${valorMaxVendas.toFixed(2)}. Foi enviada uma solicitação ao administrador.`;
+          if (Platform.OS === 'web') { window.alert(msg); }
+          else { Alert.alert(lang === 'es' ? 'Autorización requerida' : 'Autorização necessária', msg); }
+          navigation.goBack();
+          return;
+        }
+
         const params: Record<string, any> = {
           p_cliente_id: null,
           p_cliente_nome: nome.trim(),
