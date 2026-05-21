@@ -1064,7 +1064,16 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         setEmail(vp.cliente_email || '');
         setEndereco(vp.cliente_endereco || '');
         setEnderecoComercial(vp.cliente_endereco_comercial || '');
-        if (vp.cliente_segmento_id) setSegmentoId(vp.cliente_segmento_id);
+        if (vp.cliente_segmento_id) {
+          setSegmentoId(vp.cliente_segmento_id);
+          // Buscar nome do segmento para exibir (campo mostra nome, não id)
+          const { data: seg } = await supabase
+            .from('segmentos')
+            .select('nome_pt')
+            .eq('id', vp.cliente_segmento_id)
+            .maybeSingle();
+          if (seg?.nome_pt) setSegmentoNome(seg.nome_pt);
+        }
         if (vp.cliente_foto_url) setFotoCliente(vp.cliente_foto_url);
         setObservacoesCliente(vp.cliente_observacoes || '');
 
@@ -1735,7 +1744,9 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         // Só para venda nova de cliente novo (sem clienteExistente/clienteEncontrado).
         // Se exceder o limite, NÃO cria a venda: grava em vendas_pendentes + solicitação.
         // Quando vier de uma venda já aprovada (route param), pula esta validação.
-        const vendaJaAprovada = !!route?.params?.vendaPendente;
+        // Pula a validação de limite quando a venda já foi aprovada
+        // (seja por navegação OU por detecção de documento — vendaPendenteId cobre ambos)
+        const vendaJaAprovada = !!vendaPendenteId && isVendaAprovadaTravada;
         if (
           !vendaJaAprovada &&
           validarMaxVendas &&
@@ -2518,21 +2529,24 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                   ) : (
                     <View style={styles.rowFields}>
                       <TextInput
-                        style={[styles.input, { flex: 1 }]}
+                        style={[styles.input, { flex: 1 }, isVendaAprovadaTravada && styles.inputDisabled]}
                         value={taxaJuros}
                         onChangeText={(text) => setTaxaJuros(text.replace(/[^\d.,]/g, ''))}
                         placeholder={t.phJuros}
                         placeholderTextColor="#9CA3AF"
                         keyboardType="decimal-pad"
-                        autoFocus
+                        autoFocus={!isVendaAprovadaTravada}
+                        editable={!isVendaAprovadaTravada}
                       />
-                      <TouchableOpacity
-                        style={styles.taxaCancelBtn}
-                        onPress={() => { setTaxaJurosPersonalizada(false); setTaxaJuros(''); }}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={styles.taxaCancelBtnText}>{t.voltar}</Text>
-                      </TouchableOpacity>
+                      {!isVendaAprovadaTravada && (
+                        <TouchableOpacity
+                          style={styles.taxaCancelBtn}
+                          onPress={() => { setTaxaJurosPersonalizada(false); setTaxaJuros(''); }}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.taxaCancelBtnText}>{t.voltar}</Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
                   )}
                 </View>
@@ -2555,8 +2569,10 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                         style={[
                           styles.radioOption,
                           frequencia === freq.value && styles.radioOptionActive,
+                          isVendaAprovadaTravada && frequencia !== freq.value && { opacity: 0.4 },
                         ]}
                         onPress={() => {
+                          if (isVendaAprovadaTravada) return;
                           setFrequencia(freq.value);
                           limparErroCampo('frequencia');
                           if (freq.value === 'DIARIO') {
@@ -2565,7 +2581,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                             setDataPrimeiroVencimento(calcularDataMensal(parseInt(diaMesPagamento)));
                           }
                         }}
-                        activeOpacity={0.7}
+                        activeOpacity={isVendaAprovadaTravada ? 1 : 0.7}
                       >
                         <View style={[
                           styles.radioCircle,
@@ -2591,9 +2607,10 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                       Dia da semana <Text style={styles.required}>*</Text>
                     </Text>
                     <TouchableOpacity
-                      style={[styles.selectField, camposComErro.has('diaSemanaPagamento') && styles.inputError]}
-                      onPress={() => { setShowDiaSemanaModal(true); limparErroCampo('diaSemanaPagamento'); }}
-                      activeOpacity={0.7}
+                      style={[styles.selectField, camposComErro.has('diaSemanaPagamento') && styles.inputError, isVendaAprovadaTravada && styles.inputDisabled]}
+                      onPress={() => { if (isVendaAprovadaTravada) return; setShowDiaSemanaModal(true); limparErroCampo('diaSemanaPagamento'); }}
+                      activeOpacity={isVendaAprovadaTravada ? 1 : 0.7}
+                      disabled={isVendaAprovadaTravada}
                     >
                       <Text style={styles.selectFieldText}>{getDiaSemanaLabel()}</Text>
                       <Text style={styles.selectFieldChevron}>▼</Text>
@@ -2608,7 +2625,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                       Dia do mês <Text style={styles.required}>*</Text>
                     </Text>
                     <TextInput
-                      style={[styles.input, camposComErro.has('diaMesPagamento') && styles.inputError]}
+                      style={[styles.input, camposComErro.has('diaMesPagamento') && styles.inputError, isVendaAprovadaTravada && styles.inputDisabled]}
                       value={diaMesPagamento}
                       onChangeText={(text) => {
                         const num = text.replace(/[^\d]/g, '');
@@ -2621,6 +2638,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                       placeholderTextColor="#9CA3AF"
                       keyboardType="numeric"
                       maxLength={2}
+                      editable={!isVendaAprovadaTravada}
                     />
                   </View>
                 )}
@@ -2681,9 +2699,10 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                     Data 1º vencimento <Text style={styles.required}>*</Text>
                   </Text>
                   <TouchableOpacity
-                    style={[styles.selectField, camposComErro.has('dataPrimeiroVencimento') && styles.inputError]}
-                    onPress={() => { setShowDatePicker(true); limparErroCampo('dataPrimeiroVencimento'); }}
-                    activeOpacity={0.7}
+                    style={[styles.selectField, camposComErro.has('dataPrimeiroVencimento') && styles.inputError, isVendaAprovadaTravada && styles.inputDisabled]}
+                    onPress={() => { if (isVendaAprovadaTravada) return; setShowDatePicker(true); limparErroCampo('dataPrimeiroVencimento'); }}
+                    activeOpacity={isVendaAprovadaTravada ? 1 : 0.7}
+                    disabled={isVendaAprovadaTravada}
                   >
                     <Text style={styles.selectFieldText}>
                       {formatarData(dataPrimeiroVencimento)}
