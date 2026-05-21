@@ -533,6 +533,15 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   const renegociacao = route?.params?.renegociacao || null;
   const isRenegociacao = !!renegociacao;
 
+  // ⭐ Venda pendente (aprovada ou rejeitada) vinda do SolicitacoesWidget
+  const vendaPendenteParam = route?.params?.vendaPendente || null;
+  const [vendaPendenteIdDetectada, setVendaPendenteIdDetectada] = useState<string | null>(null);
+  // id efetivo: ou veio por navegação, ou foi detectado pelo documento
+  const vendaPendenteId = vendaPendenteParam?.id || vendaPendenteIdDetectada || null;
+  // venda detectada por documento é sempre aprovada (a query filtra APROVADO)
+  const vendaPendenteModo = vendaPendenteParam?.modo || (vendaPendenteIdDetectada ? 'aprovada' : null);
+  const isVendaAprovadaTravada = vendaPendenteModo === 'aprovada';
+
   // -----------------------------------------------------------
   // ESTADOS - CLIENTE
   // -----------------------------------------------------------
@@ -555,7 +564,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   // -----------------------------------------------------------
   // POPUP BUSCA POR DOCUMENTO (somente fluxo novo cliente)
   // -----------------------------------------------------------
-  const [modalDocVisible, setModalDocVisible] = useState(!clienteExistente && !isRenegociacao);
+  const [modalDocVisible, setModalDocVisible] = useState(!clienteExistente && !isRenegociacao && !vendaPendenteParam);
   const [docBusca, setDocBusca] = useState('');
   const [buscandoDoc, setBuscandoDoc] = useState(false);
   const [clienteEncontradoId, setClienteEncontradoId] = useState<string | null>(null);
@@ -569,6 +578,38 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     setBuscandoDoc(true);
     try {
       const docSemMask = docBusca.replace(/\D/g, '');
+
+      // ⭐ Antes de tudo: verificar se há VENDA PENDENTE APROVADA para este documento
+      // (venda nova autorizada pelo admin, ainda não materializada)
+      const { data: vpAprovada } = await supabase
+        .from('vendas_pendentes')
+        .select('id, cliente_nome')
+        .eq('cliente_documento', docSemMask)
+        .eq('status', 'APROVADO')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (vpAprovada) {
+        setBuscandoDoc(false);
+        const titulo = lang === 'es' ? 'Venta autorizada' : 'Venda autorizada';
+        const msg = lang === 'es'
+          ? `Hay una venta autorizada para ${vpAprovada.cliente_nome}. ¿Desea cargarla?`
+          : `Há uma venda autorizada para ${vpAprovada.cliente_nome}. Deseja carregá-la?`;
+        const carregar = () => {
+          setVendaPendenteIdDetectada(vpAprovada.id);
+          setModalDocVisible(false);
+        };
+        if (Platform.OS === 'web') {
+          if (window.confirm(`${titulo}\n\n${msg}`)) carregar();
+        } else {
+          Alert.alert(titulo, msg, [
+            { text: lang === 'es' ? 'No' : 'Não', style: 'cancel' },
+            { text: lang === 'es' ? 'Sí, cargar' : 'Sim, carregar', onPress: carregar },
+          ]);
+        }
+        return;
+      }
 
       // Busca exata primeiro — evita falsos positivos com ilike '%14%'
       let { data: clientes } = await supabase
@@ -996,6 +1037,62 @@ export default function NovaVendaScreen({ navigation, route }: any) {
       }
     })();
   }, [vendedor?.id]);
+
+  // -----------------------------------------------------------
+  // ⭐ CARREGAR VENDA PENDENTE (aprovada/rejeitada) PARA PRÉ-PREENCHER
+  // -----------------------------------------------------------
+  const [vendaPendenteCarregada, setVendaPendenteCarregada] = useState(false);
+  const [modalAlterarVisible, setModalAlterarVisible] = useState(false);
+  const [textoAlteracao, setTextoAlteracao] = useState('');
+  const [enviandoAlteracao, setEnviandoAlteracao] = useState(false);
+  useEffect(() => {
+    if (!vendaPendenteId || vendaPendenteCarregada) return;
+    (async () => {
+      try {
+        const { data: vp } = await supabase
+          .from('vendas_pendentes')
+          .select('*')
+          .eq('id', vendaPendenteId)
+          .single();
+        if (!vp) return;
+
+        // Cliente
+        setNome(vp.cliente_nome || '');
+        setDocumento(vp.cliente_documento || '');
+        if (vp.cliente_telefone) setTelefoneCelular(String(vp.cliente_telefone).replace(/^\+\d{1,3}/, ''));
+        if (vp.cliente_telefone_fixo) setTelefoneFixo(String(vp.cliente_telefone_fixo).replace(/^\+\d{1,3}/, ''));
+        setEmail(vp.cliente_email || '');
+        setEndereco(vp.cliente_endereco || '');
+        setEnderecoComercial(vp.cliente_endereco_comercial || '');
+        if (vp.cliente_segmento_id) setSegmentoId(vp.cliente_segmento_id);
+        if (vp.cliente_foto_url) setFotoCliente(vp.cliente_foto_url);
+        setObservacoesCliente(vp.cliente_observacoes || '');
+
+        // Empréstimo — usa valor_aprovado se o admin liberou valor diferente
+        const valorUsar = vp.valor_aprovado != null ? vp.valor_aprovado : vp.valor_principal;
+        setValorEmprestimo(String(valorUsar).replace(/\.00$/, ''));
+        setNumeroParcelas(String(vp.numero_parcelas || ''));
+        setTaxaJuros(String(vp.taxa_juros ?? ''));
+        setTaxaJurosPersonalizada(true);
+        setFrequencia(vp.frequencia || 'DIARIO');
+        if (vp.data_primeiro_vencimento) setDataPrimeiroVencimento(vp.data_primeiro_vencimento);
+        if (vp.dia_semana_cobranca != null) setDiaSemanaPagamento(String(vp.dia_semana_cobranca));
+        if (vp.dia_mes_cobranca != null) setDiaMesPagamento(String(vp.dia_mes_cobranca));
+        if (vp.dias_mes_cobranca) setDiasMesFlexivel(vp.dias_mes_cobranca);
+        if (vp.iniciar_proximo_mes != null) setIniciarProximoMes(vp.iniciar_proximo_mes);
+        setObservacoesEmprestimo(vp.observacoes_emprestimo || '');
+        if (vp.microseguro_valor) setValorMicroseguro(String(vp.microseguro_valor));
+
+        // Não abrir o modal de busca de documento
+        setModalDocVisible(false);
+        setClienteExpanded(true);
+
+        setVendaPendenteCarregada(true);
+      } catch (e) {
+        console.error('Erro ao carregar venda pendente:', e);
+      }
+    })();
+  }, [vendaPendenteId, vendaPendenteCarregada]);
 
   // -----------------------------------------------------------
   // CARREGAR DADOS DO EMPRÉSTIMO ORIGINAL (RENEGOCIAÇÃO)
@@ -1848,6 +1945,14 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         }
       }
 
+      // ⭐ Se veio de uma venda pendente aprovada, marca como CONCLUIDO
+      if (vendaPendenteId && isVendaAprovadaTravada) {
+        await supabase
+          .from('vendas_pendentes')
+          .update({ status: 'CONCLUIDO' })
+          .eq('id', vendaPendenteId);
+      }
+
       // Atualizar liquidação e mostrar resultado
       liqCtx.recarregarLiquidacao();
       setResultado(res);
@@ -1874,9 +1979,51 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   // -----------------------------------------------------------
   // FECHAR TELA
   // -----------------------------------------------------------
+  // ⭐ Reenviar venda pendente com pedido de alteração → volta para PENDENTE
+  const enviarPedidoAlteracao = async () => {
+    if (!vendaPendenteId || !textoAlteracao.trim()) return;
+    setEnviandoAlteracao(true);
+    try {
+      // Volta a venda pendente para PENDENTE com o motivo da alteração
+      await supabase
+        .from('vendas_pendentes')
+        .update({
+          status: 'PENDENTE',
+          motivo_alteracao: textoAlteracao.trim(),
+          valor_aprovado: null, // limpa aprovação anterior — admin reavalia
+        })
+        .eq('id', vendaPendenteId);
+
+      // Reabre/atualiza a solicitação vinculada para PENDENTE
+      await supabase
+        .from('solicitacoes_autorizacao')
+        .update({
+          status: 'PENDENTE',
+          data_resolucao: null,
+          motivo_resolucao: null,
+          motivo_solicitacao: `Pedido de alteração: ${textoAlteracao.trim()}`,
+        })
+        .eq('venda_pendente_id', vendaPendenteId);
+
+      setEnviandoAlteracao(false);
+      setModalAlterarVisible(false);
+      const msg = lang === 'es'
+        ? 'Solicitud de cambio enviada al administrador.'
+        : 'Pedido de alteração enviado ao administrador.';
+      if (Platform.OS === 'web') { window.alert(msg); }
+      else { Alert.alert('✓', msg); }
+      navigation.goBack();
+    } catch (e: any) {
+      setEnviandoAlteracao(false);
+      const msg = e?.message || 'Erro ao enviar alteração';
+      if (Platform.OS === 'web') { window.alert(msg); }
+      else { Alert.alert('Erro', msg); }
+    }
+  };
+
   const handleClose = () => {
     // Se é renovação/renegociação, dados já vêm preenchidos — não pedir confirmação
-    if (clienteExistente || isRenegociacao) {
+    if (clienteExistente || isRenegociacao || vendaPendenteParam) {
       navigation.goBack();
       return;
     }
@@ -1978,6 +2125,20 @@ export default function NovaVendaScreen({ navigation, route }: any) {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
+          {/* ⭐ Banner: venda aprovada (travada) */}
+          {isVendaAprovadaTravada && (
+            <View style={styles.bannerAprovada}>
+              <Text style={styles.bannerAprovadaTitulo}>
+                ✓ {lang === 'es' ? 'Venta aprobada por el administrador' : 'Venda aprovada pelo administrador'}
+              </Text>
+              <Text style={styles.bannerAprovadaTexto}>
+                {lang === 'es'
+                  ? 'Los datos están bloqueados. Solo confirme la venta. Si necesita cambios, use "Alterar préstamo solicitado" abajo.'
+                  : 'Os dados estão travados. Apenas confirme a venda. Se precisar de mudanças, use "Alterar empréstimo solicitado" abaixo.'}
+              </Text>
+            </View>
+          )}
+
           {/* ================================================ */}
           {/* SEÇÃO: CLIENTE                                   */}
           {/* ================================================ */}
@@ -2035,14 +2196,14 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                     style={[
                       styles.input, 
                       camposComErro.has('nome') && styles.inputError,
-                      isRenegociacao && styles.inputDisabled,
+                      (isRenegociacao || isVendaAprovadaTravada) && styles.inputDisabled,
                     ]}
                     value={nome}
                     onChangeText={(text) => { setNome(text); limparErroCampo('nome'); }}
                     placeholder={t.phNomeCliente}
                     placeholderTextColor="#9CA3AF"
                     autoCapitalize="words"
-                    editable={!isRenegociacao}
+                    editable={!isRenegociacao && !isVendaAprovadaTravada}
                   />
                 </View>
 
@@ -2055,13 +2216,13 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                     style={[
                       styles.input, 
                       camposComErro.has('documento') && styles.inputError,
-                      isRenegociacao && styles.inputDisabled,
+                      (isRenegociacao || isVendaAprovadaTravada) && styles.inputDisabled,
                     ]}
                     value={documento}
                     onChangeText={(text) => { setDocumento(text); limparErroCampo('documento'); }}
                     placeholder={t.phDoc}
                     placeholderTextColor="#9CA3AF"
-                    editable={!isRenegociacao}
+                    editable={!isRenegociacao && !isVendaAprovadaTravada}
                   />
                 </View>
 
@@ -2072,10 +2233,10 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                   </Text>
                   <View style={styles.rowFields}>
                     <TouchableOpacity
-                      style={[styles.ddiSelector, isRenegociacao && styles.inputDisabled]}
-                      onPress={() => { if (!isRenegociacao) openDdiModal('celular'); }}
-                      activeOpacity={isRenegociacao ? 1 : 0.7}
-                      disabled={isRenegociacao}
+                      style={[styles.ddiSelector, (isRenegociacao || isVendaAprovadaTravada) && styles.inputDisabled]}
+                      onPress={() => { if (!isRenegociacao && !isVendaAprovadaTravada) openDdiModal('celular'); }}
+                      activeOpacity={(isRenegociacao || isVendaAprovadaTravada) ? 1 : 0.7}
+                      disabled={isRenegociacao || isVendaAprovadaTravada}
                     >
                       <Text style={styles.ddiText}>{getDdiLabel('celular')}</Text>
                       <Text style={styles.ddiChevron}>▼</Text>
@@ -2085,14 +2246,14 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                         styles.input, 
                         { flex: 1 }, 
                         camposComErro.has('telefoneCelular') && styles.inputError,
-                        isRenegociacao && styles.inputDisabled,
+                        (isRenegociacao || isVendaAprovadaTravada) && styles.inputDisabled,
                       ]}
                       value={telefoneCelular}
                       onChangeText={(text) => { setTelefoneCelular(text.replace(/[^\d]/g, '')); limparErroCampo('telefoneCelular'); }}
                       placeholder={t.phTelefone}
                       placeholderTextColor="#9CA3AF"
                       keyboardType="phone-pad"
-                      editable={!isRenegociacao}
+                      editable={!isRenegociacao && !isVendaAprovadaTravada}
                     />
                   </View>
                 </View>
@@ -2102,10 +2263,10 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                   <Text style={styles.fieldLabel}>{t.telefoneFixo}</Text>
                   <View style={styles.rowFields}>
                     <TouchableOpacity
-                      style={[styles.ddiSelector, isRenegociacao && styles.inputDisabled]}
-                      onPress={() => { if (!isRenegociacao) openDdiModal('fixo'); }}
-                      activeOpacity={isRenegociacao ? 1 : 0.7}
-                      disabled={isRenegociacao}
+                      style={[styles.ddiSelector, (isRenegociacao || isVendaAprovadaTravada) && styles.inputDisabled]}
+                      onPress={() => { if (!isRenegociacao && !isVendaAprovadaTravada) openDdiModal('fixo'); }}
+                      activeOpacity={(isRenegociacao || isVendaAprovadaTravada) ? 1 : 0.7}
+                      disabled={isRenegociacao || isVendaAprovadaTravada}
                     >
                       <Text style={styles.ddiText}>{getDdiLabel('fixo')}</Text>
                       <Text style={styles.ddiChevron}>▼</Text>
@@ -2114,14 +2275,14 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                       style={[
                         styles.input, 
                         { flex: 1 },
-                        isRenegociacao && styles.inputDisabled,
+                        (isRenegociacao || isVendaAprovadaTravada) && styles.inputDisabled,
                       ]}
                       value={telefoneFixo}
                       onChangeText={(text) => setTelefoneFixo(text.replace(/[^\d]/g, ''))}
                       placeholder={t.phTelefone}
                       placeholderTextColor="#9CA3AF"
                       keyboardType="phone-pad"
-                      editable={!isRenegociacao}
+                      editable={!isRenegociacao && !isVendaAprovadaTravada}
                     />
                   </View>
                 </View>
@@ -2130,14 +2291,14 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                 <View style={styles.fieldGroup}>
                   <Text style={styles.fieldLabel}>{t.email}</Text>
                   <TextInput
-                    style={[styles.input, isRenegociacao && styles.inputDisabled]}
+                    style={[styles.input, (isRenegociacao || isVendaAprovadaTravada) && styles.inputDisabled]}
                     value={email}
                     onChangeText={setEmail}
                     placeholder={t.phEmail}
                     placeholderTextColor="#9CA3AF"
                     keyboardType="email-address"
                     autoCapitalize="none"
-                    editable={!isRenegociacao}
+                    editable={!isRenegociacao && !isVendaAprovadaTravada}
                   />
                 </View>
 
@@ -2150,13 +2311,13 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                     style={[
                       styles.input, 
                       camposComErro.has('endereco') && styles.inputError,
-                      isRenegociacao && styles.inputDisabled,
+                      (isRenegociacao || isVendaAprovadaTravada) && styles.inputDisabled,
                     ]}
                     value={endereco}
                     onChangeText={(text) => { setEndereco(text); limparErroCampo('endereco'); }}
                     placeholder={t.phEndRes}
                     placeholderTextColor="#9CA3AF"
-                    editable={!isRenegociacao}
+                    editable={!isRenegociacao && !isVendaAprovadaTravada}
                   />
                 </View>
 
@@ -2169,13 +2330,13 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                     style={[
                       styles.input, 
                       camposComErro.has('enderecoComercial') && styles.inputError,
-                      isRenegociacao && styles.inputDisabled,
+                      (isRenegociacao || isVendaAprovadaTravada) && styles.inputDisabled,
                     ]}
                     value={enderecoComercial}
                     onChangeText={(text) => { setEnderecoComercial(text); limparErroCampo('enderecoComercial'); }}
                     placeholder={t.phEndCom}
                     placeholderTextColor="#9CA3AF"
-                    editable={!isRenegociacao}
+                    editable={!isRenegociacao && !isVendaAprovadaTravada}
                   />
                 </View>
 
@@ -2183,10 +2344,10 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                 <View style={styles.fieldGroup}>
                   <Text style={styles.fieldLabel}>{t.segmento}</Text>
                   <TouchableOpacity
-                    style={[styles.selectField, isRenegociacao && styles.inputDisabled]}
-                    onPress={() => { if (!isRenegociacao) setShowSegmentoModal(true); }}
-                    activeOpacity={isRenegociacao ? 1 : 0.7}
-                    disabled={isRenegociacao}
+                    style={[styles.selectField, (isRenegociacao || isVendaAprovadaTravada) && styles.inputDisabled]}
+                    onPress={() => { if (!isRenegociacao && !isVendaAprovadaTravada) setShowSegmentoModal(true); }}
+                    activeOpacity={(isRenegociacao || isVendaAprovadaTravada) ? 1 : 0.7}
+                    disabled={isRenegociacao || isVendaAprovadaTravada}
                   >
                     <Text style={segmentoId ? styles.selectFieldText : styles.selectFieldPlaceholder}>
                       {segmentoNome || 'Selecione o segmento...'}
@@ -2199,10 +2360,10 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                 <View style={styles.fieldGroup}>
                   <Text style={styles.fieldLabel}>{t.fotoCliente}</Text>
                   <TouchableOpacity
-                    style={[styles.photoContainer, isRenegociacao && { opacity: 0.6 }]}
-                    onPress={() => { if (!isRenegociacao) handlePhotoOptions(); }}
-                    activeOpacity={isRenegociacao ? 1 : 0.7}
-                    disabled={isRenegociacao}
+                    style={[styles.photoContainer, (isRenegociacao || isVendaAprovadaTravada) && { opacity: 0.6 }]}
+                    onPress={() => { if (!isRenegociacao && !isVendaAprovadaTravada) handlePhotoOptions(); }}
+                    activeOpacity={(isRenegociacao || isVendaAprovadaTravada) ? 1 : 0.7}
+                    disabled={isRenegociacao || isVendaAprovadaTravada}
                   >
                     {fotoCliente ? (
                       <View style={styles.photoPreviewWrapper}>
@@ -2233,7 +2394,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                     style={[
                       styles.input, 
                       styles.textArea,
-                      isRenegociacao && styles.inputDisabled,
+                      (isRenegociacao || isVendaAprovadaTravada) && styles.inputDisabled,
                     ]}
                     value={observacoesCliente}
                     onChangeText={setObservacoesCliente}
@@ -2242,7 +2403,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                     multiline
                     numberOfLines={2}
                     textAlignVertical="top"
-                    editable={!isRenegociacao}
+                    editable={!isRenegociacao && !isVendaAprovadaTravada}
                   />
                 </View>
                   </>
@@ -2279,14 +2440,14 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                       style={[
                         styles.input, 
                         camposComErro.has('valorEmprestimo') && styles.inputError,
-                        isRenegociacao && styles.inputDisabled,
+                        (isRenegociacao || isVendaAprovadaTravada) && styles.inputDisabled,
                       ]}
                       value={valorEmprestimo}
                       onChangeText={(text) => { handleValorEmprestimoChange(text); limparErroCampo('valorEmprestimo'); }}
                       placeholder="500"
                       placeholderTextColor="#9CA3AF"
                       keyboardType="decimal-pad"
-                      editable={!isRenegociacao}
+                      editable={!isRenegociacao && !isVendaAprovadaTravada}
                     />
                     {isRenegociacao && (
                       <Text style={styles.hintRenegociacao}>
@@ -2299,7 +2460,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                       Parcelas <Text style={styles.required}>*</Text>
                     </Text>
                     <TextInput
-                      style={[styles.input, camposComErro.has('numeroParcelas') && styles.inputError]}
+                      style={[styles.input, camposComErro.has('numeroParcelas') && styles.inputError, isVendaAprovadaTravada && styles.inputDisabled]}
                       value={numeroParcelas}
                       onChangeText={(text) => {
                         const num = text.replace(/[^\d]/g, '');
@@ -2310,6 +2471,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                       placeholderTextColor="#9CA3AF"
                       keyboardType="numeric"
                       maxLength={3}
+                      editable={!isVendaAprovadaTravada}
                     />
                   </View>
                 </View>
@@ -2698,6 +2860,19 @@ export default function NovaVendaScreen({ navigation, route }: any) {
             </View>
           </View>
 
+          {/* ⭐ Venda aprovada: botão para solicitar alteração (reinicia processo) */}
+          {isVendaAprovadaTravada && (
+            <TouchableOpacity
+              style={styles.btnAlterarSolicitado}
+              onPress={() => setModalAlterarVisible(true)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.btnAlterarSolicitadoText}>
+                {lang === 'es' ? '✎ Alterar préstamo solicitado' : '✎ Alterar empréstimo solicitado'}
+              </Text>
+            </TouchableOpacity>
+          )}
+
           {/* Espaço inferior */}
           <View style={{ height: 100 }} />
         </ScrollView>
@@ -3036,6 +3211,54 @@ export default function NovaVendaScreen({ navigation, route }: any) {
           </View>
         </Pressable>
       </Modal>
+
+      {/* ⭐ MODAL: Pedido de alteração de venda aprovada */}
+      <Modal visible={modalAlterarVisible} transparent animationType="fade" onRequestClose={() => setModalAlterarVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalCardTitle}>
+              {lang === 'es' ? 'Solicitar cambio' : 'Solicitar alteração'}
+            </Text>
+            <Text style={styles.modalCardDesc}>
+              {lang === 'es'
+                ? 'Describa qué desea cambiar. La venta volverá a análisis del administrador.'
+                : 'Descreva o que deseja alterar. A venda voltará para análise do administrador.'}
+            </Text>
+            <TextInput
+              style={[styles.modalCardInput, { minHeight: 90, textAlignVertical: 'top' }]}
+              value={textoAlteracao}
+              onChangeText={setTextoAlteracao}
+              placeholder={lang === 'es' ? 'Ej.: quiero más crédito del aprobado...' : 'Ex.: quero mais crédito do que foi aprovado...'}
+              placeholderTextColor="#9CA3AF"
+              multiline
+              numberOfLines={4}
+              maxLength={500}
+              editable={!enviandoAlteracao}
+            />
+            <View style={styles.modalCardButtons}>
+              <TouchableOpacity
+                style={styles.modalCardBtnCancel}
+                onPress={() => setModalAlterarVisible(false)}
+                disabled={enviandoAlteracao}
+              >
+                <Text style={styles.modalCardBtnCancelText}>
+                  {lang === 'es' ? 'Cancelar' : 'Cancelar'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalCardBtnConfirm, (!textoAlteracao.trim() || enviandoAlteracao) && { opacity: 0.5 }]}
+                onPress={enviarPedidoAlteracao}
+                disabled={!textoAlteracao.trim() || enviandoAlteracao}
+              >
+                {enviandoAlteracao
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={styles.modalCardBtnConfirmText}>{lang === 'es' ? 'Enviar' : 'Enviar'}</Text>
+                }
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -3214,6 +3437,39 @@ const styles = StyleSheet.create({
     color: '#92400E',
     marginTop: 4,
     fontStyle: 'italic',
+  },
+  bannerAprovada: {
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 4,
+  },
+  bannerAprovadaTitulo: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#065F46',
+    marginBottom: 4,
+  },
+  bannerAprovadaTexto: {
+    fontSize: 12,
+    color: '#047857',
+    lineHeight: 17,
+  },
+  btnAlterarSolicitado: {
+    marginTop: 8,
+    paddingVertical: 13,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#D1D5DB',
+    backgroundColor: '#F9FAFB',
+    alignItems: 'center',
+  },
+  btnAlterarSolicitadoText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6B7280',
   },
 
   // Row fields (DDI + telefone)

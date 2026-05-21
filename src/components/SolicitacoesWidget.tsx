@@ -3,9 +3,11 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Clipboard from 'expo-clipboard';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Modal,
   Platform,
@@ -31,12 +33,19 @@ interface Solicitacao {
   cliente_nome?: string;
   parcela_numero?: number;
   valor_pago?: number;
+  venda_pendente_id?: string | null;
+  vp_status?: string | null;
+  vp_cliente_nome?: string | null;
+  vp_cliente_documento?: string | null;
+  vp_valor_principal?: number | null;
+  vp_valor_aprovado?: number | null;
 }
 
 interface Props {
   vendedorId: string;
   rotaId: string;
   lang?: 'pt-BR' | 'es';
+  navigation?: any;
 }
 
 // ============================================================
@@ -108,7 +117,7 @@ const translations = {
 // ============================================================
 // COMPONENTE PRINCIPAL
 // ============================================================
-export const SolicitacoesWidget: React.FC<Props> = ({ vendedorId, rotaId, lang = 'pt-BR' }) => {
+export const SolicitacoesWidget: React.FC<Props> = ({ vendedorId, rotaId, lang = 'pt-BR', navigation }) => {
   const t = translations[lang] || translations['pt-BR'];
   
   const [modalVisible, setModalVisible] = useState(false);
@@ -212,8 +221,10 @@ export const SolicitacoesWidget: React.FC<Props> = ({ vendedorId, rotaId, lang =
           motivo_resolucao,
           cliente_id,
           parcela_id,
+          venda_pendente_id,
           clientes:cliente_id (nome),
-          emprestimo_parcelas:parcela_id (numero_parcela, valor_pago)
+          emprestimo_parcelas:parcela_id (numero_parcela, valor_pago),
+          vendas_pendentes:venda_pendente_id (status, cliente_nome, cliente_documento, valor_principal, valor_aprovado)
         `)
         .eq('vendedor_id', vendedorId)
         .eq('rota_id', rotaId)
@@ -224,9 +235,15 @@ export const SolicitacoesWidget: React.FC<Props> = ({ vendedorId, rotaId, lang =
 
       const mapped = (data || []).map((s: any) => ({
         ...s,
-        cliente_nome: s.clientes?.nome || null,
+        cliente_nome: s.clientes?.nome || s.vendas_pendentes?.cliente_nome || null,
         parcela_numero: s.emprestimo_parcelas?.numero_parcela || null,
         valor_pago: s.emprestimo_parcelas?.valor_pago || null,
+        venda_pendente_id: s.venda_pendente_id || null,
+        vp_status: s.vendas_pendentes?.status || null,
+        vp_cliente_nome: s.vendas_pendentes?.cliente_nome || null,
+        vp_cliente_documento: s.vendas_pendentes?.cliente_documento || null,
+        vp_valor_principal: s.vendas_pendentes?.valor_principal != null ? parseFloat(String(s.vendas_pendentes.valor_principal)) : null,
+        vp_valor_aprovado: s.vendas_pendentes?.valor_aprovado != null ? parseFloat(String(s.vendas_pendentes.valor_aprovado)) : null,
       }));
 
       setSolicitacoes(mapped);
@@ -373,6 +390,34 @@ export const SolicitacoesWidget: React.FC<Props> = ({ vendedorId, rotaId, lang =
             <Text style={S.cardAguardando}>{t.aguardandoAprovacao}</Text>
           )}
         </View>
+
+        {/* ⭐ Venda nova aprovada — documento do cliente + copiar */}
+        {item.tipo_solicitacao === 'VENDA_EXCEDE_LIMITE'
+          && item.status === 'APROVADO'
+          && item.vp_status === 'APROVADO'
+          && item.vp_cliente_documento && (
+          <View style={S.docBox}>
+            <View style={S.docInfo}>
+              <Text style={S.docLabel}>
+                {lang === 'es' ? 'Documento para registrar:' : 'Documento para registrar:'}
+              </Text>
+              <Text style={S.docValor}>{item.vp_cliente_documento}</Text>
+            </View>
+            <TouchableOpacity
+              style={S.docCopiarBtn}
+              onPress={async () => {
+                await Clipboard.setStringAsync(String(item.vp_cliente_documento));
+                const msg = lang === 'es' ? 'Documento copiado' : 'Documento copiado';
+                if (Platform.OS === 'web') { /* noop visual */ }
+                else { Alert.alert('✓', msg); }
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="copy-outline" size={16} color="#2563EB" />
+              <Text style={S.docCopiarText}>{lang === 'es' ? 'Copiar' : 'Copiar'}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     );
   };
@@ -658,6 +703,47 @@ const S = StyleSheet.create({
     fontSize: 11,
     color: '#D97706',
     fontStyle: 'italic',
+  },
+  docBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  docInfo: {
+    flex: 1,
+  },
+  docLabel: {
+    fontSize: 11,
+    color: '#6B7280',
+  },
+  docValor: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1E40AF',
+    marginTop: 2,
+  },
+  docCopiarBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  docCopiarText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#2563EB',
   },
 
   loadingContainer: {

@@ -21,6 +21,7 @@
     "@supabase/supabase-js": "^2.93.3",
     "babel-plugin-react-compiler": "^1.0.0",
     "expo": "^53.0.27",
+    "expo-clipboard": "~7.1.5",
     "expo-constants": "~17.1.8",
     "expo-dev-client": "~5.2.4",
     "expo-file-system": "~18.1.11",
