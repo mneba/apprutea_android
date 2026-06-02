@@ -9,31 +9,31 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { textos } from '../constants/novaVendaConstants';
 import { useAuth } from '../contexts/AuthContext';
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
-import { textos, fmt } from '../constants/novaVendaConstants';
 import { styles } from '../styles/novaVendaStyles';
 
 // Hooks
-import { useNovaVendaForm } from '../hooks/useNovaVendaForm';
-import { useNovaVendaConfig } from '../hooks/useNovaVendaConfig';
 import { useBuscaDocumento } from '../hooks/useBuscaDocumento';
+import { useNovaVendaConfig } from '../hooks/useNovaVendaConfig';
+import { useNovaVendaForm } from '../hooks/useNovaVendaForm';
 import { useNovaVendaSubmit } from '../hooks/useNovaVendaSubmit';
 
 // Componentes
 import FormularioCliente from '../components/nova-venda/FormularioCliente';
 import FormularioEmprestimo from '../components/nova-venda/FormularioEmprestimo';
-import SecaoMicroseguro from '../components/nova-venda/SecaoMicroseguro';
-import ResumoVenda from '../components/nova-venda/ResumoVenda';
 import ModalBuscaDocumento from '../components/nova-venda/ModalBuscaDocumento';
 import ModalResultado from '../components/nova-venda/ModalResultado';
 import {
-  ModalDDI,
-  ModalSegmento,
-  ModalDiaSemana,
-  ModalCalendario,
   ModalAlteracao,
+  ModalCalendario,
+  ModalDDI,
+  ModalDiaSemana,
+  ModalSegmento,
 } from '../components/nova-venda/PickerModals';
+import ResumoVenda from '../components/nova-venda/ResumoVenda';
+import SecaoMicroseguro from '../components/nova-venda/SecaoMicroseguro';
 
 // ============================================================
 // TELA PRINCIPAL — NOVA VENDA
@@ -162,15 +162,23 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   };
 
   const handleClose = () => {
-    if (clienteExistente || isRenegociacao || buscaDoc.vendaPendenteId) {
+    if (clienteExistente || isRenegociacao || vendaPendenteParam) {
       navigation.goBack();
       return;
     }
-    if (form.nome || form.documento || form.valorEmprestimo) {
-      Alert.alert(t.cancelarVenda, t.cancelarMsg, [
-        { text: t.nao, style: 'cancel' },
-        { text: t.simCancelar, style: 'destructive', onPress: () => navigation.goBack() },
-      ]);
+    const temDados = form.nome || form.documento || form.telefoneCelular || form.telefoneFixo ||
+                     form.email || form.endereco || form.enderecoComercial || form.segmentoId ||
+                     form.fotoCliente || form.observacoesCliente;
+
+    if (temDados) {
+      if (Platform.OS === 'web') {
+        if (window.confirm('Os dados preenchidos serão perdidos. Cancelar?')) navigation.goBack();
+      } else {
+        Alert.alert(t.cancelarVenda, t.cancelarMsg, [
+          { text: t.nao, style: 'cancel' },
+          { text: t.simCancelar, style: 'destructive', onPress: () => navigation.goBack() },
+        ]);
+      }
     } else {
       navigation.goBack();
     }
