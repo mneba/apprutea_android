@@ -1,11 +1,10 @@
 import React, { useRef } from 'react';
 import {
   Animated,
-  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Language } from '../contexts/LiquidacaoContext';
@@ -134,11 +133,12 @@ export default function ClienteCardLiquidacao({
   const bc = borderOf(e, pg);
   const bg = bgOf(e, pg);
   const pi = e.pagamento_info;
-  const valorAPagar = e.valor_pago_parcela > 0 && !pg ? e.saldo_parcela : e.valor_parcela;
+  const valorAPagar = e.numero_parcela === e.numero_parcelas
+    ? (e.valor_pago_parcela > 0 && !pg ? e.saldo_parcela : e.valor_parcela)
+    : e.valor_parcela;
 
-  // Swipe só funciona no mobile
-  const isWeb = Platform.OS === 'web';
-  const podeSwipe = !isWeb && !pg && !np && !!liqId && !isViz && !!onNaoPago;
+  // Swipe desabilitado temporariamente
+  const podeSwipe = false;
 
   // Renderiza ação de swipe à direita (botão Não Pago)
   const renderRightActions = (progress: Animated.AnimatedInterpolation<number>, dragX: Animated.AnimatedInterpolation<number>) => {

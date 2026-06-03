@@ -837,7 +837,14 @@ export default function ClientesScreen({ navigation, route }: any) {
       const dados = Array.isArray(data) ? data[0] : data;
       if (dados) {
         setDadosPagamento(dados);
-        setValorPagamento((dados.valor_saldo_parcela || parcela.valor_parcela).toFixed(2).replace('.', ','));
+        // Última parcela: valor calculado (saldos anteriores, créditos, pagamentos parciais)
+        // Demais parcelas: sempre o valor fixo da parcela
+        const isUltimaParcela = dados.numero_parcela === dados.total_parcelas;
+        if (isUltimaParcela) {
+          setValorPagamento((dados.valor_saldo_parcela || parcela.valor_parcela).toFixed(2).replace('.', ','));
+        } else {
+          setValorPagamento(parcela.valor_parcela.toFixed(2).replace('.', ','));
+        }
       } else {
         setValorPagamento(parcela.valor_parcela.toFixed(2).replace('.', ','));
       }
@@ -895,10 +902,16 @@ export default function ClientesScreen({ navigation, route }: any) {
         
         if (dados) {
           setDadosPagamento(dados);
-          // Usa valor_saldo_parcela se disponível, senão valor_saldo da fn_buscar
-          const valorAPagar = dados.valor_saldo_parcela || valorSaldo;
-          setValorPagamento(valorAPagar.toFixed(2).replace('.', ','));
-          console.log('✅ Modal atualizado! Parcela:', dados.numero_parcela, 'Valor:', valorAPagar);
+          // Última parcela: valor calculado (saldos anteriores, créditos, pagamentos parciais)
+          // Demais parcelas: sempre o valor fixo da parcela
+          const isUltimaParcela = dados.numero_parcela === dados.total_parcelas;
+          if (isUltimaParcela) {
+            const valorAPagar = dados.valor_saldo_parcela || valorSaldo;
+            setValorPagamento(valorAPagar.toFixed(2).replace('.', ','));
+          } else {
+            setValorPagamento(proxima.valor_parcela.toFixed(2).replace('.', ','));
+          }
+          console.log('✅ Modal atualizado! Parcela:', dados.numero_parcela, '/', dados.total_parcelas, 'Valor:', isUltimaParcela ? (dados.valor_saldo_parcela || valorSaldo) : proxima.valor_parcela);
         } else {
           // Fallback se fn_consultar não retornar dados
           setValorPagamento(valorSaldo.toFixed(2).replace('.', ','));
