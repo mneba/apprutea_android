@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Linking,
   Modal,
   Platform,
@@ -206,6 +208,143 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
     empNovo: Emprestimo;       // o que o vendedor quer trocar para
   } | null>(null);
   const [trocandoEnvio, setTrocandoEnvio] = useState(false);
+  const [uploadingFoto, setUploadingFoto] = useState(false);
+  const [obsLocal, setObsLocal] = useState('');
+  const [salvandoObs, setSalvandoObs] = useState(false);
+
+  // ==================== FOTO DO CLIENTE ====================
+  const handleFotoCliente = () => {
+    if (!cliente?.id) return;
+    const opcoes: any[] = [
+      { text: lang === 'es' ? 'Cámara' : 'Câmera', onPress: () => capturarFoto('camera') },
+      { text: lang === 'es' ? 'Galería' : 'Galeria', onPress: () => capturarFoto('gallery') },
+    ];
+    if (clienteCompleto?.foto_url) {
+      opcoes.push({ text: lang === 'es' ? 'Quitar foto' : 'Remover foto', style: 'destructive', onPress: removerFoto });
+    }
+    opcoes.push({ text: lang === 'es' ? 'Cancelar' : 'Cancelar', style: 'cancel' });
+
+    if (Platform.OS === 'web') {
+      capturarFoto('gallery');
+    } else {
+      Alert.alert(
+        lang === 'es' ? 'Foto del cliente' : 'Foto do cliente',
+        lang === 'es' ? '¿Cómo desea agregar la foto?' : 'Como deseja adicionar a foto?',
+        opcoes
+      );
+    }
+  };
+
+  const capturarFoto = async (modo: 'camera' | 'gallery') => {
+    try {
+      if (modo === 'camera') {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('', lang === 'es' ? 'Permiso de cámara necesario' : 'Permissão de câmera necessária');
+          return;
+        }
+      } else {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('', lang === 'es' ? 'Permiso de galería necesario' : 'Permissão de galeria necessária');
+          return;
+        }
+      }
+
+      const pickerOpts: ImagePicker.ImagePickerOptions = {
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.6,
+        base64: true,
+      };
+
+      const result = modo === 'camera'
+        ? await ImagePicker.launchCameraAsync(pickerOpts)
+        : await ImagePicker.launchImageLibraryAsync(pickerOpts);
+
+      if (result.canceled || !result.assets?.[0]) return;
+
+      const asset = result.assets[0];
+      if (!asset.base64) {
+        console.error('ImagePicker não retornou base64');
+        Alert.alert('Erro', 'Não foi possível processar a imagem.');
+        return;
+      }
+
+      setUploadingFoto(true);
+      const ext = (asset.uri.split('.').pop()?.toLowerCase() || 'jpg').replace(/\?.*/, '');
+      const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+      const path = `clientes/${cliente!.id}.${ext === 'png' ? 'png' : 'jpg'}`;
+
+      // Converter base64 para Uint8Array (funciona em React Native)
+      const binaryString = atob(asset.base64);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+
+      console.log('📤 Enviando foto:', path, 'tamanho:', bytes.length, 'bytes');
+
+      // DEBUG - verificar sessão auth
+      const { data: sessionData } = await supabase.auth.getSession();
+      console.log('🔑 Sessão Auth:', sessionData?.session ? 'ATIVA - ' + sessionData.session.user.email : 'NENHUMA');
+
+      const { error: upErr } = await supabase.storage
+        .from('fotos')
+        .upload(path, bytes, {
+          contentType: mimeType,
+          upsert: true,
+        });
+
+      if (upErr) {
+        console.error('❌ Erro upload storage:', upErr);
+        throw upErr;
+      }
+
+      const { data: urlData } = supabase.storage.from('fotos').getPublicUrl(path);
+      const publicUrl = `${urlData.publicUrl}?t=${Date.now()}`;
+      console.log('✅ Foto enviada, URL:', publicUrl);
+
+      const { error: updErr } = await supabase.from('clientes').update({ foto_url: publicUrl }).eq('id', cliente!.id);
+      if (updErr) console.error('❌ Erro ao atualizar foto_url:', updErr);
+
+      setClienteCompleto((prev: any) => prev ? { ...prev, foto_url: publicUrl } : prev);
+    } catch (e: any) {
+      console.error('❌ Erro ao enviar foto:', e);
+      Alert.alert('Erro', e?.message || 'Não foi possível enviar a foto.');
+    } finally {
+      setUploadingFoto(false);
+    }
+  };
+
+  const removerFoto = async () => {
+    if (!cliente?.id) return;
+    try {
+      setUploadingFoto(true);
+      await supabase.from('clientes').update({ foto_url: null }).eq('id', cliente.id);
+      setClienteCompleto((prev: any) => prev ? { ...prev, foto_url: null } : prev);
+    } catch (e) {
+      console.error('Erro ao remover foto:', e);
+    } finally {
+      setUploadingFoto(false);
+    }
+  };
+
+  const salvarObservacoes = async (texto: string) => {
+    if (!cliente?.id) return;
+    const trimmed = texto.trim();
+    if (trimmed === (clienteCompleto?.observacoes || '').trim()) return;
+    setSalvandoObs(true);
+    try {
+      await supabase.from('clientes').update({ observacoes: trimmed || null }).eq('id', cliente.id);
+      setClienteCompleto((prev: any) => prev ? { ...prev, observacoes: trimmed || null } : prev);
+    } catch (e) {
+      console.error('Erro ao salvar observações:', e);
+    } finally {
+      setSalvandoObs(false);
+    }
+  };
 
   const carregarDados = useCallback(async () => {
     if (!cliente?.id) return;
@@ -214,10 +353,11 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       // 1. Dados completos do cliente
       const { data: cliData } = await supabase
         .from('clientes')
-        .select('id, nome, documento, telefone_celular, endereco, status, codigo_cliente, created_at, permite_emprestimo_adicional, permite_renegociacao, rotas_ids, empresa_id')
+        .select('id, nome, documento, telefone_celular, endereco, endereco_comercial, foto_url, observacoes, status, codigo_cliente, created_at, permite_emprestimo_adicional, permite_renegociacao, rotas_ids, empresa_id')
         .eq('id', cliente.id)
         .single();
       setClienteCompleto(cliData);
+      setObsLocal(cliData?.observacoes || '');
 
       // 2. Empréstimos via view completa
       const { data: emps } = await supabase
@@ -251,6 +391,12 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       
       setEmpAtivos(ativos);
       setEmpHistorico(all.filter(e => e.status !== 'ATIVO' && e.status !== 'VENCIDO'));
+      
+      // Auto-expandir se só 1 empréstimo ativo
+      if (ativos.length === 1) {
+        setExpandedEmp(ativos[0].id);
+        carregarParcelas(ativos[0].id);
+      }
       
       // ⭐ Buscar solicitações PENDENTES e APROVADO recente do cliente (granular)
       // PENDENTE: para mostrar "aguardando" no card específico
@@ -490,9 +636,24 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
     <ScrollView style={S.abaContent} showsVerticalScrollIndicator={false}>
       {/* Avatar + Nome */}
       <View style={S.perfilHeader}>
-        <View style={S.avatarGrande}>
-          <Text style={S.avatarGrandeText}>{getIni(cli.nome || cliente.nome).toUpperCase()}</Text>
-        </View>
+        <TouchableOpacity onPress={handleFotoCliente} activeOpacity={0.7} style={{ position: 'relative' }}>
+          {clienteCompleto?.foto_url ? (
+            <Image source={{ uri: clienteCompleto.foto_url }} style={S.avatarGrandeImg} />
+          ) : (
+            <View style={S.avatarGrande}>
+              <Text style={S.avatarGrandeText}>{getIni(cli.nome || cliente.nome).toUpperCase()}</Text>
+            </View>
+          )}
+          {uploadingFoto ? (
+            <View style={S.avatarGrandeCamBadge}>
+              <ActivityIndicator size={12} color="#fff" />
+            </View>
+          ) : (
+            <View style={S.avatarGrandeCamBadge}>
+              <Ionicons name="camera" size={14} color="#fff" />
+            </View>
+          )}
+        </TouchableOpacity>
         <Text style={S.perfilNome}>{(cli.nome || cliente.nome).toLowerCase()}</Text>
         {cli.status && (
           <View style={[S.statusBadge, { backgroundColor: (corStatus[cli.status] || corStatus.PENDENTE).bg }]}>
@@ -507,13 +668,13 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       <View style={S.dadosCard}>
         {cli.codigo_cliente && (
           <View style={S.dadoRow}>
-            <Text style={S.dadoLabel}>🏷 {t.codigo}</Text>
+            <Text style={S.dadoLabel}><Ionicons name="pricetag-outline" size={12} color="#6B7280" /> {t.codigo}</Text>
             <Text style={S.dadoValue}>{cli.codigo_cliente}</Text>
           </View>
         )}
         {(cli.documento || cliente.documento) && (
           <View style={S.dadoRow}>
-            <Text style={S.dadoLabel}>📄 {t.documento}</Text>
+            <Text style={S.dadoLabel}><Ionicons name="document-text-outline" size={12} color="#6B7280" /> {t.documento}</Text>
             <Text style={S.dadoValue}>{cli.documento || cliente.documento}</Text>
           </View>
         )}
@@ -521,7 +682,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           const tel = cli.telefone_celular || cliente.telefone || '';
           return (
             <View style={S.dadoRow}>
-              <Text style={S.dadoLabel}>📱 {t.telefone}</Text>
+              <Text style={S.dadoLabel}><Ionicons name="call-outline" size={12} color="#6B7280" /> {t.telefone}</Text>
               <View style={S.dadoActions}>
                 <TouchableOpacity onPress={() => Linking.openURL(`tel:${tel.replace(/\D/g, '')}`)}>
                   <Text style={[S.dadoValue, { color: '#2563EB' }]}>{tel}</Text>
@@ -530,7 +691,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                   const num = fmtWhatsApp(tel);
                   Linking.openURL(`https://wa.me/${num}`);
                 }}>
-                  <Text style={S.whatsappIcon}>💬</Text>
+                  <Ionicons name="logo-whatsapp" size={16} color="#25D366" />
                 </TouchableOpacity>
               </View>
             </View>
@@ -540,40 +701,50 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           const end = cli.endereco || cliente.endereco || '';
           return (
             <View style={S.dadoRow}>
-              <Text style={S.dadoLabel}>📍 {t.endereco}</Text>
+              <Text style={S.dadoLabel}><Ionicons name="location-outline" size={12} color="#6B7280" /> {t.endereco}</Text>
               <View style={S.dadoActions}>
                 <Text style={S.dadoValue} numberOfLines={2}>{end}</Text>
                 <TouchableOpacity style={S.mapaBtn} onPress={() => abrirMapa(end)}>
-                  <Text style={S.mapaIcon}>🧭</Text>
+                  <Ionicons name="navigate-outline" size={16} color="#3B82F6" />
                 </TouchableOpacity>
               </View>
             </View>
           );
         })()}
-      </View>
-
-      {/* Resumo rápido empréstimos */}
-      {empAtivos.length > 0 && (
-        <View style={S.resumoCard}>
-          <Text style={S.resumoTitle}>{empAtivos.length} {t.emprestimo}(s) {t.ativo.toLowerCase()}(s)</Text>
-          <View style={S.resumoGrid}>
-            <View style={S.resumoItem}>
-              <Text style={S.resumoLabel}>{t.saldo}</Text>
-              <Text style={[S.resumoValue, { color: '#EF4444' }]}>{fmt(empAtivos.reduce((s, e) => s + e.valor_saldo, 0))}</Text>
-            </View>
-            <View style={S.resumoItem}>
-              <Text style={S.resumoLabel}>{t.vencidas}</Text>
-              <Text style={[S.resumoValue, { color: empAtivos.reduce((s, e) => s + e.parcelas_vencidas, 0) > 0 ? '#EF4444' : '#10B981' }]}>
-                {empAtivos.reduce((s, e) => s + e.parcelas_vencidas, 0)}
-              </Text>
+        {cli.endereco_comercial && (
+          <View style={S.dadoRow}>
+            <Text style={S.dadoLabel}><Ionicons name="business-outline" size={12} color="#6B7280" /> {lang === 'es' ? 'Dir. Comercial' : 'End. Comercial'}</Text>
+            <View style={S.dadoActions}>
+              <Text style={S.dadoValue} numberOfLines={2}>{cli.endereco_comercial}</Text>
+              <TouchableOpacity style={S.mapaBtn} onPress={() => abrirMapa(cli.endereco_comercial)}>
+                <Ionicons name="navigate-outline" size={16} color="#3B82F6" />
+              </TouchableOpacity>
             </View>
           </View>
+        )}
+      </View>
+
+      {/* Observações */}
+      <View style={S.obsCard}>
+        <View style={S.obsHeader}>
+          <Ionicons name="chatbubble-outline" size={13} color="#6B7280" />
+          <Text style={S.obsLabel}>{lang === 'es' ? 'Observaciones' : 'Observações'}</Text>
+          {salvandoObs && <ActivityIndicator size={12} color="#3B82F6" style={{ marginLeft: 6 }} />}
         </View>
-      )}
+        <TextInput
+          style={S.obsInput}
+          value={obsLocal}
+          onChangeText={setObsLocal}
+          onBlur={() => salvarObservacoes(obsLocal)}
+          placeholder={lang === 'es' ? 'Notas sobre el cliente...' : 'Anotações sobre o cliente...'}
+          placeholderTextColor="#9CA3AF"
+          multiline
+          numberOfLines={3}
+          textAlignVertical="top"
+        />
+      </View>
     </ScrollView>
   );
-
-  // ==================== CARD EMPRÉSTIMO (reutilizado) ====================
   const renderEmprestimoCard = (emp: Emprestimo, somenteLeitura: boolean) => {
     const isExp = expandedEmp === emp.id;
     const cor = corStatus[emp.status] || corStatus.PENDENTE;
@@ -585,7 +756,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
         {/* Header clicável */}
         <TouchableOpacity style={S.empHeader} onPress={() => toggleExpand(emp.id)} activeOpacity={0.7}>
           <View style={S.empHeaderLeft}>
-            <Text style={S.empValor}>{fmt(emp.valor_principal)}</Text>
+            <Text style={S.empValor}>{fmt(emp.valor_total)}</Text>
             {emp.parcelas_vencidas > 0 && (
               <View style={S.empVencBadge}>
                 <Text style={S.empVencText}>{emp.parcelas_vencidas} {t.vencidas.toLowerCase()}</Text>
@@ -604,6 +775,10 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           <Text style={S.empInfoItem}>{emp.parcelas_pagas}/{emp.numero_parcelas} {t.parcelas.toLowerCase()}</Text>
           <Text style={S.empInfoDot}>•</Text>
           <Text style={S.empInfoItem}>{pct}%</Text>
+          <Text style={S.empInfoDot}>•</Text>
+          <Text style={[S.empInfoItem, { color: '#D97706' }]}>
+            {lang === 'es' ? 'Intereses' : 'Juros'}: {fmt(emp.valor_total - emp.valor_principal)} ({emp.taxa_juros}%)
+          </Text>
         </View>
 
         {/* Barra de progresso */}
@@ -750,14 +925,6 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
             {/* Grid de dados */}
             <View style={S.empGrid}>
               <View style={S.empGridItem}>
-                <Text style={S.empGridLabel}>{t.valorTotal}</Text>
-                <Text style={S.empGridValue}>{fmt(emp.valor_total)}</Text>
-              </View>
-              <View style={S.empGridItem}>
-                <Text style={S.empGridLabel}>{t.taxa}</Text>
-                <Text style={S.empGridValue}>{emp.taxa_juros}%</Text>
-              </View>
-              <View style={S.empGridItem}>
                 <Text style={S.empGridLabel}>{t.valorPago}</Text>
                 <Text style={[S.empGridValue, { color: '#10B981' }]}>{fmt(emp.valor_pago)}</Text>
               </View>
@@ -890,21 +1057,21 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
                           {diasDiferenca === 0 ? (
                             <View style={{ backgroundColor: '#D1FAE5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                              <Text style={{ fontSize: 10, fontWeight: '600', color: '#065F46' }}>
-                                ✓ {lang === 'es' ? 'En el día' : 'No dia'}
+                              <Ionicons name="checkmark-circle" size={10} color="#065F46" /> <Text style={{ fontSize: 10, fontWeight: '600', color: '#065F46' }}>
+                                {lang === 'es' ? 'En el día' : 'No dia'}
                               </Text>
                             </View>
                           ) : diasDiferenca > 0 ? (
                             <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                              <Text style={{ fontSize: 10, fontWeight: '600', color: '#991B1B' }}>
-                                ⚠ {diasDiferenca} {lang === 'es' ? (diasDiferenca === 1 ? 'día de atraso' : 'días de atraso') : (diasDiferenca === 1 ? 'dia de atraso' : 'dias de atraso')}
+                              <Ionicons name="alert-circle" size={10} color="#991B1B" /> <Text style={{ fontSize: 10, fontWeight: '600', color: '#991B1B' }}>
+                                {diasDiferenca} {lang === 'es' ? (diasDiferenca === 1 ? 'día de atraso' : 'días de atraso') : (diasDiferenca === 1 ? 'dia de atraso' : 'dias de atraso')}
                               </Text>
                             </View>
                           ) : null}
                           {quitouAntecipado && (
                             <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                              <Text style={{ fontSize: 10, fontWeight: '600', color: '#92400E' }}>
-                                ⚡ {lang === 'es' ? 'Pago anticipado' : 'Quitação antecipada'}
+                              <Ionicons name="flash" size={10} color="#92400E" /> <Text style={{ fontSize: 10, fontWeight: '600', color: '#92400E' }}>
+                                {lang === 'es' ? 'Pago anticipado' : 'Quitação antecipada'}
                               </Text>
                             </View>
                           )}
@@ -915,8 +1082,8 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                       {atrasoAoVivo !== null && (
                         <View style={{ marginTop: 6 }}>
                           <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, alignSelf: 'flex-start' }}>
-                            <Text style={{ fontSize: 10, fontWeight: '600', color: '#991B1B' }}>
-                              ⚠ {atrasoAoVivo} {lang === 'es' ? (atrasoAoVivo === 1 ? 'día atrasada' : 'días atrasada') : (atrasoAoVivo === 1 ? 'dia atrasada' : 'dias atrasada')}
+                              <Ionicons name="alert-circle" size={10} color="#991B1B" /> <Text style={{ fontSize: 10, fontWeight: '600', color: '#991B1B' }}>
+                              {atrasoAoVivo} {lang === 'es' ? (atrasoAoVivo === 1 ? 'día atrasada' : 'días atrasada') : (atrasoAoVivo === 1 ? 'dia atrasada' : 'dias atrasada')}
                             </Text>
                           </View>
                         </View>
@@ -1038,7 +1205,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
         ) : empAtivos.length === 0 ? (
           <View style={S.emptyBox}>
-            <Text style={S.emptyIcon}>📋</Text>
+            <Ionicons name="document-text-outline" size={40} color="#D1D5DB" style={{ marginBottom: 8 }} />
             <Text style={S.emptyText}>{t.semEmprestimo}</Text>
           </View>
         ) : (
@@ -1072,16 +1239,31 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           {/* Header */}
           <View style={S.header}>
             <View style={S.headerInfo}>
-              <View style={S.avatarPequeno}>
-                <Text style={S.avatarPequenoText}>{getIni(cliente.nome).toUpperCase()}</Text>
-              </View>
+              <TouchableOpacity onPress={handleFotoCliente} activeOpacity={0.7} style={S.avatarWrapper}>
+                {clienteCompleto?.foto_url ? (
+                  <Image source={{ uri: clienteCompleto.foto_url }} style={S.avatarImg} />
+                ) : (
+                  <View style={S.avatarPequeno}>
+                    <Text style={S.avatarPequenoText}>{getIni(cliente.nome).toUpperCase()}</Text>
+                  </View>
+                )}
+                {uploadingFoto ? (
+                  <View style={S.avatarCamBadge}>
+                    <ActivityIndicator size={10} color="#fff" />
+                  </View>
+                ) : (
+                  <View style={S.avatarCamBadge}>
+                    <Ionicons name="camera" size={10} color="#fff" />
+                  </View>
+                )}
+              </TouchableOpacity>
               <View style={S.headerTexts}>
                 <Text style={S.headerNome} numberOfLines={1}>{cliente.nome.toLowerCase()}</Text>
-                {cliente.telefone && <Text style={S.headerTel}>📱 {cliente.telefone}</Text>}
+                {cliente.telefone && <Text style={S.headerTel}><Ionicons name="call-outline" size={11} color="#6B7280" /> {cliente.telefone}</Text>}
               </View>
             </View>
             <TouchableOpacity onPress={onClose} style={S.closeBtn}>
-              <Text style={S.closeX}>✕</Text>
+              <Ionicons name="close" size={18} color="#6B7280" />
             </TouchableOpacity>
           </View>
 
@@ -1375,6 +1557,9 @@ const S = StyleSheet.create({
   headerInfo: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 },
   avatarPequeno: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' },
   avatarPequenoText: { fontSize: 13, fontWeight: '700', color: '#FFF' },
+  avatarWrapper: { position: 'relative' },
+  avatarImg: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#E5E7EB' },
+  avatarCamBadge: { position: 'absolute', bottom: -2, right: -2, width: 18, height: 18, borderRadius: 9, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
   headerTexts: { flex: 1 },
   headerNome: { fontSize: 15, fontWeight: '700', color: '#1F2937', textTransform: 'capitalize' },
   headerTel: { fontSize: 11, color: '#6B7280', marginTop: 1 },
@@ -1398,11 +1583,17 @@ const S = StyleSheet.create({
   perfilHeader: { alignItems: 'center', marginBottom: 16 },
   avatarGrande: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
   avatarGrandeText: { fontSize: 22, fontWeight: '700', color: '#FFF' },
+  avatarGrandeImg: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#E5E7EB', marginBottom: 8 },
+  avatarGrandeCamBadge: { position: 'absolute', bottom: 6, right: -4, width: 24, height: 24, borderRadius: 12, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
   perfilNome: { fontSize: 18, fontWeight: '700', color: '#1F2937', textTransform: 'capitalize' },
   statusBadge: { marginTop: 6, paddingHorizontal: 12, paddingVertical: 3, borderRadius: 12 },
   statusBadgeText: { fontSize: 11, fontWeight: '700' },
 
   dadosCard: { backgroundColor: '#F9FAFB', borderRadius: 12, padding: 14, gap: 12 },
+  obsCard: { backgroundColor: '#F9FAFB', borderRadius: 12, padding: 14, marginTop: 12 },
+  obsHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  obsLabel: { fontSize: 13, fontWeight: '600', color: '#6B7280' },
+  obsInput: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: '#111827', minHeight: 72, textAlignVertical: 'top' },
   dadoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   dadoLabel: { fontSize: 13, color: '#6B7280', minWidth: 80 },
   dadoValue: { fontSize: 13, fontWeight: '600', color: '#1F2937', textAlign: 'right', flex: 1, marginLeft: 12 },

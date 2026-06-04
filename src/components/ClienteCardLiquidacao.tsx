@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import {
   Animated,
+  Image,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -27,6 +28,7 @@ export interface EmprestimoData {
 export interface ClienteAgrupado {
   cliente_id: string; codigo_cliente: number | null; nome: string;
   telefone_celular: string | null; endereco: string | null;
+  foto_url: string | null;
   latitude: number | null; longitude: number | null; rota_id: string;
   emprestimos: EmprestimoData[]; qtd_emprestimos: number; tem_multiplos_vencimentos: boolean;
 }
@@ -196,9 +198,13 @@ export default function ClienteCardLiquidacao({
 
       {/* === LINHA 1: Avatar + Nome + Badges === */}
       <View style={S.cardRow}>
-        <View style={[S.av, { backgroundColor: pg ? '#10B981' : np ? '#6B7280' : e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 ? '#EF4444' : '#3B82F6' }]}>
-          <Text style={S.avTx}>{getIni(c.nome)}</Text>
-        </View>
+        {c.foto_url ? (
+          <Image source={{ uri: c.foto_url }} style={[S.av, { backgroundColor: '#E5E7EB' }]} />
+        ) : (
+          <View style={[S.av, { backgroundColor: pg ? '#10B981' : np ? '#6B7280' : e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 ? '#EF4444' : '#3B82F6' }]}>
+            <Text style={S.avTx}>{getIni(c.nome)}</Text>
+          </View>
+        )}
         <View style={S.cardInfo}>
           <View style={S.nameRow}>
             <Text style={[S.nome, np && { color: '#6B7280' }]} numberOfLines={1}>{c.nome}</Text>

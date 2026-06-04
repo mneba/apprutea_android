@@ -5,16 +5,14 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { styles } from '../../styles/novaVendaStyles';
 import {
   amanha,
   calcularDataMensal,
-  fmt,
   formatarData,
-  FREQ_LABELS,
   type Lang,
-  type Textos,
+  type Textos
 } from '../../constants/novaVendaConstants';
+import { styles } from '../../styles/novaVendaStyles';
 
 interface Props {
   // Valores
@@ -329,29 +327,6 @@ export default function FormularioEmprestimo(props: Props) {
           textAlignVertical="top"
         />
       </View>
-
-      {/* Cálculo automático */}
-      {valorPrincipal > 0 && taxaNum > 0 && (
-        <View style={styles.calculoBox}>
-          <Text style={styles.calculoTitle}>{t.secCalculo}</Text>
-          <View style={styles.calculoRow}>
-            <Text style={styles.calculoLabel}>{t.valorTotal}</Text>
-            <Text style={styles.calculoValue}>$ {fmt(valorTotal)}</Text>
-          </View>
-          <View style={styles.calculoRow}>
-            <Text style={styles.calculoLabel}>{t.valorParcela}</Text>
-            <Text style={styles.calculoValue}>$ {fmt(valorParcela)}</Text>
-          </View>
-          <View style={styles.calculoRow}>
-            <Text style={styles.calculoLabel}>{t.totalJuros}</Text>
-            <Text style={[styles.calculoValue, { color: '#EF4444' }]}>$ {fmt(totalJuros)}</Text>
-          </View>
-          <View style={[styles.calculoRow, { borderTopWidth: 1, borderTopColor: '#E5E7EB', paddingTop: 8, marginTop: 4 }]}>
-            <Text style={[styles.calculoLabel, { fontWeight: '700' }]}>{parcelasNum}x de</Text>
-            <Text style={[styles.calculoValue, { fontWeight: '700', color: '#2563EB' }]}>$ {fmt(valorParcela)}</Text>
-          </View>
-        </View>
-      )}
     </>
   );
 }

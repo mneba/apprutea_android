@@ -6,6 +6,7 @@ import { supabase } from '../services/supabase';
 export interface ClienteRotaDia {
   cliente_id: string; codigo_cliente: number | null; nome: string;
   telefone_celular: string | null; endereco: string | null;
+  foto_url: string | null;
   latitude: number | null; longitude: number | null;
   emprestimo_id: string; saldo_emprestimo: number; valor_principal: number;
   numero_parcelas: number; status_emprestimo: string; rota_id: string;
@@ -104,6 +105,20 @@ export default function useClientesLiquidacao({ rotaId, dataLiq, liqId }: UseCli
         }
       }
 
+      // Enriquecer com foto_url dos clientes
+      const clienteIdsUnicos = [...new Set(allData.map(r => r.cliente_id).filter(Boolean))];
+      if (clienteIdsUnicos.length > 0) {
+        const { data: fotosData } = await supabase
+          .from('clientes')
+          .select('id, foto_url')
+          .in('id', clienteIdsUnicos)
+          .not('foto_url', 'is', null);
+        if (fotosData && fotosData.length > 0) {
+          const fotoMap = new Map((fotosData as any[]).map(c => [c.id, c.foto_url]));
+          allData = allData.map(r => ({ ...r, foto_url: fotoMap.get(r.cliente_id) || null }));
+        }
+      }
+
       // 2. Busca parcelas que foram pagas NA liquidação atual (para mostrar como "pagas")
       if (liqId) {
         console.log('🔍 Buscando parcelas pagas na liquidação:', liqId);
@@ -124,7 +139,7 @@ export default function useClientesLiquidacao({ rotaId, dataLiq, liqId }: UseCli
             const clienteIds = [...new Set(pagamentosNovos.map(p => p.cliente_id))];
             const { data: clientes } = await supabase
               .from('clientes')
-              .select('id, nome, telefone_celular, endereco, latitude, longitude, codigo_cliente')
+              .select('id, nome, telefone_celular, endereco, latitude, longitude, codigo_cliente, foto_url')
               .in('id', clienteIds);
             const cliMap = new Map((clientes || []).map(c => [c.id, c]));
 
@@ -156,6 +171,7 @@ export default function useClientesLiquidacao({ rotaId, dataLiq, liqId }: UseCli
                 latitude: cli.latitude,
                 longitude: cli.longitude,
                 codigo_cliente: cli.codigo_cliente,
+                foto_url: cli.foto_url || null,
                 emprestimo_id: emp.id,
                 saldo_emprestimo: emp.valor_saldo,
                 valor_principal: emp.valor_principal,

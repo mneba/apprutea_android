@@ -1,9 +1,11 @@
+import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Image,
   Linking,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -117,14 +119,18 @@ export default function PerfilScreen({ navigation }: any) {
   };
 
   const handleLogout = () => {
-    Alert.alert(
-      t.sairConta,
-      t.confirmarSair,
-      [
-        { text: t.cancelar, style: 'cancel' },
-        { text: t.sair, onPress: signOut, style: 'destructive' },
-      ]
-    );
+    if (Platform.OS === 'web') {
+      if (window.confirm(t.confirmarSair)) signOut();
+    } else {
+      Alert.alert(
+        t.sairConta,
+        t.confirmarSair,
+        [
+          { text: t.cancelar, style: 'cancel' },
+          { text: t.sair, onPress: signOut, style: 'destructive' },
+        ]
+      );
+    }
   };
 
   const formatarData = (data: string | null) => {
@@ -185,14 +191,14 @@ export default function PerfilScreen({ navigation }: any) {
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.backIcon}>←</Text>
+          <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t.titulo}</Text>
         <TouchableOpacity
           onPress={() => setIdioma(language === 'pt-BR' ? 'es' : 'pt-BR')}
           style={styles.langButton}
         >
-          <Text style={styles.langText}>🌐</Text>
+          <Ionicons name="globe-outline" size={16} color="#fff" />
           <Text style={styles.langLabel}>{language === 'pt-BR' ? 'PT' : 'ES'}</Text>
         </TouchableOpacity>
       </View>
@@ -205,13 +211,13 @@ export default function PerfilScreen({ navigation }: any) {
               <Image source={{ uri: v.foto_url }} style={styles.avatarImage} />
             ) : (
               <View style={styles.avatarPlaceholder}>
-                <Text style={styles.avatarIcon}>👤</Text>
+                <Ionicons name="person" size={48} color="#3B82F6" />
               </View>
             )}
           </View>
           <Text style={styles.nomeCompleto}>{nomeCompleto}</Text>
           <View style={styles.codigoRow}>
-            <Text style={styles.codigoIcon}>🛡️</Text>
+            <Ionicons name="shield-checkmark-outline" size={14} color="#6B7280" />
             <Text style={styles.codigoText}>{t.codigo}: {v?.codigo_acesso || '-'}</Text>
           </View>
         </View>
@@ -225,7 +231,7 @@ export default function PerfilScreen({ navigation }: any) {
             {v?.email && (
               <TouchableOpacity style={styles.infoRow} onPress={() => handleEmail(v.email)}>
                 <View style={[styles.infoIconContainer, { backgroundColor: '#DBEAFE' }]}>
-                  <Text style={styles.infoRowIcon}>✉️</Text>
+                  <Ionicons name="mail-outline" size={20} color="#3B82F6" />
                 </View>
                 <View style={styles.infoRowContent}>
                   <Text style={styles.infoRowLabel}>{t.email}</Text>
@@ -237,7 +243,7 @@ export default function PerfilScreen({ navigation }: any) {
             {v?.telefone && (
               <TouchableOpacity style={styles.infoRow} onPress={() => handleLigar(v.telefone)}>
                 <View style={[styles.infoIconContainer, { backgroundColor: '#D1FAE5' }]}>
-                  <Text style={styles.infoRowIcon}>📞</Text>
+                  <Ionicons name="call-outline" size={20} color="#10B981" />
                 </View>
                 <View style={styles.infoRowContent}>
                   <Text style={styles.infoRowLabel}>{t.telefone}</Text>
@@ -249,7 +255,7 @@ export default function PerfilScreen({ navigation }: any) {
             {v?.data_admissao && (
               <View style={styles.infoRow}>
                 <View style={[styles.infoIconContainer, { backgroundColor: '#FEF3C7' }]}>
-                  <Text style={styles.infoRowIcon}>📅</Text>
+                  <Ionicons name="calendar-outline" size={20} color="#D97706" />
                 </View>
                 <View style={styles.infoRowContent}>
                   <Text style={styles.infoRowLabel}>{t.dataAdmissao}</Text>
@@ -284,7 +290,7 @@ export default function PerfilScreen({ navigation }: any) {
 
         {/* Botão Sair */}
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Text style={styles.logoutIcon}>🚪</Text>
+          <Ionicons name="log-out-outline" size={20} color="#fff" />
           <Text style={styles.logoutText}>{t.sairConta}</Text>
         </TouchableOpacity>
 

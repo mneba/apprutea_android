@@ -45,6 +45,7 @@ type OrdenacaoLiquidacao = 'rota' | 'nome';
 interface ClienteRotaDia {
   cliente_id: string; codigo_cliente: number | null; nome: string;
   telefone_celular: string | null; endereco: string | null;
+  foto_url: string | null;
   latitude: number | null; longitude: number | null;
   emprestimo_id: string; saldo_emprestimo: number; valor_principal: number;
   numero_parcelas: number; status_emprestimo: string; rota_id: string;
@@ -74,6 +75,7 @@ interface EmprestimoData {
 interface ClienteAgrupado {
   cliente_id: string; codigo_cliente: number | null; nome: string;
   telefone_celular: string | null; endereco: string | null;
+  foto_url: string | null;
   latitude: number | null; longitude: number | null; rota_id: string;
   emprestimos: EmprestimoData[]; qtd_emprestimos: number; tem_multiplos_vencimentos: boolean;
 }
@@ -1224,7 +1226,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     const m = new Map<string, ClienteAgrupado>();
     raw.forEach(r => {
       let g = m.get(r.cliente_id);
-      if (!g) { g = { cliente_id: r.cliente_id, codigo_cliente: r.codigo_cliente, nome: r.nome, telefone_celular: r.telefone_celular, endereco: r.endereco, latitude: r.latitude, longitude: r.longitude, rota_id: r.rota_id, emprestimos: [], qtd_emprestimos: 0, tem_multiplos_vencimentos: false }; m.set(r.cliente_id, g); }
+      if (!g) { g = { cliente_id: r.cliente_id, codigo_cliente: r.codigo_cliente, nome: r.nome, telefone_celular: r.telefone_celular, endereco: r.endereco, foto_url: r.foto_url || null, latitude: r.latitude, longitude: r.longitude, rota_id: r.rota_id, emprestimos: [], qtd_emprestimos: 0, tem_multiplos_vencimentos: false }; m.set(r.cliente_id, g); }
       
       // Verifica se já existe uma entrada para este empréstimo
       const existente = g.emprestimos.find(e => e.emprestimo_id === r.emprestimo_id);
