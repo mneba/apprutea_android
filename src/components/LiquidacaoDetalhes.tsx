@@ -513,7 +513,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
     return `<div class="mov">
       <div style="margin-bottom:2px"><span style="font-size:9px;font-weight:700;color:${tipoCor};background:${tipoCor}20;padding:1px 6px;border-radius:4px">${tipoLabel}</span></div>
       <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${clienteCodigo ? '#' + clienteCodigo + ' ' : ''}${clienteNome}</span><span class="mov-val verm">-${fmt(parseFloat(emp.valor_principal))}</span></div>
-      <div class="mov-sub">${lang === 'es' ? '1° pago' : '1° pgto'}: ${primeiroPgto} · ${emp.numero_parcelas}x ${fmt(parseFloat(emp.valor_parcela))} · ${emp.taxa_juros}%</div>
+      <div class="mov-sub">${lang === 'es' ? '1° pago' : '1° pgto'}: ${primeiroPgto} · ${emp.numero_parcelas}x ${fmt(parseFloat(emp.valor_parcela))} · ${lang === 'es' ? 'intereses' : 'juros'} ${fmt(parseFloat(emp.valor_total || 0) - parseFloat(emp.valor_principal || 0))} (${emp.taxa_juros}%)</div>
       <div class="mov-meta"><span>${fmtHora(emp.created_at)}</span></div>
     </div>`;
   }).join('')}
@@ -532,7 +532,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
       : '—';
     return `<div class="mov">
       <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${clienteNome}</span><span class="mov-val" style="color:#F59E0B">${fmt(parseFloat(emp.valor_principal))}</span></div>
-      <div class="mov-sub">${lang === 'es' ? '1° pago' : '1° pgto'}: ${primeiroPgto} · ${emp.numero_parcelas}x ${fmt(parseFloat(emp.valor_parcela))} · ${emp.taxa_juros}%</div>
+      <div class="mov-sub">${lang === 'es' ? '1° pago' : '1° pgto'}: ${primeiroPgto} · ${emp.numero_parcelas}x ${fmt(parseFloat(emp.valor_parcela))} · ${lang === 'es' ? 'intereses' : 'juros'} ${fmt(parseFloat(emp.valor_total || 0) - parseFloat(emp.valor_principal || 0))} (${emp.taxa_juros}%)</div>
       <div class="mov-meta"><span>${fmtHora(emp.created_at)}</span></div>
     </div>`;
   }).join('')}
@@ -702,7 +702,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                       <Text style={[cupom.itemSub, { fontSize: 9 }]}>
                         {'   '}{lang === 'es' ? '1° pago' : '1° pgto'}: {primeiroPgto}
                         {'  '}{emp.numero_parcelas}x {fmt(parseFloat(emp.valor_parcela))}
-                        {'  '}{emp.taxa_juros}%
+                        {'  '}{lang === 'es' ? 'intereses' : 'juros'} {fmt(parseFloat(emp.valor_total || 0) - parseFloat(emp.valor_principal || 0))} ({emp.taxa_juros}%)
                       </Text>
                       <View style={cupom.itemMeta}>
                         <Text style={cupom.itemHora}>   {fmtHora(emp.created_at)}</Text>
@@ -742,7 +742,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                       <Text style={[cupom.itemSub, { fontSize: 9 }]}>
                         {'   '}{lang === 'es' ? '1° pago' : '1° pgto'}: {primeiroPgto}
                         {'  '}{emp.numero_parcelas}x {fmt(parseFloat(emp.valor_parcela))}
-                        {'  '}{emp.taxa_juros}%
+                        {'  '}{lang === 'es' ? 'intereses' : 'juros'} {fmt(parseFloat(emp.valor_total || 0) - parseFloat(emp.valor_principal || 0))} ({emp.taxa_juros}%)
                       </Text>
                       <View style={cupom.itemMeta}>
                         <Text style={cupom.itemHora}>   {fmtHora(emp.created_at)}</Text>
@@ -1486,7 +1486,7 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
               <Text style={[dStyles.finItemCliente, { color: '#6B7280', marginTop: 2 }]}>
                 {lang === 'es' ? '1° pago' : '1° pgto'}: {primeiroPgto}
                 {'  ·  '}{item.numero_parcelas}x {fmt(parseFloat(item.valor_parcela || 0))}
-                {'  ·  '}{item.taxa_juros}%
+                {'  ·  '}{lang === 'es' ? 'intereses' : 'juros'} {fmt(parseFloat(item.valor_total || 0) - parseFloat(item.valor_principal || 0))} ({item.taxa_juros}%)
                 {'  ·  '}{fmtFrequencia(item.frequencia_pagamento)}
               </Text>
             </View>
@@ -1593,6 +1593,10 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
   const qtdReal = tipo === 'VENDAS' 
     ? registros.length 
     : registros.filter(r => r.status !== 'ANULADO').length;
+  // Total de juros (apenas VENDAS): soma de (valor_total - valor_principal)
+  const totalJurosReal = tipo === 'VENDAS'
+    ? registros.reduce((s, r) => s + (parseFloat(r.valor_total || 0) - parseFloat(r.valor_principal || 0)), 0)
+    : 0;
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -1605,6 +1609,12 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
             <Text style={dStyles.finResumoLabel}>{t.total}</Text>
             <Text style={[dStyles.finResumoValor, { color: config.cor }]}>{fmt(loading ? totalValor : totalReal)}</Text>
           </View>
+          {tipo === 'VENDAS' && !loading && totalJurosReal > 0 && (
+            <View>
+              <Text style={dStyles.finResumoLabel}>{lang === 'es' ? 'Intereses' : 'Juros'}</Text>
+              <Text style={[dStyles.finResumoValor, { color: '#2563EB', fontSize: 18 }]}>{fmt(totalJurosReal)}</Text>
+            </View>
+          )}
           <View style={dStyles.finResumoBadge}>
             <Text style={dStyles.finResumoBadgeText}>{loading ? totalQtd : qtdReal} {tipo === 'VENDAS' ? t.empAbrev : t.lancamentos}</Text>
           </View>

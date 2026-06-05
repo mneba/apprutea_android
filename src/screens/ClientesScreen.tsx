@@ -125,6 +125,8 @@ const textos = {
     ordemRota: 'Ordem rota', ordemNome: 'Nome A-Z',
     filtroTodos: 'Todos', filtroAtrasados: 'Atrasados', filtroPagas: 'Pagas',
     ocultarLiquidacao: 'Ocultar clientes da liquidação',
+    freqTodos: 'Todas', freqDiario: 'Diário', freqSemanal: 'Semanal',
+    freqQuinzenal: 'Quinzenal', freqMensal: 'Mensal', freqFlexivel: 'Flexível',
     parcela: 'Parcela', saldoEmprestimo: 'Saldo Empréstimo',
     parcelasVencidas: 'parcela(s) vencida(s)', totalAtraso: 'Total em atraso:',
     emprestimo: 'Empréstimo', principal: 'Principal', juros: 'Juros',
@@ -217,6 +219,8 @@ const textos = {
     ordemRota: 'Orden ruta', ordemNome: 'Nombre A-Z',
     filtroTodos: 'Todos', filtroAtrasados: 'Atrasados', filtroPagas: 'Pagados',
     ocultarLiquidacao: 'Ocultar clientes de la liquidación',
+    freqTodos: 'Todas', freqDiario: 'Diario', freqSemanal: 'Semanal',
+    freqQuinzenal: 'Quincenal', freqMensal: 'Mensual', freqFlexivel: 'Flexible',
     parcela: 'Cuota', saldoEmprestimo: 'Saldo Préstamo',
     parcelasVencidas: 'cuota(s) vencida(s)', totalAtraso: 'Total en atraso:',
     emprestimo: 'Préstamo', principal: 'Principal', juros: 'Intereses',
@@ -442,6 +446,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [expandedTodos, setExpandedTodos] = useState<string | null>(null);
   const [filtroTipo, setFiltroTipo] = useState<string>('todos');
   const [filtroStatus, setFiltroStatus] = useState<string>('todos');
+  const [filtroFrequencia, setFiltroFrequencia] = useState<string>('todos');
   const [showFiltroTipo, setShowFiltroTipo] = useState(false);
   const [showFiltroStatus, setShowFiltroStatus] = useState(false);
   const [ocultarLiquidacao, setOcultarLiquidacao] = useState(false);
@@ -1275,6 +1280,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   const filtered = useMemo(() => {
     let r = [...grouped];
     if (busca.trim()) { const b = busca.toLowerCase().trim(); r = r.filter(c => c.nome.toLowerCase().includes(b) || (c.telefone_celular && c.telefone_celular.includes(b)) || (c.endereco && c.endereco.toLowerCase().includes(b))); }
+    if (filtroFrequencia !== 'todos') r = r.filter(c => c.emprestimos.some(e => e.frequencia_pagamento === filtroFrequencia));
     if (filtro === 'atrasados') r = r.filter(c => !isCliPago(c) && c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas));
     else if (filtro === 'pagas') r = r.filter(c => isCliPago(c));
     else r = r.filter(c => !isCliPago(c)); // 'todos' mostra apenas pendentes (não pagos)
@@ -1287,7 +1293,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         }
       : (a, b) => a.nome.localeCompare(b.nome));
     return r;
-  }, [grouped, busca, filtro, ord, isCliPago, ordemRotaMap]);
+  }, [grouped, busca, filtro, filtroFrequencia, ord, isCliPago, ordemRotaMap]);
 
   const cntTotal = grouped.filter(c => !isCliPago(c)).length;
   const cntAtraso = grouped.filter(c => c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas)).length;
@@ -1332,6 +1338,8 @@ export default function ClientesScreen({ navigation, route }: any) {
     if (busca.trim()) { const b = busca.toLowerCase().trim(); r = r.filter(c => c.nome.toLowerCase().includes(b) || (c.telefone_celular && c.telefone_celular.includes(b))); }
     // Filtro por tipo de empréstimo
     if (filtroTipo !== 'todos') { r = r.filter(c => c.emprestimos.some(e => e.tipo_emprestimo === filtroTipo)); }
+    // Filtro por frequência
+    if (filtroFrequencia !== 'todos') { r = r.filter(c => c.emprestimos.some(e => e.frequencia_pagamento === filtroFrequencia)); }
     // Filtro por status do empréstimo
     if (filtroStatus !== 'todos') {
       if (filtroStatus === 'QUITADO') {
@@ -1352,7 +1360,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       return a.nome.localeCompare(b.nome);
     });
     return r;
-  }, [todosList, busca, filtroTipo, filtroStatus, ocultarLiquidacao, clientesLiqIds, ordemRotaMap]);
+  }, [todosList, busca, filtroTipo, filtroStatus, filtroFrequencia, ocultarLiquidacao, clientesLiqIds, ordemRotaMap]);
 
   const renderTodos = (c: ClienteTodos) => {
     const ei = empIdxTodos[c.id] || 0;
@@ -1537,6 +1545,8 @@ return (
         setFiltroTipo={setFiltroTipo}
         filtroStatus={filtroStatus}
         setFiltroStatus={setFiltroStatus}
+        filtroFrequencia={filtroFrequencia}
+        setFiltroFrequencia={setFiltroFrequencia}
         ocultarLiquidacao={ocultarLiquidacao}
         setOcultarLiquidacao={setOcultarLiquidacao}
         liqId={liqId}

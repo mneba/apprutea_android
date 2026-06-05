@@ -49,6 +49,8 @@ interface FiltrosDrawerProps {
   setFiltroTipo: (f: string) => void;
   filtroStatus: string;
   setFiltroStatus: (f: string) => void;
+  filtroFrequencia: string;
+  setFiltroFrequencia: (f: string) => void;
   ocultarLiquidacao: boolean;
   setOcultarLiquidacao: (v: boolean) => void;
   liqId: string | null;
@@ -74,6 +76,12 @@ interface FiltrosDrawerProps {
     stQuitado: string;
     stRenegociado: string;
     ocultarLiquidacao: string;
+    freqTodos: string;
+    freqDiario: string;
+    freqSemanal: string;
+    freqQuinzenal: string;
+    freqMensal: string;
+    freqFlexivel: string;
   };
 }
 
@@ -95,6 +103,8 @@ export default function FiltrosDrawer({
   setFiltroTipo,
   filtroStatus,
   setFiltroStatus,
+  filtroFrequencia,
+  setFiltroFrequencia,
   ocultarLiquidacao,
   setOcultarLiquidacao,
   liqId,
@@ -187,6 +197,34 @@ export default function FiltrosDrawer({
               ))}
             </View>
           )}
+
+          {/* ─── Seção: Frequência (ambas as abas) ─── */}
+          <View style={S.drawerSection}>
+              <Text style={S.drawerSectionTitle}>
+                <Ionicons name="repeat-outline" size={16} color="#6B7280" /> {lang === 'es' ? 'Frecuencia' : 'Frequência'}
+              </Text>
+              {[
+                { k: 'todos', l: t.freqTodos || 'Todos', icon: 'layers-outline' as const },
+                { k: 'DIARIO', l: t.freqDiario || 'Diário', icon: 'today-outline' as const },
+                { k: 'SEMANAL', l: t.freqSemanal || 'Semanal', icon: 'calendar-outline' as const },
+                { k: 'QUINZENAL', l: t.freqQuinzenal || 'Quinzenal', icon: 'calendar-outline' as const },
+                { k: 'MENSAL', l: t.freqMensal || 'Mensal', icon: 'calendar-number-outline' as const },
+                { k: 'FLEXIVEL', l: t.freqFlexivel || 'Flexível', icon: 'options-outline' as const },
+              ].map(f => (
+                <TouchableOpacity
+                  key={f.k}
+                  style={[S.drawerOption, filtroFrequencia === f.k && S.drawerOptionActive]}
+                  onPress={() => { setFiltroFrequencia(f.k); }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name={f.icon} size={18} color={filtroFrequencia === f.k ? '#2563EB' : '#6B7280'} />
+                  <Text style={[S.drawerOptionText, filtroFrequencia === f.k && S.drawerOptionTextActive]}>
+                    {f.l}
+                  </Text>
+                  {filtroFrequencia === f.k && <Ionicons name="checkmark" size={18} color="#2563EB" style={{ marginLeft: 'auto' }} />}
+                </TouchableOpacity>
+              ))}
+            </View>
 
           {/* ─── Seção: Filtros (modo Todos) ─── */}
           {tab === 'todos' && (
