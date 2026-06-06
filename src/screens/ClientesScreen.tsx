@@ -27,6 +27,7 @@ import LegendaCoresModal from '../components/LegendaCoresModal';
 import { ModalCriarNota, ModalNotasLista, buscarNotasCountPorClientes } from '../components/NotasComponent';
 import PagamentoModal from '../components/PagamentoModal';
 import ParcelasModal from '../components/ParcelasModal';
+import ProximosDiasModal from '../components/ProximosDiasModal';
 import ReordenarModal from '../components/ReordenarModal';
 import { useAuth } from '../contexts/AuthContext';
 import { Language, useLiquidacaoContext } from '../contexts/LiquidacaoContext';
@@ -447,6 +448,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [filtroTipo, setFiltroTipo] = useState<string>('todos');
   const [filtroStatus, setFiltroStatus] = useState<string>('todos');
   const [filtroFrequencia, setFiltroFrequencia] = useState<string>('todos');
+  const [showProximosDias, setShowProximosDias] = useState(false);
   const [showFiltroTipo, setShowFiltroTipo] = useState(false);
   const [showFiltroStatus, setShowFiltroStatus] = useState(false);
   const [ocultarLiquidacao, setOcultarLiquidacao] = useState(false);
@@ -1574,7 +1576,20 @@ return (
               refreshControl={!isViz ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined}
               showsVerticalScrollIndicator={false}
               onScrollBeginDrag={() => { setShowFiltroTipo(false); setShowFiltroStatus(false); }}
-              ListFooterComponent={<View style={{ height: 90 }} />}
+              ListFooterComponent={
+                <View style={{ paddingBottom: 90 }}>
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#EFF6FF', paddingVertical: 14, borderRadius: 12, marginTop: 8, borderWidth: 1, borderColor: '#BFDBFE' }}
+                    onPress={() => setShowProximosDias(true)}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="calendar-outline" size={18} color="#2563EB" />
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#2563EB' }}>
+                      {lang === 'es' ? 'Próximos días' : 'Próximos dias'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              }
               viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
               onScrollToIndexFailed={(info) => {
                 setTimeout(() => {
@@ -1842,6 +1857,14 @@ return (
           </View>
         </View>
       )}
+
+      {/* Modal Próximos Dias */}
+      <ProximosDiasModal
+        visible={showProximosDias}
+        onClose={() => setShowProximosDias(false)}
+        rotaId={rotaId}
+        lang={lang}
+      />
     </View>
   );
 }

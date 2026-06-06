@@ -5,7 +5,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { MESES_NOME, DIAS_SEMANA_CURTO, type Lang } from '../../constants/novaVendaConstants';
+import { DIAS_SEMANA_CURTO, MESES_NOME, type Lang } from '../../constants/novaVendaConstants';
 
 // ============================================================
 // COMPONENTE CALENDÁRIO
@@ -17,6 +17,7 @@ interface CalendarioSelectorProps {
   trabalhaDomingo?: boolean;
   feriadosSet?: Set<string>;
   lang?: Lang;
+  minDate?: string; // YYYY-MM-DD — datas antes disso ficam desabilitadas
 }
 
 export default function CalendarioSelector({
@@ -25,9 +26,13 @@ export default function CalendarioSelector({
   trabalhaDomingo = true,
   feriadosSet,
   lang = 'pt-BR',
+  minDate,
 }: CalendarioSelectorProps) {
   const hoje = new Date();
   hoje.setHours(0, 0, 0, 0);
+
+  // Data mínima selecionável (se fornecida)
+  const minDateObj = minDate ? new Date(minDate + 'T00:00:00') : hoje;
 
   const [mesVis, setMesVis] = useState(
     dataSelecionada
@@ -79,7 +84,7 @@ export default function CalendarioSelector({
         dia: d,
         dateStr,
         ehHoje: date.getTime() === hoje.getTime(),
-        ehPassado: date < hoje,
+        ehPassado: date < minDateObj,
         ehFeriadoFlag: ehFeriado(dateStr),
         ehNaoUtil: ehDiaNaoUtil(dateStr, dow),
       });
@@ -187,7 +192,8 @@ export default function CalendarioSelector({
       {(() => {
         const hojeStr = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-${String(hoje.getDate()).padStart(2, '0')}`;
         const hojeNaoUtil = ehDiaNaoUtil(hojeStr, hoje.getDay());
-        if (hojeNaoUtil) return null;
+        const hojeAntesDeMim = hoje < minDateObj;
+        if (hojeNaoUtil || hojeAntesDeMim) return null;
         return (
           <TouchableOpacity
             style={styles.hojeBtn}
