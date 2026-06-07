@@ -1,7 +1,13 @@
-import React, { createContext, ReactNode, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from '../services/supabase';
 import { LiquidacaoDiaria } from '../types';
 import { useAuth } from './AuthContext';
+// FASE 2.0 — carga e tipos vêm do repositório compartilhado
+import {
+  ClienteRotaDia,
+  getClientesDia,
+  PagamentoParcela,
+} from '../services/clientesLiquidacaoRepo';
 
 export type Language = 'pt-BR' | 'es';
 
@@ -12,6 +18,17 @@ interface LiquidacaoContextType {
   temLiquidacaoAberta: boolean;
   recarregarLiquidacao: () => Promise<void>;
   loadingLiquidacao: boolean;
+
+  // ─── Clientes pré-carregados da liquidação (FASE 1) ───────────────────────
+  clientesRaw: ClienteRotaDia[];
+  pagasSet: Set<string>;
+  pagMap: Map<string, PagamentoParcela>;
+  clientesPagosNaLiq: Set<string>;
+  ordemRotaMap: Map<string, number>;
+  carregandoClientes: boolean;
+  clientesUpdatedAt: number;
+  recarregarClientes: (force?: boolean) => Promise<void>;
+  recarregarTudo: () => Promise<void>;
 
   // Modo visualização (existente)
   modoVisualizacao: boolean;
@@ -33,6 +50,16 @@ const LiquidacaoContext = createContext<LiquidacaoContextType>({
   recarregarLiquidacao: async () => {},
   loadingLiquidacao: false,
 
+  clientesRaw: [],
+  pagasSet: new Set(),
+  pagMap: new Map(),
+  clientesPagosNaLiq: new Set(),
+  ordemRotaMap: new Map(),
+  carregandoClientes: false,
+  clientesUpdatedAt: 0,
+  recarregarClientes: async () => {},
+  recarregarTudo: async () => {},
+
   modoVisualizacao: false,
   setModoVisualizacao: () => {},
   dataVisualizacao: null,
@@ -51,6 +78,17 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
   // Liquidação atual
   const [liquidacaoAtual, setLiquidacaoAtual] = useState<LiquidacaoDiaria | null>(null);
   const [loadingLiquidacao, setLoadingLiquidacao] = useState(false);
+
+  // ─── Estado de clientes pré-carregados (FASE 1) ───────────────────────────
+  const [clientesRaw, setClientesRaw] = useState<ClienteRotaDia[]>([]);
+  const [pagasSet, setPagasSet] = useState<Set<string>>(new Set());
+  const [pagMap, setPagMap] = useState<Map<string, PagamentoParcela>>(new Map());
+  const [clientesPagosNaLiq, setClientesPagosNaLiq] = useState<Set<string>>(new Set());
+  const [ordemRotaMap, setOrdemRotaMap] = useState<Map<string, number>>(new Map());
+  const [carregandoClientes, setCarregandoClientes] = useState(false);
+  const [clientesUpdatedAt, setClientesUpdatedAt] = useState(0);
+  // Guard de concorrência — ignora recargas simultâneas
+  const recarregandoClientesRef = useRef(false);
 
   // Modo visualização (existente)
   const [modoVisualizacao, setModoVisualizacao] = useState(false);
@@ -88,12 +126,74 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
     }
   }, [vendedor?.rota_id]);
 
-  // Carregar ao montar e quando vendedor mudar
+  // ─── Pré-carga de clientes (FASE 1 + 2.0) ─────────────────────────────────
+  // Casca fina: deriva os params da liquidação ABERTA e delega ao repositório.
+  const recarregarClientes = useCallback(async (force = false) => {
+    const rotaId = vendedor?.rota_id;
+    const liqId = liquidacaoAtual?.id ?? null;
+    // data_liquidacao é date ('YYYY-MM-DD') — usar string crua (sem new Date, evita bug de timezone)
+    const dataLiq = (liquidacaoAtual as any)?.data_liquidacao as string | undefined;
+
+    if (!rotaId || !liqId || !dataLiq) {
+      console.log('❌ [Ctx] recarregarClientes: faltam params', { rotaId, liqId, dataLiq });
+      setClientesRaw([]);
+      setPagasSet(new Set());
+      setPagMap(new Map());
+      setClientesPagosNaLiq(new Set());
+      setOrdemRotaMap(new Map());
+      return;
+    }
+
+    if (recarregandoClientesRef.current && !force) {
+      console.log('⏭️ [Ctx] recarregarClientes: já em andamento, ignorando');
+      return;
+    }
+    recarregandoClientesRef.current = true;
+    setCarregandoClientes(true);
+    try {
+      const res = await getClientesDia({ rotaId, dataLiq, liqId });
+      setClientesRaw(res.raw);
+      setPagMap(res.pagMap);
+      setPagasSet(res.pagasSet);
+      setClientesPagosNaLiq(res.clientesPagosNaLiq);
+      if (res.ordemRotaMap) setOrdemRotaMap(res.ordemRotaMap);
+      setClientesUpdatedAt(Date.now());
+    } catch (e) {
+      console.error('Erro [Ctx] recarregarClientes:', e);
+    } finally {
+      setCarregandoClientes(false);
+      recarregandoClientesRef.current = false;
+    }
+  }, [vendedor?.rota_id, liquidacaoAtual?.id, (liquidacaoAtual as any)?.data_liquidacao]);
+
+  // Recarrega liquidação + clientes
+  const recarregarTudo = useCallback(async () => {
+    await recarregarLiquidacao();
+    await recarregarClientes();
+  }, [recarregarLiquidacao, recarregarClientes]);
+
+  // Carregar liquidação ao montar e quando vendedor mudar
   useEffect(() => {
     if (vendedor?.rota_id) {
       recarregarLiquidacao();
     }
   }, [vendedor?.rota_id, recarregarLiquidacao]);
+
+  // Pré-carga de clientes — dispara quando a liquidação atual muda (fire-and-forget)
+  useEffect(() => {
+    if (liquidacaoAtual?.id) {
+      recarregarClientes();
+    } else {
+      // sem liquidação aberta — limpa cache
+      setClientesRaw([]);
+      setPagasSet(new Set());
+      setPagMap(new Map());
+      setClientesPagosNaLiq(new Set());
+      setOrdemRotaMap(new Map());
+      setClientesUpdatedAt(0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liquidacaoAtual?.id]);
 
   return (
     <LiquidacaoContext.Provider value={{
@@ -102,6 +202,16 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
       temLiquidacaoAberta,
       recarregarLiquidacao,
       loadingLiquidacao,
+
+      clientesRaw,
+      pagasSet,
+      pagMap,
+      clientesPagosNaLiq,
+      ordemRotaMap,
+      carregandoClientes,
+      clientesUpdatedAt,
+      recarregarClientes,
+      recarregarTudo,
 
       modoVisualizacao,
       setModoVisualizacao,

@@ -389,6 +389,24 @@ export default function ClientesScreen({ navigation, route }: any) {
   const liqIdFallback = (statusLiq === 'ABERTO' || statusLiq === 'ABERTA' || statusLiq === 'REABERTO') ? liqCtx.liquidacaoAtual?.id : null;
   const liqId = liqCtx.liquidacaoIdVisualizacao || route?.params?.liquidacaoId || (liqCtx.temLiquidacaoAberta ? liqCtx.liquidacaoAtual?.id : null) || liqIdFallback;
   const isViz = liqCtx.modoVisualizacao || route?.params?.isVisualizacao || false;
+
+  // FASE 2.1 — quando a tela está na liquidação ABERTA, o CONTEXTO é a fonte
+  // única: o hook não busca sozinho, só espelha o cache (sem busca duplicada).
+  // Visualização ou navegação por route-param => modo autônomo (busca direto).
+  const usarCacheCtx = !!(
+    !isViz &&
+    !route?.params?.liquidacaoId &&
+    !route?.params?.dataLiquidacao &&
+    liqId && liqId === liqCtx.liquidacaoAtual?.id
+  );
+  const seedClientes = usarCacheCtx ? {
+    raw: liqCtx.clientesRaw,
+    pagasSet: liqCtx.pagasSet,
+    pagMap: liqCtx.pagMap,
+    clientesPagosNaLiq: liqCtx.clientesPagosNaLiq,
+    ordemRotaMap: liqCtx.ordemRotaMap,
+    updatedAt: liqCtx.clientesUpdatedAt,
+  } : undefined;
   const {
     raw, setRaw,
     pagasSet, setPagasSet,
@@ -399,7 +417,14 @@ export default function ClientesScreen({ navigation, route }: any) {
     refreshing, setRefreshing,
     loadLiq,
     atualizarSaldoLocalLiq,
-  } = useClientesLiquidacao({ rotaId, dataLiq, liqId });
+  } = useClientesLiquidacao({
+    rotaId,
+    dataLiq,
+    liqId,
+    enabled: !usarCacheCtx,
+    seed: seedClientes,
+    onReload: liqCtx.recarregarClientes,
+  });
 
   // DEBUG TEMPORÁRIO - REMOVER DEPOIS
   console.log('🔍 DEBUG ClientesScreen:', JSON.stringify({
@@ -729,7 +754,7 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    if (tab === 'liquidacao') loadLiq();
+    if (tab === 'liquidacao') loadLiq(true);
     else { setTodosList([]); loadTodosClientes(true); }
   }, [tab, loadLiq, loadTodosClientes]);
 
