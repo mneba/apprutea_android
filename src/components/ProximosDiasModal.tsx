@@ -37,6 +37,7 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   rotaId: string | null;
+  dataLiq: string; // YYYY-MM-DD — data da liquidação em andamento
   lang: 'pt-BR' | 'es';
 }
 
@@ -75,7 +76,7 @@ const getIni = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(p => 
 
 // ─── Componente ─────────────────────────────────────────────────────────────
 
-export default function ProximosDiasModal({ visible, onClose, rotaId, lang }: Props) {
+export default function ProximosDiasModal({ visible, onClose, rotaId, dataLiq, lang }: Props) {
   const [dias, setDias] = useState<DiaAgrupado[]>([]);
   const [loading, setLoading] = useState(false);
   const [diasExtras, setDiasExtras] = useState<DiaAgrupado[]>([]);
@@ -99,9 +100,9 @@ export default function ProximosDiasModal({ visible, onClose, rotaId, lang }: Pr
     if (!rotaId) return;
     setLoading(true);
     try {
-      const hoje = new Date();
-      const inicio = addDays(hoje, 1);
-      const fim = addDays(hoje, 5);
+      const baseLiq = new Date(dataLiq + 'T00:00:00');
+      const inicio = addDays(baseLiq, 1);
+      const fim = addDays(baseLiq, 7);
 
       const { data, error } = await supabase.rpc('fn_clientes_proximos_dias', {
         p_rota_id: rotaId,
@@ -113,9 +114,9 @@ export default function ProximosDiasModal({ visible, onClose, rotaId, lang }: Pr
 
       // Agrupar por data
       const grupos = new Map<string, ClienteDia[]>();
-      // Pré-popular os 5 dias (mesmo sem clientes)
-      for (let i = 1; i <= 5; i++) {
-        const d = toDateStr(addDays(hoje, i));
+      // Pré-popular os 7 dias (mesmo sem clientes)
+      for (let i = 1; i <= 7; i++) {
+        const d = toDateStr(addDays(baseLiq, i));
         grupos.set(d, []);
       }
       ((data || []) as ClienteDia[]).forEach(c => {
@@ -216,7 +217,7 @@ export default function ProximosDiasModal({ visible, onClose, rotaId, lang }: Pr
       d.setDate(d.getDate() + 1);
       return toDateStr(d);
     }
-    return toDateStr(addDays(new Date(), 6));
+    return toDateStr(addDays(new Date(dataLiq + 'T00:00:00'), 8));
   };
 
   // Toggle accordion

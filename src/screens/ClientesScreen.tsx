@@ -391,7 +391,9 @@ export default function ClientesScreen({ navigation, route }: any) {
   const isViz = liqCtx.modoVisualizacao || route?.params?.isVisualizacao || false;
   const {
     raw, setRaw,
-    pagasSet, pagMap, clientesPagosNaLiq,
+    pagasSet, setPagasSet,
+    pagMap, setPagMap,
+    clientesPagosNaLiq, setClientesPagosNaLiq,
     ordemRotaMap, setOrdemRotaMap,
     loading, setLoading,
     refreshing, setRefreshing,
@@ -989,11 +991,31 @@ export default function ClientesScreen({ navigation, route }: any) {
           setDadosPagamento(null);
           setUsarCredito(false);
           if (clienteModal?.emprestimo_id) { atualizarSaldoLocalLiq(clienteModal.emprestimo_id); atualizarSaldoLocalTodos(clienteModal.emprestimo_id); }
+
+          // ⭐ Atualização otimista: marcar parcela como paga imediatamente no estado local
+          const parcelaId = parcelaPagamento.parcela_id;
+          const clienteId = clienteModal?.id || '';
+          setPagasSet(prev => { const s = new Set(prev); s.add(parcelaId); return s; });
+          setClientesPagosNaLiq(prev => { const s = new Set(prev); s.add(clienteId); return s; });
+          setPagMap(prev => {
+            const m = new Map(prev);
+            m.set(parcelaId, {
+              parcela_id: parcelaId,
+              cliente_id: clienteId,
+              valor_pago_atual: parseFloat(valorPagamento.replace(',', '.')) || 0,
+              valor_credito_gerado: 0,
+              valor_parcela: dadosPagamento?.valor_parcela || parcelaPagamento.valor_parcela,
+              data_pagamento: new Date().toISOString(),
+              liquidacao_id: liqId || '',
+            });
+            return m;
+          });
+
           setClienteModal(null);
-          // ⭐ Aguardar 300ms para o banco processar triggers antes de recarregar
-          await new Promise(resolve => setTimeout(resolve, 300));
-          loadLiq();
           showAlert(t.sucessoGenerico || 'Sucesso', res.mensagem || t.sucesso);
+
+          // Recarregar dados completos em background (sem bloquear UI)
+          setTimeout(() => loadLiq(), 500);
         } else { showAlert(t.erroGenerico, res?.mensagem || t.erro); }
       } catch (e: any) { console.error('Erro pagamento:', e); showAlert(t.erroGenerico, e.message || t.erro); }
       finally { setProcessando(false); }
@@ -1215,9 +1237,17 @@ export default function ClientesScreen({ navigation, route }: any) {
         Alert.alert(t.sucessoGenerico, res.mensagem || t.estornoSucesso);
         if (clienteModal?.emprestimo_id) { atualizarSaldoLocalLiq(clienteModal.emprestimo_id); atualizarSaldoLocalTodos(clienteModal.emprestimo_id); }
         if (clienteModal) abrirParcelas(clienteModal.id, clienteModal.nome, clienteModal.emprestimo_id);
-        // ⭐ Aguardar 300ms para o banco processar triggers antes de recarregar
-        await new Promise(resolve => setTimeout(resolve, 300));
-        loadLiq();
+
+        // ⭐ Atualização otimista: remover parcela do estado de pagas
+        const parcelaId = parcelaEstorno.parcela_id;
+        const clienteId = clienteModal?.id || '';
+        setPagasSet(prev => { const s = new Set(prev); s.delete(parcelaId); return s; });
+        setPagMap(prev => { const m = new Map(prev); m.delete(parcelaId); return m; });
+        // Verificar se cliente tem outras parcelas pagas antes de removê-lo de clientesPagosNaLiq
+        // (loadLiq em background vai corrigir)
+
+        // Recarregar dados completos em background
+        setTimeout(() => loadLiq(), 500);
       } else { 
         setModalEstornoVisible(false);
         Alert.alert(t.erroGenerico, res?.mensagem || t.estornoErro); 
@@ -1863,6 +1893,7 @@ return (
         visible={showProximosDias}
         onClose={() => setShowProximosDias(false)}
         rotaId={rotaId}
+        dataLiq={dataLiq}
         lang={lang}
       />
     </View>
