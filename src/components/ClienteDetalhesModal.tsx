@@ -471,7 +471,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       const enriched = (data || []).map((p: any) => {
         const pags = (p.pagamentos_parcelas || []).filter((pp: any) => !pp.estornado);
         const ultimo = pags.sort((a: any, b: any) =>
-          parseFloat(b.valor_pago_total || 0) - parseFloat(a.valor_pago_total || 0)
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         )[0];
         const dataLiq = ultimo?.liquidacoes_diarias?.data_liquidacao
           || ultimo?.liquidacoes_diarias?.data_abertura?.substring(0, 10)
@@ -960,7 +960,9 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                   const isParcial = p.status === 'PARCIAL';
                   const isPendente = !isPago && !isVencida && !isParcial;
                   const corP = corStatus[isPago ? 'PAGO' : isVencida ? 'VENCIDO' : isParcial ? 'PARCIAL' : 'PENDENTE'];
-                  const valorPagoReal = p.valor_pago_total ?? p.valor_pago;
+                  // valor_pago da parcela = total acumulado (correto)
+                  // valor_pago_total do pagamento = valor individual (NÃO usar pra exibir total)
+                  const valorPagoReal = p.valor_pago;
                   const temCredito = (p.valor_credito_gerado ?? 0) > 0;
 
                   // ⭐ Pontualidade do pagamento (PAGO ou PARCIAL)

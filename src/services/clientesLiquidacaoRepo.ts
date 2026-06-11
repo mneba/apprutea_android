@@ -109,14 +109,7 @@ export async function getClientesDia(
       allData = allData.map(r => ({ ...r, data_emprestimo: empDataMap.get(r.emprestimo_id) || null }));
     }
 
-    // Descontar crédito acumulado do saldo do empréstimo
-    const creditoMap = await buscarCreditoMap(empIdsUnicos);
-    if (creditoMap.size > 0) {
-      allData = allData.map(r => ({
-        ...r,
-        saldo_emprestimo: Math.max(0, (r.saldo_emprestimo || 0) - (creditoMap.get(r.emprestimo_id) || 0)),
-      }));
-    }
+
   }
 
   // Enriquecer com foto_url dos clientes

@@ -779,10 +779,12 @@ export default function ClientesScreen({ navigation, route }: any) {
       // Busca pagamentos com liquidacao_id (tabela pagamentos_parcelas tem tudo)
       const { data: pagamentos } = await supabase
         .from('pagamentos_parcelas')
-        .select('parcela_id, valor_pago_atual, valor_credito_usado, valor_credito_gerado, liquidacao_id, estornado')
+        .select('parcela_id, valor_pago_atual, valor_credito_usado, valor_credito_gerado, liquidacao_id, estornado, created_at')
         .in('parcela_id', ids)
-        .eq('estornado', false);
+        .eq('estornado', false)
+        .order('created_at', { ascending: true });
       
+      // Manter apenas o pagamento MAIS RECENTE por parcela (último created_at ganha)
       const pMap = new Map<string, { valorPago: number; creditoUsado: number; creditoGerado: number; liquidacaoId: string | null }>();
       (pagamentos || []).forEach((p: any) => { 
         pMap.set(p.parcela_id, { 
@@ -823,6 +825,20 @@ export default function ClientesScreen({ navigation, route }: any) {
         const creditoGerado = pag?.creditoGerado || 0;
         const liqPag = pag?.liquidacaoId || p.liquidacao_id || null;
         const dataLiquidacao = liqPag ? (liqDataMap.get(liqPag) || null) : null;
+        
+        // DEBUG - verificar dados de cada parcela não-paga
+        if (p.status !== 'PAGO' && vPago > 0) {
+          console.log(`⚠️ PARCELA ${p.numero_parcela} com pagamento parcial:`, {
+            parcela_id: p.id,
+            status: p.status,
+            valor_parcela: p.valor_parcela,
+            valor_pago_db: p.valor_pago,
+            valor_pago_usado: vPago,
+            valor_saldo_db: p.valor_saldo,
+            valor_saldo_usado: vSaldo,
+          });
+        }
+        
         return { 
           parcela_id: p.id, 
           numero_parcela: p.numero_parcela, 
