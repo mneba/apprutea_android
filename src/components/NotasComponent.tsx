@@ -255,7 +255,7 @@ export function ModalNotasLista({
   const inputNovoRef = useRef<TextInput>(null);
 
   const handleSalvarNova = useCallback(async () => {
-    if (!novoTexto.trim()) return;
+    if (!novoTexto.trim() || !podeCriarNota) return;
     setSalvandoNovo(true);
     try {
       // Resolver parcela automaticamente se tiver clienteId
@@ -306,7 +306,7 @@ export function ModalNotasLista({
     } finally {
       setSalvandoNovo(false);
     }
-  }, [novoTexto, empresaId, rotaId, vendedorId, autorNome, autorTipo, liquidacaoId, clienteId, dataReferencia, coords, obsLocalPadrao, carregarNotas, t]);
+  }, [novoTexto, podeCriarNota, empresaId, rotaId, vendedorId, autorNome, autorTipo, liquidacaoId, clienteId, dataReferencia, coords, obsLocalPadrao, carregarNotas, t]);
 
   // Formatar data/hora para exibição
   const fmtDataHora = (dt: string) => {

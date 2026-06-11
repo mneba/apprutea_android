@@ -1810,7 +1810,7 @@ return (
         clienteNome={notasClienteNome}
         lang={lang}
         coords={coords}
-        permitirCriar={!!(liqId || liqCtx.liquidacaoAtual?.id)}
+        permitirCriar={!!(liqId && ['ABERTO', 'ABERTA', 'REABERTO', 'REABERTA'].includes(liqCtx.liquidacaoAtual?.status || ''))}
         mensagemSemLiq={lang === 'es' ? 'Abra una liquidación para crear notas' : 'Abra uma liquidação para criar notas'}
         obsLocalPadrao="Cliente"
       />
