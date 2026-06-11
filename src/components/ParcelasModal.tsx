@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -30,6 +30,20 @@ export interface ParcelaModal {
   observacoes?: string | null;
 }
 
+// Registro individual de pagamento (para o popup de detalhes)
+export interface PagamentoDetalhe {
+  id?: string;
+  valor_pago_total: number;
+  valor_credito_usado?: number;
+  valor_credito_gerado?: number;
+  forma_pagamento?: string;
+  created_at: string;
+  estornado?: boolean;
+  data_liquidacao?: string | null;   // vem de liquidacoes_diarias.data_liquidacao
+  data_abertura?: string | null;     // vem de liquidacoes_diarias.data_abertura
+  importado?: boolean;               // true = registro da importação SmartPay
+}
+
 interface ClienteModalInfo {
   id: string;
   nome: string;
@@ -40,7 +54,8 @@ interface ClienteModalInfo {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-const fmt = (v: number) => '$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (v: number) =>
+  '$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const fmtData = (d: string | null | undefined) => {
   if (!d) return '';
@@ -53,7 +68,24 @@ const fmtData = (d: string | null | undefined) => {
   return dt.toLocaleDateString('pt-BR');
 };
 
-const calcularDiasAtraso = (dataVencimento: string | null | undefined, dataPagamento: string | null | undefined): number => {
+const fmtTs = (ts: string) => {
+  try {
+    const s = ts.replace(' ', 'T').replace(/\+00(:00)?$/, 'Z');
+    const dt = new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z');
+    if (isNaN(dt.getTime())) return '—';
+    return dt.toLocaleString('pt-BR', {
+      day: '2-digit', month: '2-digit', year: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+    });
+  } catch {
+    return '—';
+  }
+};
+
+const calcularDiasAtraso = (
+  dataVencimento: string | null | undefined,
+  dataPagamento: string | null | undefined
+): number => {
   if (!dataVencimento || !dataPagamento) return 0;
   const vencStr = dataVencimento.substring(0, 10);
   const pagStr = dataPagamento.substring(0, 10);
@@ -78,6 +110,9 @@ interface ParcelasModalProps {
   isClientePago?: boolean;
   onPagar: (parcela: ParcelaModal) => void;
   onEstornar: (parcela: ParcelaModal) => void;
+  // Opcional: mapa parcela_id → lista de pagamentos individuais
+  // Quando fornecido, cada parcela vira toque que abre o popup de detalhes
+  pagamentosDetalhados?: Map<string, PagamentoDetalhe[]>;
   t: {
     parcela: string;
     pago: string;
@@ -108,12 +143,339 @@ interface ParcelasModalProps {
   };
 }
 
-// ─── Componente ─────────────────────────────────────────────────────────────
+// ─── Popup de Detalhes de Pagamento ─────────────────────────────────────────
+
+interface DetalhesPopupProps {
+  visible: boolean;
+  onClose: () => void;
+  parcela: ParcelaModal | null;
+  pagamentos: PagamentoDetalhe[];
+  t: ParcelasModalProps['t'];
+}
+
+function DetalhesPopup({ visible, onClose, parcela, pagamentos, t }: DetalhesPopupProps) {
+  if (!parcela) return null;
+
+  const valorPago = parcela.valor_pago || 0;
+  const creditoGerado = parcela.credito_gerado || 0;
+  const saldoExcedente = parcela.saldo_excedente || 0;
+  const valorSaldo = parcela.valor_saldo ?? (parcela.valor_parcela - valorPago);
+
+  // Calcula dinheiro e crédito usado a partir dos registros individuais (mais preciso)
+  // Evita o problema de credito_usado = 0 no dado agregado da parcela
+  const pagsNaoEstornados = pagamentos.filter(pp => !pp.estornado);
+  const dinheiroReal = pagsNaoEstornados.reduce((s, pp) => s + parseFloat(String(pp.valor_pago_total || 0)), 0);
+  const creditoUsado = pagsNaoEstornados.reduce((s, pp) => s + parseFloat(String(pp.valor_credito_usado || 0)), 0);
+  // Se não temos registros individuais (importado), cai de volta para o dado da parcela
+  const valorDinheiro = pagsNaoEstornados.length > 0 ? dinheiroReal : (valorPago - (parcela.credito_usado || 0));
+  const creditoUsadoFinal = pagsNaoEstornados.length > 0 ? creditoUsado : (parcela.credito_usado || 0);
+  const isPago = parcela.status === 'PAGO';
+  const isParcial = parcela.status === 'PARCIAL';
+  const isVencida = parcela.status === 'VENCIDO' || parcela.status === 'VENCIDA';
+  const temPagamentoParcial = !isPago && valorPago > 0;
+  const isAutoQuitacao = (parcela.observacoes || '').includes('[AUTO-QUITAÇÃO]');
+
+  // Filtra estornados para exibição
+  const pagsAtivos = pagamentos.filter(pp => !pp.estornado);
+  const pagsEstornados = pagamentos.filter(pp => pp.estornado);
+
+  const corStatus = isPago ? '#10B981' : isParcial ? '#D97706' : isVencida ? '#EF4444' : '#6B7280';
+  const bgStatus = isPago ? '#D1FAE5' : isParcial ? '#FEF3C7' : isVencida ? '#FEE2E2' : '#F3F4F6';
+  const statusText = isPago ? t.pagoStatus : isParcial ? t.parcialStatus : isVencida ? t.vencidaStatus : t.pendente;
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={D.overlay}>
+        <View style={D.sheet}>
+          {/* Handle */}
+          <View style={D.handle} />
+
+          {/* Header */}
+          <View style={D.header}>
+            <View style={D.headerLeft}>
+              <Text style={D.headerTitle}>{t.parcela} {parcela.numero_parcela}</Text>
+              <View style={[D.statusBadge, { backgroundColor: bgStatus }]}>
+                <Text style={[D.statusText, { color: corStatus }]}>{statusText}</Text>
+              </View>
+            </View>
+            <TouchableOpacity onPress={onClose} style={D.closeBtn}>
+              <Ionicons name="close" size={18} color="#6B7280" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={D.scroll} showsVerticalScrollIndicator={false}>
+            {/* Resumo da parcela */}
+            <View style={D.resumoCard}>
+              <View style={D.resumoRow}>
+                <Text style={D.resumoLabel}>Parcela original</Text>
+                <Text style={D.resumoValue}>{fmt(parcela.valor_parcela)}</Text>
+              </View>
+              <View style={D.resumoRow}>
+                <Ionicons name="calendar-outline" size={12} color="#9CA3AF" />
+                <Text style={[D.resumoLabel, { marginLeft: 4 }]}>{t.venc}</Text>
+                <Text style={D.resumoValue}>{fmtData(parcela.data_vencimento)}</Text>
+              </View>
+
+              {/* Linha separadora quando tem pagamento */}
+              {(isPago || temPagamentoParcial || (isVencida && valorPago > 0)) && (
+                <>
+                  <View style={D.separator} />
+                  {valorPago > 0 && creditoUsadoFinal === 0 && (
+                    <View style={D.resumoRow}>
+                      <Ionicons name="cash-outline" size={12} color="#6B7280" />
+                      <Text style={[D.resumoLabel, { marginLeft: 4 }]}>{t.dinheiro}</Text>
+                      <Text style={[D.resumoValue, { color: '#10B981', fontWeight: '700' }]}>{fmt(valorDinheiro)}</Text>
+                    </View>
+                  )}
+                  {creditoUsadoFinal > 0 && (
+                    <>
+                      <View style={D.resumoRow}>
+                        <Ionicons name="cash-outline" size={12} color="#6B7280" />
+                        <Text style={[D.resumoLabel, { marginLeft: 4 }]}>{t.dinheiro}</Text>
+                        <Text style={[D.resumoValue, { color: '#10B981', fontWeight: '700' }]}>{fmt(valorDinheiro)}</Text>
+                      </View>
+                      <View style={D.resumoRow}>
+                        <Ionicons name="card-outline" size={12} color="#2563EB" />
+                        <Text style={[D.resumoLabel, { marginLeft: 4, color: '#2563EB' }]}>{t.creditoUsado}</Text>
+                        <Text style={[D.resumoValue, { color: '#2563EB' }]}>{fmt(creditoUsadoFinal)}</Text>
+                      </View>
+                    </>
+                  )}
+                  {/* Saldo restante (parcial/vencida com pagamento) */}
+                  {(isParcial || (isVencida && valorSaldo > 0) || (temPagamentoParcial && valorSaldo > 0)) && (
+                    <View style={D.resumoRow}>
+                      <Text style={[D.resumoLabel, { color: '#D97706' }]}>{t.restante}</Text>
+                      <Text style={[D.resumoValue, { color: '#D97706', fontWeight: '700' }]}>{fmt(valorSaldo)}</Text>
+                    </View>
+                  )}
+                  {/* Crédito gerado */}
+                  {(creditoGerado > 0 || saldoExcedente > 0) && !isAutoQuitacao && (
+                    <View style={[D.resumoRow, { marginTop: 2 }]}>
+                      <Ionicons name="flash-outline" size={12} color="#7C3AED" />
+                      <Text style={[D.resumoLabel, { marginLeft: 4, color: '#7C3AED' }]}>Crédito gerado</Text>
+                      <Text style={[D.resumoValue, { color: '#7C3AED' }]}>
+                        {fmt(creditoGerado > 0 ? creditoGerado : saldoExcedente)}
+                      </Text>
+                    </View>
+                  )}
+                  {isAutoQuitacao && (
+                    <View style={D.autoQuitBadge}>
+                      <Ionicons name="swap-horizontal" size={11} color="#2563EB" />
+                      <Text style={D.autoQuitText}> Quitado por crédito</Text>
+                    </View>
+                  )}
+                </>
+              )}
+            </View>
+
+            {/* Lista de pagamentos individuais */}
+            {pagsAtivos.length > 0 && (
+              <View style={D.section}>
+                <Text style={D.sectionTitle}>
+                  Pagamentos ({pagsAtivos.length})
+                </Text>
+                {pagsAtivos.map((pp, idx) => {
+                  const dataLiq = pp.data_liquidacao
+                    || (pp.data_abertura ? pp.data_abertura.substring(0, 10) : null);
+                  const isImportado = pp.importado === true;
+                  const valorPP = parseFloat(String(pp.valor_pago_total || 0));
+                  const creditoPP = parseFloat(String(pp.valor_credito_gerado || 0));
+
+                  return (
+                    <View key={idx} style={D.pagCard}>
+                      <View style={D.pagRow}>
+                        <View style={D.pagIconBox}>
+                          <Ionicons
+                            name={isImportado ? 'archive-outline' : 'cash-outline'}
+                            size={14}
+                            color={isImportado ? '#6B7280' : '#10B981'}
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          {/* Valor + forma */}
+                          <View style={D.pagTopRow}>
+                            <Text style={D.pagValor}>{fmt(valorPP)}</Text>
+                            {isImportado ? (
+                              <View style={D.importBadge}>
+                                <Text style={D.importText}>Importado</Text>
+                              </View>
+                            ) : pp.forma_pagamento ? (
+                              <View style={D.formaBadge}>
+                                <Ionicons
+                                  name={pp.forma_pagamento === 'DINHEIRO' ? 'cash-outline' : 'swap-horizontal-outline'}
+                                  size={10}
+                                  color="#6B7280"
+                                />
+                                <Text style={D.formaText}>
+                                  {pp.forma_pagamento === 'DINHEIRO' ? t.dinheiro : 'Transferência'}
+                                </Text>
+                              </View>
+                            ) : null}
+                          </View>
+
+                          {/* Data/hora do pagamento */}
+                          {pp.created_at && !isImportado && (
+                            <View style={D.pagInfoRow}>
+                              <Ionicons name="time-outline" size={11} color="#9CA3AF" />
+                              <Text style={D.pagInfoText}>{fmtTs(pp.created_at)}</Text>
+                            </View>
+                          )}
+
+                          {/* Data da liquidação */}
+                          {dataLiq && (
+                            <View style={D.pagInfoRow}>
+                              <Ionicons name="document-text-outline" size={11} color="#6366F1" />
+                              <Text style={[D.pagInfoText, { color: '#6366F1' }]}>
+                                {t.liq} {fmtData(dataLiq)}
+                              </Text>
+                            </View>
+                          )}
+
+                          {/* Crédito usado neste pagamento */}
+                          {(parseFloat(String(pp.valor_credito_usado || 0))) > 0 && (
+                            <View style={D.pagInfoRow}>
+                              <Ionicons name="card-outline" size={11} color="#2563EB" />
+                              <Text style={[D.pagInfoText, { color: '#2563EB' }]}>
+                                +{fmt(parseFloat(String(pp.valor_credito_usado || 0)))} crédito usado
+                              </Text>
+                            </View>
+                          )}
+                          {/* Crédito gerado neste pagamento */}
+                          {creditoPP > 0 && (
+                            <View style={D.pagInfoRow}>
+                              <Ionicons name="flash-outline" size={11} color="#7C3AED" />
+                              <Text style={[D.pagInfoText, { color: '#7C3AED' }]}>
+                                +{fmt(creditoPP)} crédito gerado
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
+            {/* Sem pagamentos registrados (parcela paga mas sem detalhes) */}
+            {(isPago || temPagamentoParcial || (isVencida && valorPago > 0)) && pagsAtivos.length === 0 && (
+              <View style={D.section}>
+                <View style={D.semDetalhes}>
+                  <Ionicons name="archive-outline" size={20} color="#9CA3AF" />
+                  <Text style={D.semDetalhesText}>Saldo importado (sem registro individual)</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Pagamentos estornados (colapsado) */}
+            {pagsEstornados.length > 0 && (
+              <View style={D.section}>
+                <Text style={[D.sectionTitle, { color: '#9CA3AF' }]}>
+                  Estornados ({pagsEstornados.length})
+                </Text>
+                {pagsEstornados.map((pp, idx) => (
+                  <View key={idx} style={[D.pagCard, { opacity: 0.5 }]}>
+                    <View style={D.pagRow}>
+                      <View style={[D.pagIconBox, { backgroundColor: '#FEE2E2' }]}>
+                        <Ionicons name="arrow-undo-outline" size={14} color="#EF4444" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[D.pagValor, { color: '#9CA3AF', textDecorationLine: 'line-through' }]}>
+                          {fmt(parseFloat(String(pp.valor_pago_total || 0)))}
+                        </Text>
+                        {pp.created_at && (
+                          <Text style={D.pagInfoText}>{fmtTs(pp.created_at)}</Text>
+                        )}
+                      </View>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            <View style={{ height: 24 }} />
+          </ScrollView>
+
+          {/* Botão fechar */}
+          <View style={D.footer}>
+            <TouchableOpacity style={D.footerBtn} onPress={onClose}>
+              <Text style={D.footerBtnTx}>{t.fechar}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── Styles do Popup ────────────────────────────────────────────────────────
+
+const D = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '80%' },
+  handle: { width: 40, height: 4, backgroundColor: '#D1D5DB', borderRadius: 2, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
+  headerLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerTitle: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
+  statusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+  statusText: { fontSize: 10, fontWeight: '700' },
+  closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
+  scroll: { paddingHorizontal: 16, paddingTop: 12 },
+
+  // Resumo
+  resumoCard: { backgroundColor: '#F9FAFB', borderRadius: 12, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#E5E7EB' },
+  resumoRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 3 },
+  resumoLabel: { flex: 1, fontSize: 13, color: '#6B7280' },
+  resumoValue: { fontSize: 13, color: '#1F2937', fontWeight: '600' },
+  separator: { height: 1, backgroundColor: '#E5E7EB', marginVertical: 8 },
+  autoQuitBadge: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', backgroundColor: '#DBEAFE', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, marginTop: 4, borderWidth: 1, borderColor: '#BFDBFE' },
+  autoQuitText: { fontSize: 11, fontWeight: '600', color: '#2563EB' },
+
+  // Seções
+  section: { marginBottom: 16 },
+  sectionTitle: { fontSize: 12, fontWeight: '700', color: '#374151', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+
+  // Card de pagamento
+  pagCard: { backgroundColor: '#FAFAFA', borderRadius: 10, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB' },
+  pagRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  pagIconBox: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#D1FAE5', justifyContent: 'center', alignItems: 'center', marginTop: 2 },
+  pagTopRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  pagValor: { fontSize: 15, fontWeight: '700', color: '#10B981' },
+  pagInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  pagInfoText: { fontSize: 11, color: '#9CA3AF' },
+
+  // Badges
+  formaBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#F3F4F6', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 4 },
+  formaText: { fontSize: 10, color: '#6B7280', fontWeight: '500' },
+  importBadge: { backgroundColor: '#F3F4F6', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 4 },
+  importText: { fontSize: 10, color: '#9CA3AF', fontWeight: '500' },
+
+  // Sem detalhes
+  semDetalhes: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#F9FAFB', borderRadius: 10, padding: 14, borderWidth: 1, borderColor: '#E5E7EB' },
+  semDetalhesText: { fontSize: 13, color: '#9CA3AF', fontStyle: 'italic' },
+
+  // Footer
+  footer: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
+  footerBtn: { backgroundColor: '#3B82F6', paddingVertical: 14, borderRadius: 10, alignItems: 'center' },
+  footerBtnTx: { fontSize: 15, fontWeight: '700', color: '#fff' },
+});
+
+// ─── Componente Principal ────────────────────────────────────────────────────
 
 export default function ParcelasModal({
   visible, onClose, clienteModal, parcelasModal, loadingParcelas,
-  creditoDisponivel, liqId, isViz, isClientePago = false, onPagar, onEstornar, t,
+  creditoDisponivel, liqId, isViz, isClientePago = false,
+  onPagar, onEstornar, pagamentosDetalhados, t,
 }: ParcelasModalProps) {
+
+  const [parcelaDetalhes, setParcelaDetalhes] = useState<ParcelaModal | null>(null);
+
+  const abrirDetalhes = (p: ParcelaModal) => {
+    if (!pagamentosDetalhados) return;
+    setParcelaDetalhes(p);
+  };
+
+  const fecharDetalhes = () => setParcelaDetalhes(null);
 
   const renderParcelaItem = (p: ParcelaModal) => {
     const isPago = p.status === 'PAGO';
@@ -125,7 +487,6 @@ export default function ParcelasModal({
 
     const diasAtraso = isPago ? calcularDiasAtraso(p.data_vencimento, p.data_pagamento) : 0;
     const pagoComAtraso = isPago && diasAtraso > 0;
-    const pagoNoDia = isPago && diasAtraso === 0;
     const pagoAdiantado = isPago && diasAtraso < 0;
 
     // Cores por status
@@ -157,9 +518,12 @@ export default function ParcelasModal({
       : isVencida ? '#FEE2E2'
       : '#FFEDD5';
 
-    const statusText = isPago ? t.pagoStatus : isParcial ? t.parcialStatus : isCancelado ? 'CANCELADO' : isVencida ? t.vencidaStatus : t.pendente;
+    const statusText = isPago ? t.pagoStatus
+      : isParcial ? t.parcialStatus
+      : isCancelado ? 'CANCELADO'
+      : isVencida ? t.vencidaStatus
+      : t.pendente;
 
-    // Ícone por status
     const statusIcon: keyof typeof Ionicons.glyphMap = isPago
       ? 'checkmark-circle'
       : isParcial || (!isPago && (p.valor_pago || 0) > 0) ? 'pie-chart'
@@ -172,8 +536,16 @@ export default function ParcelasModal({
     const valorSaldo = p.valor_saldo ?? (p.valor_parcela - valorPago);
     const temPagamentoParcial = !isPago && valorPago > 0;
 
+    // Parcela é toque quando temos pagamentosDetalhados e há algo a mostrar
+    const temDetalhes = !!pagamentosDetalhados && (isPago || isParcial || temPagamentoParcial || (isVencida && valorPago > 0));
+    const Wrapper = temDetalhes ? TouchableOpacity : View;
+    const wrapperProps = temDetalhes
+      ? { activeOpacity: 0.7, onPress: () => abrirDetalhes(p) }
+      : {};
+
     return (
-      <View key={p.parcela_id} style={[S.mParcela, { borderLeftColor: iconColor }]}>
+      // @ts-ignore — Wrapper dinâmico
+      <Wrapper key={p.parcela_id} style={[S.mParcela, { borderLeftColor: iconColor }]} {...wrapperProps}>
         <View style={S.mParcelaRow}>
           {/* Ícone de status */}
           <View style={[S.mParcelaIcon, { backgroundColor: iconBg }]}>
@@ -188,6 +560,10 @@ export default function ParcelasModal({
               <View style={[S.mParcelaStatus, { backgroundColor: statusBg }]}>
                 <Text style={[S.mParcelaStatusTx, { color: statusColor }]}>{statusText}</Text>
               </View>
+              {/* Indicador de detalhes disponíveis */}
+              {temDetalhes && (
+                <Ionicons name="information-circle-outline" size={14} color="#9CA3AF" style={{ marginLeft: 2 }} />
+              )}
             </View>
 
             {/* Linha 2: Datas compactas */}
@@ -199,12 +575,15 @@ export default function ParcelasModal({
               {p.data_pagamento && (
                 <View style={S.dateRow}>
                   <Ionicons name="checkmark-done-outline" size={11} color={pagoComAtraso ? '#D97706' : '#6B7280'} />
-                  <Text style={[S.dateText, pagoComAtraso && { color: '#D97706' }]}>{t.em} {fmtData(p.data_pagamento)}</Text>
-                  {/* Badge atraso/pontualidade */}
+                  <Text style={[S.dateText, pagoComAtraso && { color: '#D97706' }]}>
+                    {t.em} {fmtData(p.data_pagamento)}
+                  </Text>
                   {pagoComAtraso && (
                     <View style={S.badgeAtraso}>
                       <Ionicons name="alert-circle" size={9} color="#DC2626" />
-                      <Text style={S.badgeAtrasoTx}> {diasAtraso} {diasAtraso === 1 ? t.diaAtraso : t.diasAtraso}</Text>
+                      <Text style={S.badgeAtrasoTx}>
+                        {' '}{diasAtraso} {diasAtraso === 1 ? t.diaAtraso : t.diasAtraso}
+                      </Text>
                     </View>
                   )}
                 </View>
@@ -231,7 +610,7 @@ export default function ParcelasModal({
               </View>
             )}
 
-            {/* PAGO: valores */}
+            {/* PAGO: valores resumidos */}
             {isPago && (
               <View style={S.valoresBlock}>
                 {creditoUsado > 0 ? (
@@ -312,51 +691,74 @@ export default function ParcelasModal({
             )}
           </View>
         </View>
-      </View>
+      </Wrapper>
     );
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
-      <View style={S.modalOverlay}>
-        <View style={S.modalContainer}>
-          {/* Header */}
-          <View style={S.modalHeader}>
-            <Text style={S.modalTitle} numberOfLines={1}>{clienteModal?.nome || ''}</Text>
-            <TouchableOpacity onPress={onClose} style={S.modalClose}>
-              <Ionicons name="close" size={18} color="#6B7280" />
-            </TouchableOpacity>
-          </View>
-
-          {/* Banner crédito */}
-          {creditoDisponivel > 0 && (
-            <View style={S.creditoBanner}>
-              <Ionicons name="card-outline" size={16} color="#1D4ED8" />
-              <Text style={S.creditoText}>{t.creditoDisponivel} {fmt(creditoDisponivel)}</Text>
+    <>
+      <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
+        <View style={S.modalOverlay}>
+          <View style={S.modalContainer}>
+            {/* Header */}
+            <View style={S.modalHeader}>
+              <Text style={S.modalTitle} numberOfLines={1}>{clienteModal?.nome || ''}</Text>
+              <TouchableOpacity onPress={onClose} style={S.modalClose}>
+                <Ionicons name="close" size={18} color="#6B7280" />
+              </TouchableOpacity>
             </View>
-          )}
 
-          {/* Lista de parcelas */}
-          <ScrollView style={S.modalScroll} showsVerticalScrollIndicator={false}>
-            {loadingParcelas ? (
-              <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
-            ) : parcelasModal.length === 0 ? (
-              <Text style={S.modalEmpty}>{t.nenhumaParcelaEncontrada}</Text>
-            ) : (
-              parcelasModal.map(p => renderParcelaItem(p))
+            {/* Banner crédito */}
+            {creditoDisponivel > 0 && (
+              <View style={S.creditoBanner}>
+                <Ionicons name="card-outline" size={16} color="#1D4ED8" />
+                <Text style={S.creditoText}>{t.creditoDisponivel} {fmt(creditoDisponivel)}</Text>
+              </View>
             )}
-            <View style={{ height: 10 }} />
-          </ScrollView>
 
-          {/* Botão Fechar */}
-          <View style={S.mBtnFecharWrap}>
-            <TouchableOpacity style={S.mBtnFechar} onPress={onClose}>
-              <Text style={S.mBtnFecharTx}>{t.fechar}</Text>
-            </TouchableOpacity>
+            {/* Hint de toque (quando detalhes disponíveis) */}
+            {pagamentosDetalhados && (
+              <View style={S.hintBar}>
+                <Ionicons name="information-circle-outline" size={13} color="#6B7280" />
+                <Text style={S.hintText}>Toque em uma parcela paga para ver detalhes</Text>
+              </View>
+            )}
+
+            {/* Lista de parcelas */}
+            <ScrollView style={S.modalScroll} showsVerticalScrollIndicator={false}>
+              {loadingParcelas ? (
+                <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
+              ) : parcelasModal.length === 0 ? (
+                <Text style={S.modalEmpty}>{t.nenhumaParcelaEncontrada}</Text>
+              ) : (
+                parcelasModal.map(p => renderParcelaItem(p))
+              )}
+              <View style={{ height: 10 }} />
+            </ScrollView>
+
+            {/* Botão Fechar */}
+            <View style={S.mBtnFecharWrap}>
+              <TouchableOpacity style={S.mBtnFechar} onPress={onClose}>
+                <Text style={S.mBtnFecharTx}>{t.fechar}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
-      </View>
-    </Modal>
+      </Modal>
+
+      {/* Popup de detalhes — fora do modal principal para sobrepor corretamente */}
+      <DetalhesPopup
+        visible={!!parcelaDetalhes}
+        onClose={fecharDetalhes}
+        parcela={parcelaDetalhes}
+        pagamentos={
+          parcelaDetalhes && pagamentosDetalhados
+            ? (pagamentosDetalhados.get(parcelaDetalhes.parcela_id) || [])
+            : []
+        }
+        t={t}
+      />
+    </>
   );
 }
 
@@ -374,6 +776,10 @@ const S = StyleSheet.create({
   // Banner crédito
   creditoBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#DBEAFE', padding: 12, marginHorizontal: 16, marginTop: 12, borderRadius: 10, borderWidth: 1, borderColor: '#93C5FD' },
   creditoText: { fontSize: 13, fontWeight: '600', color: '#1D4ED8' },
+
+  // Hint
+  hintBar: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#F9FAFB', borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  hintText: { fontSize: 11, color: '#9CA3AF' },
 
   // Card parcela
   mParcela: { backgroundColor: '#FAFAFA', borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#E5E7EB', borderLeftWidth: 4 },

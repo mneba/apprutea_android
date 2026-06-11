@@ -1044,7 +1044,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                             fontSize: 15, fontWeight: '700',
                             color: isPago ? '#10B981' : isVencida ? '#EF4444' : '#374151'
                           }}>
-                            {(isPago || isParcial) ? fmt(valorPagoReal) : fmt(p.valor_parcela)}
+                            {(isPago || isParcial || (isVencida && valorPagoReal > 0)) ? fmt(valorPagoReal) : fmt(p.valor_parcela)}
                           </Text>
                           <View style={{ backgroundColor: corP.bg, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
                             <Text style={{ fontSize: 10, fontWeight: '600', color: corP.text }}>
@@ -1054,8 +1054,8 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                         </View>
                       </View>
                       
-                      {/* ⭐ Badge de pontualidade (parcela PAGA ou PARCIAL) */}
-                      {(isPago || isParcial) && diasDiferenca !== null && (
+                      {/* ⭐ Badge de pontualidade (parcela PAGA, PARCIAL ou VENCIDA com pagamento) */}
+                      {(isPago || isParcial || (isVencida && valorPagoReal > 0)) && diasDiferenca !== null && (
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
                           {diasDiferenca === 0 ? (
                             <View style={{ backgroundColor: '#D1FAE5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
@@ -1091,12 +1091,18 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                         </View>
                       )}
 
-                      {/* Linha 2 (pago/parcial): detalhes do pagamento */}
-                      {(isPago || isParcial) && (
-                        <View style={{ marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#D1FAE5', flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                      {/* Linha 2 (pago/parcial/vencida com pagamento): detalhes do pagamento */}
+                      {(isPago || isParcial || (isVencida && valorPagoReal > 0)) && (
+                        <View style={{ marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: isPago ? '#D1FAE5' : '#FED7AA', flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                           {parseFloat(String(valorPagoReal)) !== p.valor_parcela && (
                             <Text style={{ fontSize: 11, color: '#6B7280' }}>
                               {lang === 'es' ? 'Cuota:' : 'Parcela:'} {fmt(p.valor_parcela)}
+                            </Text>
+                          )}
+                          {/* Saldo restante — PARCIAL ou VENCIDA com pagamento parcial */}
+                          {(isParcial || (isVencida && valorPagoReal > 0 && valorPagoReal < p.valor_parcela)) && (
+                            <Text style={{ fontSize: 11, color: '#D97706', fontWeight: '600' }}>
+                              {lang === 'es' ? 'Pendiente:' : 'Pendente:'} {fmt(p.valor_saldo ?? (p.valor_parcela - valorPagoReal))}
                             </Text>
                           )}
                           {p.data_pagamento && (

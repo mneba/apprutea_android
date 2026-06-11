@@ -444,7 +444,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         const dinheiroRecebido = valorPagoAtual - creditoUsado;
         return `<div class="mov">
           <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${nomeCliente}</span><span class="mov-val verde">+${fmt(dinheiroRecebido)}</span></div>
-          ${excedente > 0 ? `<div class="mov-sub" style="color:#6B7280">${lang === 'es' ? 'Cuota' : 'Parcela'}: ${fmt(parseFloat(p.valor_parcela || 0))} · ${lang === 'es' ? 'Excedente' : 'Excedente'}: ${fmt(excedente)}</div>` : ''}
+          <div class="mov-sub" style="color:#6B7280">${lang === 'es' ? 'Cuota' : 'Parcela'} ${p.numero_parcela}: ${fmt(parseFloat(p.valor_parcela || 0))}${excedente > 0 ? ` · ${lang === 'es' ? 'Crédito generado' : 'Crédito gerado'}: ${fmt(excedente)}` : ''}${creditoUsado > 0 ? ` · ${lang === 'es' ? 'Crédito usado' : 'Crédito usado'}: ${fmt(creditoUsado)}` : ''}</div>
           <div class="mov-meta"><span>${fmtHora(p.created_at)}</span>${p.forma_pagamento ? `<span>${p.forma_pagamento}</span>` : ''}</div>
         </div>`;
       }).join('')}
@@ -816,12 +816,12 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                                 <Text style={cupom.itemCat} numberOfLines={1}>{nomeCliente}</Text>
                                 <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(dinheiroRecebido)}</Text>
                               </View>
-                              {temExcedente && (
-                                <Text style={[cupom.itemSub, { color: '#6B7280', fontSize: 9 }]}>
-                                  {'   '}
-                                  {lang === 'es' ? 'Cuota' : 'Parcela'}: {fmt(parseFloat(p.valor_parcela || 0))} · {lang === 'es' ? 'Excedente' : 'Excedente'}: {fmt(excedente)}
-                                </Text>
-                              )}
+                              <Text style={[cupom.itemSub, { color: '#6B7280', fontSize: 9 }]}>
+                                {'   '}
+                                {lang === 'es' ? 'Cuota' : 'Parcela'} {p.numero_parcela}: {fmt(parseFloat(p.valor_parcela || 0))}
+                                {temExcedente && ` · ${lang === 'es' ? 'Crédito generado' : 'Crédito gerado'}: ${fmt(excedente)}`}
+                                {creditoUsado > 0 && ` · ${lang === 'es' ? 'Crédito usado' : 'Crédito usado'}: ${fmt(creditoUsado)}`}
+                              </Text>
                               <View style={cupom.itemMeta}>
                                 <Text style={cupom.itemHora}>   {fmtHora(p.created_at)}</Text>
                                 {p.forma_pagamento && <Text style={cupom.itemHora}>{p.forma_pagamento}</Text>}

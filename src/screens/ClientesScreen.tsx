@@ -26,7 +26,7 @@ import FiltrosDrawer from '../components/FiltrosDrawer';
 import LegendaCoresModal from '../components/LegendaCoresModal';
 import { ModalCriarNota, ModalNotasLista, buscarNotasCountPorClientes } from '../components/NotasComponent';
 import PagamentoModal from '../components/PagamentoModal';
-import ParcelasModal from '../components/ParcelasModal';
+import ParcelasModal, { PagamentoDetalhe } from '../components/ParcelasModal';
 import ProximosDiasModal from '../components/ProximosDiasModal';
 import ReordenarModal from '../components/ReordenarModal';
 import { useAuth } from '../contexts/AuthContext';
@@ -500,6 +500,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [modalEstornoVisible, setModalEstornoVisible] = useState(false);
   const [parcelasModal, setParcelasModal] = useState<ParcelaModal[]>([]);
   const [loadingParcelas, setLoadingParcelas] = useState(false);
+  const [pagamentosDetalhados, setPagamentosDetalhados] = useState<Map<string, PagamentoDetalhe[]>>(new Map());
   const [creditoDisponivel, setCreditoDisponivel] = useState(0);
   const [clienteModal, setClienteModal] = useState<{ id: string; nome: string; emprestimo_id: string; emprestimo_status?: string; saldo_emprestimo?: number } | null>(null);
   
@@ -769,6 +770,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     setModalParcelasVisible(true);
     setLoadingParcelas(true);
     setParcelasModal([]);
+    setPagamentosDetalhados(new Map());
     setCreditoDisponivel(0);
     try {
       const { data: parcelas, error: errP } = await supabase.from('emprestimo_parcelas').select('id, emprestimo_id, numero_parcela, valor_parcela, valor_pago, valor_saldo, valor_multa, data_vencimento, data_pagamento, status, saldo_excedente, liquidacao_id, observacoes, ordem_visita_dia').eq('emprestimo_id', emprestimoId).order('numero_parcela', { ascending: true });
@@ -776,17 +778,16 @@ export default function ClientesScreen({ navigation, route }: any) {
       if (!parcelas || parcelas.length === 0) { setParcelasModal([]); setLoadingParcelas(false); return; }
       const ids = parcelas.map((p: any) => p.id);
       
-      // Busca pagamentos com liquidacao_id (tabela pagamentos_parcelas tem tudo)
+      // Busca TODOS os pagamentos (incluindo estornados) para pMap + popup de detalhes
       const { data: pagamentos } = await supabase
         .from('pagamentos_parcelas')
-        .select('parcela_id, valor_pago_atual, valor_credito_usado, valor_credito_gerado, liquidacao_id, estornado, created_at')
+        .select('parcela_id, valor_pago_atual, valor_credito_usado, valor_credito_gerado, liquidacao_id, forma_pagamento, estornado, created_at')
         .in('parcela_id', ids)
-        .eq('estornado', false)
         .order('created_at', { ascending: true });
       
-      // Manter apenas o pagamento MAIS RECENTE por parcela (último created_at ganha)
+      // pMap: manter apenas o pagamento MAIS RECENTE não-estornado por parcela (lógica original)
       const pMap = new Map<string, { valorPago: number; creditoUsado: number; creditoGerado: number; liquidacaoId: string | null }>();
-      (pagamentos || []).forEach((p: any) => { 
+      (pagamentos || []).filter((p: any) => !p.estornado).forEach((p: any) => { 
         pMap.set(p.parcela_id, { 
           valorPago: p.valor_pago_atual || 0, 
           creditoUsado: p.valor_credito_usado || 0,
@@ -813,6 +814,25 @@ export default function ClientesScreen({ navigation, route }: any) {
           liqDataMap.set(l.id, dl);
         });
       }
+      
+      // detMap: todos os pagamentos agrupados por parcela_id (para popup de detalhes)
+      // Construído APÓS liqDataMap para poder resolver a data_liquidacao de cada pagamento
+      const detMap = new Map<string, PagamentoDetalhe[]>();
+      (pagamentos || []).forEach((p: any) => {
+        const dataLiqPag = p.liquidacao_id ? (liqDataMap.get(p.liquidacao_id) || null) : null;
+        const entry: PagamentoDetalhe = {
+          valor_pago_total: p.valor_pago_atual || 0,
+          valor_credito_usado: p.valor_credito_usado || 0,
+          valor_credito_gerado: p.valor_credito_gerado || 0,
+          forma_pagamento: p.forma_pagamento || undefined,
+          created_at: p.created_at,
+          estornado: p.estornado || false,
+          data_liquidacao: dataLiqPag,
+        };
+        const arr = detMap.get(p.parcela_id) || [];
+        arr.push(entry);
+        detMap.set(p.parcela_id, arr);
+      });
       
       // Crédito disponível = soma dos saldo_excedente reais das parcelas (não do histórico de geração)
       const creditoTotal = (parcelas || []).reduce((sum: number, p: any) => sum + (p.saldo_excedente || 0), 0);
@@ -857,6 +877,7 @@ export default function ClientesScreen({ navigation, route }: any) {
           observacoes: p.observacoes || null
         }; 
       }));
+      setPagamentosDetalhados(detMap);
     } catch (e) { console.error('Erro parcelas:', e); Alert.alert(t.erroGenerico, t.erroCarregarParcelas); }
     finally { setLoadingParcelas(false); }
   }, []);
@@ -1728,6 +1749,7 @@ return (
         isClientePago={clienteModal ? clientesPagosNaLiq.has(clienteModal.id) : false}
         onPagar={abrirPagamento}
         onEstornar={abrirEstorno}
+        pagamentosDetalhados={pagamentosDetalhados}
         t={t}
       />
 
