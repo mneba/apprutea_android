@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Alert, Platform } from 'react-native';
-import { supabase } from '../services/supabase';
 import type { Lang, Textos } from '../constants/novaVendaConstants';
+import { supabase } from '../services/supabase';
 
 // ============================================================
 // HOOK: Submit (4 fluxos) + pedido alteração + fechar
@@ -408,6 +408,17 @@ export function useNovaVendaSubmit(ctx: SubmitContext) {
       if (!res?.sucesso) {
         const msg = res?.mensagem || 'Erro ao registrar venda.';
         console.error('❌ Erro da RPC:', msg);
+        // Detectar solicitação de autorização criada pelo banco (renovação excede anterior)
+        if (msg.startsWith('[AUTORIZAÇÃO]')) {
+          const msgLimpa = msg.replace('[AUTORIZAÇÃO] ', '');
+          if (Platform.OS === 'web') window.alert(msgLimpa);
+          else Alert.alert(
+            ctx.lang === 'es' ? 'Autorización requerida' : 'Autorização necessária',
+            msgLimpa
+          );
+          ctx.navigation.goBack();
+          return;
+        }
         if (Platform.OS === 'web') window.alert(msg); else Alert.alert('Erro', msg);
         return;
       }

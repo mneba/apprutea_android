@@ -1079,7 +1079,19 @@ export default function ClientesScreen({ navigation, route }: any) {
           // Recarregar dados completos em background (sem bloquear UI)
           setTimeout(() => loadLiq(), 500);
         } else { showAlert(t.erroGenerico, res?.mensagem || t.erro); }
-      } catch (e: any) { console.error('Erro pagamento:', e); showAlert(t.erroGenerico, e.message || t.erro); }
+      } catch (e: any) {
+        console.error('Erro pagamento:', e);
+        // Nunca expor erros técnicos do banco para o usuário
+        const msg = (e.message || '');
+        const erroAmigavel = msg.includes('numeric field overflow')
+          ? 'Valor informado é inválido para o sistema. Verifique o valor e tente novamente.'
+          : msg.includes('duplicate key') || msg.includes('unique constraint')
+          ? 'Este pagamento já foi registrado. Atualize a tela e verifique.'
+          : msg.includes('violates foreign key') || msg.includes('not found')
+          ? 'Parcela não encontrada. Atualize a tela e tente novamente.'
+          : t.erro;
+        showAlert(t.erroGenerico, erroAmigavel);
+      }
       finally { setProcessando(false); }
     };
     
