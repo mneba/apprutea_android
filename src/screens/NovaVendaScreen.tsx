@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { textos } from '../constants/novaVendaConstants';
+import { amanha, textos } from '../constants/novaVendaConstants';
 import { useAuth } from '../contexts/AuthContext';
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { styles } from '../styles/novaVendaStyles';
@@ -44,6 +44,18 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   const liqCtx = useLiquidacaoContext();
   const lang = liqCtx.language;
   const t = textos[lang];
+
+  // Data base da liquidação: dataVisualizacao (retroativa) ou data_liquidacao da aberta
+  // minDate do calendário = amanha(dataLiquidacao) = dia seguinte à liquidação
+  // Exemplo: liquidação 04/06, hoje 08/06 → minDate = 05/06 (permite cadastrar a partir do dia 5)
+  const dataLiquidacaoBase: string | undefined =
+    liqCtx.dataVisualizacao ||
+    (liqCtx.liquidacaoAtual as any)?.data_liquidacao ||
+    undefined;
+  // Dia seguinte à liquidação = primeira data permitida para vencimento
+  const dataOperacional: string | undefined = dataLiquidacaoBase
+    ? amanha(dataLiquidacaoBase)
+    : undefined;
 
   const clienteExistente = route?.params?.clienteExistente || null;
   const renegociacao = route?.params?.renegociacao || null;
@@ -297,6 +309,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                   getDiaSemanaLabel={form.getDiaSemanaLabel}
                   onOpenDiaSemanaModal={() => form.setShowDiaSemanaModal(true)}
                   onOpenDatePicker={() => form.setShowDatePicker(true)}
+                  dataOperacional={dataOperacional}
                   t={t}
                 />
               </View>
@@ -449,6 +462,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         feriadosSet={config.feriadosSet}
         lang={lang}
         t={t}
+        minDate={dataOperacional}
         onSelect={form.setDataPrimeiroVencimento}
         onClose={() => form.setShowDatePicker(false)}
       />

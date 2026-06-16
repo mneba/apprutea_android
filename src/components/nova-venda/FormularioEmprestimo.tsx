@@ -33,6 +33,8 @@ interface Props {
   // Config
   taxasPermitidas: number[];
   taxasLivre: boolean;
+  // Data operacional — base para amanha() e minDate (respeita liquidação retroativa)
+  dataOperacional?: string;
   // Flags
   isRenegociacao: boolean;
   isVendaAprovadaTravada: boolean;
@@ -64,6 +66,7 @@ export default function FormularioEmprestimo(props: Props) {
     isRenegociacao, isVendaAprovadaTravada, camposComErro, lang,
     handleValorEmprestimoChange, limparErroCampo, toggleDiaFlexivel,
     getDiaSemanaLabel, onOpenDiaSemanaModal, onOpenDatePicker,
+    dataOperacional,
     t,
   } = props;
 
@@ -195,9 +198,9 @@ export default function FormularioEmprestimo(props: Props) {
                 setFrequencia(freq.value);
                 limparErroCampo('frequencia');
                 if (freq.value === 'DIARIO') {
-                  setDataPrimeiroVencimento(amanha());
+                  setDataPrimeiroVencimento(amanha(dataOperacional));
                 } else if (freq.value === 'MENSAL' && diaMesPagamento) {
-                  setDataPrimeiroVencimento(calcularDataMensal(parseInt(diaMesPagamento)));
+                  setDataPrimeiroVencimento(calcularDataMensal(parseInt(diaMesPagamento), dataOperacional));
                 }
               }}
               activeOpacity={isVendaAprovadaTravada ? 1 : 0.7}

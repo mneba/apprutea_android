@@ -74,17 +74,23 @@ export const FREQ_LABELS: Record<string, string> = {
 // HELPERS
 // ============================================================
 
-/** Retorna a data de amanhã no formato YYYY-MM-DD */
-export const amanha = (): string => {
-  const d = new Date();
+/** Retorna o dia seguinte à data base no formato YYYY-MM-DD.
+ *  Se dataBase não for fornecida, usa a data real de hoje.
+ *  Usar sempre a data operacional da liquidação (não new Date()) para evitar
+ *  bloqueio de datas retroativas. */
+export const amanha = (dataBase?: string): string => {
+  const d = dataBase ? new Date(dataBase + 'T12:00:00') : new Date();
   d.setDate(d.getDate() + 1);
-  return d.toISOString().split('T')[0];
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 };
 
-/** Para MENSAL: se o dia já passou no mês atual, avança para o mês seguinte */
-export const calcularDataMensal = (dia: number): string => {
-  if (!dia || dia < 1 || dia > 31) return amanha();
-  const hoje = new Date();
+/** Para MENSAL: se o dia já passou no mês atual (ou na data base), avança para o mês seguinte */
+export const calcularDataMensal = (dia: number, dataBase?: string): string => {
+  if (!dia || dia < 1 || dia > 31) return amanha(dataBase);
+  const hoje = dataBase ? new Date(dataBase + 'T12:00:00') : new Date();
   const ano = hoje.getFullYear();
   const mes = hoje.getMonth();
   const diaHoje = hoje.getDate();

@@ -9,9 +9,9 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { DDI_LIST, type DDIOption, type Lang, type Segmento, type SegmentoGrupo, type Textos } from '../../constants/novaVendaConstants';
 import { styles } from '../../styles/novaVendaStyles';
 import CalendarioSelector from './CalendarioSelector';
-import { DDI_LIST, type DDIOption, type Lang, type SegmentoGrupo, type Segmento, type Textos } from '../../constants/novaVendaConstants';
 
 // ============================================================
 // MODAL: DDI
@@ -236,11 +236,12 @@ interface ModalCalendarioProps {
   feriadosSet: Set<string>;
   lang: Lang;
   t: Textos;
+  minDate?: string; // YYYY-MM-DD — data mínima selecionável (data operacional da liquidação)
   onSelect: (dateStr: string) => void;
   onClose: () => void;
 }
 
-export function ModalCalendario({ visible, dataSelecionada, trabalhaDomingo, feriadosSet, lang, t, onSelect, onClose }: ModalCalendarioProps) {
+export function ModalCalendario({ visible, dataSelecionada, trabalhaDomingo, feriadosSet, lang, t, minDate, onSelect, onClose }: ModalCalendarioProps) {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.pickerOverlay} onPress={onClose}>
@@ -256,6 +257,7 @@ export function ModalCalendario({ visible, dataSelecionada, trabalhaDomingo, fer
             trabalhaDomingo={trabalhaDomingo}
             feriadosSet={feriadosSet}
             lang={lang}
+            minDate={minDate}
             onSelect={(dateStr) => { onSelect(dateStr); onClose(); }}
           />
         </View>
