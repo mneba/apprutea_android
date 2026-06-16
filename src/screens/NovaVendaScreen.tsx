@@ -61,11 +61,13 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   const renegociacao = route?.params?.renegociacao || null;
   const isRenegociacao = !!renegociacao;
   const vendaPendenteParam = route?.params?.vendaPendente || null;
+  // ⭐ Solicitação de renovação pendente — pré-preenche o formulário com os dados da solicitação
+  const solicitacaoRenovacaoParam = route?.params?.solicitacaoRenovacao || null;
 
   // -----------------------------------------------------------
   // HOOKS
   // -----------------------------------------------------------
-  const form = useNovaVendaForm({ clienteExistente, renegociacao, isRenegociacao, t });
+  const form = useNovaVendaForm({ clienteExistente, renegociacao, isRenegociacao, solicitacaoRenovacao: solicitacaoRenovacaoParam, t });
 
   const config = useNovaVendaConfig({
     vendedorId: vendedor?.id,

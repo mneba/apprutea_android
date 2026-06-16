@@ -1079,19 +1079,7 @@ export default function ClientesScreen({ navigation, route }: any) {
           // Recarregar dados completos em background (sem bloquear UI)
           setTimeout(() => loadLiq(), 500);
         } else { showAlert(t.erroGenerico, res?.mensagem || t.erro); }
-      } catch (e: any) {
-        console.error('Erro pagamento:', e);
-        // Nunca expor erros técnicos do banco para o usuário
-        const msg = (e.message || '');
-        const erroAmigavel = msg.includes('numeric field overflow')
-          ? 'Valor informado é inválido para o sistema. Verifique o valor e tente novamente.'
-          : msg.includes('duplicate key') || msg.includes('unique constraint')
-          ? 'Este pagamento já foi registrado. Atualize a tela e verifique.'
-          : msg.includes('violates foreign key') || msg.includes('not found')
-          ? 'Parcela não encontrada. Atualize a tela e tente novamente.'
-          : t.erro;
-        showAlert(t.erroGenerico, erroAmigavel);
-      }
+      } catch (e: any) { console.error('Erro pagamento:', e); showAlert(t.erroGenerico, e.message || t.erro); }
       finally { setProcessando(false); }
     };
     
@@ -1317,12 +1305,8 @@ export default function ClientesScreen({ navigation, route }: any) {
         const clienteId = clienteModal?.id || '';
         setPagasSet(prev => { const s = new Set(prev); s.delete(parcelaId); return s; });
         setPagMap(prev => { const m = new Map(prev); m.delete(parcelaId); return m; });
-        // Remover cliente de clientesPagosNaLiq
-        setClientesPagosNaLiq(prev => {
-          const s = new Set(prev);
-          s.delete(clienteId);
-          return s;
-        });
+        // Verificar se cliente tem outras parcelas pagas antes de removê-lo de clientesPagosNaLiq
+        // (loadLiq em background vai corrigir)
 
         // Recarregar dados completos em background
         setTimeout(() => loadLiq(), 500);
@@ -1387,51 +1371,23 @@ export default function ClientesScreen({ navigation, route }: any) {
   // Regra de negócio: vendedor visitou, cobrou (mesmo parcial/atrasada) → sai da lista
   const isCliPago = useCallback((c: ClienteAgrupado) => clientesPagosNaLiq.has(c.cliente_id), [clientesPagosNaLiq]);
 
-  // Quando clientesPagosNaLiq esvazia (todos estornados), sair da aba 'pagas' automaticamente
-  useEffect(() => {
-    if (filtro === 'pagas' && clientesPagosNaLiq.size === 0) {
-      setFiltro('todos');
-    }
-  }, [clientesPagosNaLiq, filtro]);
-
   const filtered = useMemo(() => {
-    let r: ClienteAgrupado[];
-
-    if (filtro === 'pagas') {
-      // Fonte de verdade: clientesPagosNaLiq (atualizado otimisticamente)
-      // Garante que cliente recém-pago aparece IMEDIATAMENTE sem esperar loadLiq
-      r = [...grouped].filter(c => clientesPagosNaLiq.has(c.cliente_id));
-    } else {
-      r = [...grouped];
-      if (filtro === 'atrasados') r = r.filter(c => !clientesPagosNaLiq.has(c.cliente_id) && c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas));
-      else r = r.filter(c => !clientesPagosNaLiq.has(c.cliente_id)); // 'todos' mostra apenas pendentes
-    }
-
+    let r = [...grouped];
     if (busca.trim()) { const b = busca.toLowerCase().trim(); r = r.filter(c => c.nome.toLowerCase().includes(b) || (c.telefone_celular && c.telefone_celular.includes(b)) || (c.endereco && c.endereco.toLowerCase().includes(b))); }
     if (filtroFrequencia !== 'todos') r = r.filter(c => c.emprestimos.some(e => e.frequencia_pagamento === filtroFrequencia));
-
-    if (filtro === 'pagas') {
-      // Aba pagas: mais recente em cima — usa data_pagamento do pagMap
-      r.sort((a, b) => {
-        const tA = a.emprestimos.map(e => pagMap.get(e.parcela_id)?.data_pagamento).filter(Boolean).sort().reverse()[0] ?? '';
-        const tB = b.emprestimos.map(e => pagMap.get(e.parcela_id)?.data_pagamento).filter(Boolean).sort().reverse()[0] ?? '';
-        if (tA && tB) return tB.localeCompare(tA); // mais recente primeiro
-        if (tA) return -1; // A tem data, B não → A vem antes
-        if (tB) return 1;
-        return a.nome.localeCompare(b.nome); // sem data: alfabético
-      });
-    } else {
-      r.sort(ord === 'rota'
-        ? (a, b) => {
-            const oa = ordemRotaMap.get(a.cliente_id) ?? 9999;
-            const ob = ordemRotaMap.get(b.cliente_id) ?? 9999;
-            if (oa !== ob) return oa - ob;
-            return a.nome.localeCompare(b.nome);
-          }
-        : (a, b) => a.nome.localeCompare(b.nome));
-    }
+    if (filtro === 'atrasados') r = r.filter(c => !isCliPago(c) && c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas));
+    else if (filtro === 'pagas') r = r.filter(c => isCliPago(c));
+    else r = r.filter(c => !isCliPago(c)); // 'todos' mostra apenas pendentes (não pagos)
+    r.sort(ord === 'rota'
+      ? (a, b) => {
+          const oa = ordemRotaMap.get(a.cliente_id) ?? 9999;
+          const ob = ordemRotaMap.get(b.cliente_id) ?? 9999;
+          if (oa !== ob) return oa - ob;
+          return a.nome.localeCompare(b.nome);
+        }
+      : (a, b) => a.nome.localeCompare(b.nome));
     return r;
-  }, [grouped, busca, filtro, filtroFrequencia, ord, ordemRotaMap, clientesPagosNaLiq, pagMap]);
+  }, [grouped, busca, filtro, filtroFrequencia, ord, isCliPago, ordemRotaMap]);
 
   const cntTotal = grouped.filter(c => !isCliPago(c)).length;
   const cntAtraso = grouped.filter(c => c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas)).length;
@@ -1543,6 +1499,36 @@ export default function ClientesScreen({ navigation, route }: any) {
               documento: cli.codigo_cliente?.toString() || '' 
             } 
           });
+        }}
+        onAlterarSolicitacaoRenovacao={async (cli, solicId, empQuitadoId, valorSolic) => {
+          // Buscar dados do empréstimo quitado para pré-preencher o formulário
+          const { data: emp } = await supabase
+            .from('emprestimos')
+            .select('numero_parcelas, taxa_juros, frequencia_pagamento, dia_semana_cobranca, dia_mes_cobranca')
+            .eq('id', empQuitadoId)
+            .single();
+          const nav = navigation.getParent() || navigation;
+          nav.navigate('NovoCliente', {
+            clienteExistente: { id: cli.id, nome: cli.nome, telefone_celular: (cli as any).telefone_celular, documento: (cli as any).codigo_cliente?.toString() || '' },
+            solicitacaoRenovacao: {
+              solic_id: solicId,
+              valor_principal: valorSolic,
+              numero_parcelas: emp?.numero_parcelas || 10,
+              taxa_juros: emp?.taxa_juros || 20,
+              frequencia: emp?.frequencia_pagamento || 'DIARIO',
+              dia_semana_cobranca: emp?.dia_semana_cobranca || null,
+              dia_mes_cobranca: emp?.dia_mes_cobranca || null,
+            },
+          });
+        }}
+        onCancelarSolicitacaoRenovacao={async (solicId) => {
+          await supabase
+            .from('solicitacoes_autorizacao')
+            .update({ status: 'CANCELADO', motivo_resolucao: 'Cancelado pelo vendedor', data_resolucao: new Date().toISOString() })
+            .eq('id', solicId);
+          // Recarregar detalhes do cliente para atualizar UI
+          setModalDetalhesVisible(false);
+          setTimeout(() => setModalDetalhesVisible(true), 100);
         }}
       />
     );
@@ -1924,6 +1910,34 @@ return (
               { text: t.sim, onPress: confirmar }
             ]); 
           }
+        }}
+        onAlterarSolicitacaoRenovacao={async (cli, solicId, empQuitadoId, valorSolic) => {
+          const { data: emp } = await supabase
+            .from('emprestimos')
+            .select('numero_parcelas, taxa_juros, frequencia_pagamento, dia_semana_cobranca, dia_mes_cobranca')
+            .eq('id', empQuitadoId)
+            .single();
+          const nav = navigation.getParent() || navigation;
+          nav.navigate('NovoCliente', {
+            clienteExistente: { id: cli.id, nome: cli.nome, telefone_celular: (cli as any).telefone_celular, documento: (cli as any).codigo_cliente?.toString() || '' },
+            solicitacaoRenovacao: {
+              solic_id: solicId,
+              valor_principal: valorSolic,
+              numero_parcelas: emp?.numero_parcelas || 10,
+              taxa_juros: emp?.taxa_juros || 20,
+              frequencia: emp?.frequencia_pagamento || 'DIARIO',
+              dia_semana_cobranca: emp?.dia_semana_cobranca || null,
+              dia_mes_cobranca: emp?.dia_mes_cobranca || null,
+            },
+          });
+        }}
+        onCancelarSolicitacaoRenovacao={async (solicId) => {
+          await supabase
+            .from('solicitacoes_autorizacao')
+            .update({ status: 'CANCELADO', motivo_resolucao: 'Cancelado pelo vendedor', data_resolucao: new Date().toISOString() })
+            .eq('id', solicId);
+          setModalDetalhesVisible(false);
+          setTimeout(() => setModalDetalhesVisible(true), 100);
         }}
         onRenegociar={(cli, emp) => {
           // Mesmo fluxo do onRenegociar do ClienteCardTodos

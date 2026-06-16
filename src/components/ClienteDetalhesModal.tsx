@@ -166,11 +166,13 @@ interface Props {
   cliente: ClienteInfo | null;
   lang?: Language;
   onNovoEmprestimo?: (cliente: ClienteInfo) => void;
+  onAlterarSolicitacaoRenovacao?: (cliente: ClienteInfo, solicitacaoId: string, emprestimoQuitadoId: string, valorSolicitado: number) => void;
+  onCancelarSolicitacaoRenovacao?: (solicitacaoId: string) => void;
   onRenegociar?: (cliente: ClienteInfo, emprestimo: Emprestimo) => void;
 }
 
 // ==================== COMPONENTE ====================
-export default function ClienteDetalhesModal({ visible, onClose, cliente, lang = 'pt-BR', onNovoEmprestimo, onRenegociar }: Props) {
+export default function ClienteDetalhesModal({ visible, onClose, cliente, lang = 'pt-BR', onNovoEmprestimo, onRenegociar, onAlterarSolicitacaoRenovacao, onCancelarSolicitacaoRenovacao }: Props) {
   const t = T[lang];
   const [aba, setAba] = useState<Aba>('pessoais');
   const [loading, setLoading] = useState(false);
@@ -187,11 +189,22 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
     renegociacao_id: string | null;              // id da solicitação PENDENTE
     aprovacao_emprestimo_id: string | null;      // empréstimo da solicitação APROVADO (não consumida)
     adicional: boolean;
+    // ⭐ Renovação excede anterior
+    renovacao_excede: boolean;
+    renovacao_solic_id: string | null;
+    renovacao_valor_solicitado: number | null;
+    renovacao_valor_limite: number | null;
+    renovacao_emprestimo_id: string | null;     // último empréstimo quitado (origem da solicitação)
   }>({ 
     renegociacao_emprestimo_id: null, 
     renegociacao_id: null, 
     aprovacao_emprestimo_id: null,
-    adicional: false 
+    adicional: false,
+    renovacao_excede: false,
+    renovacao_solic_id: null,
+    renovacao_valor_solicitado: null,
+    renovacao_valor_limite: null,
+    renovacao_emprestimo_id: null,
   });
   
   // ⭐ Modal de confirmação de solicitação
@@ -403,16 +416,21 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       // APROVADO: para mostrar "Renegociar" só no empréstimo autorizado (não em todos)
       const { data: solicData } = await supabase
         .from('solicitacoes_autorizacao')
-        .select('id, tipo_solicitacao, emprestimo_id, status, data_resolucao')
+        .select('id, tipo_solicitacao, emprestimo_id, status, data_resolucao, valor_solicitado, valor_limite')
         .eq('cliente_id', cliente.id)
         .in('status', ['PENDENTE', 'APROVADO'])
-        .in('tipo_solicitacao', ['RENEGOCIACAO', 'EMPRESTIMO_ADICIONAL'])
+        .in('tipo_solicitacao', ['RENEGOCIACAO', 'EMPRESTIMO_ADICIONAL', 'RENOVACAO_EXCEDE_ANTERIOR'])
         .order('created_at', { ascending: false });
       
       let renegEmpId: string | null = null;
       let renegSolicId: string | null = null;
       let aprovEmpId: string | null = null;
       let temAdicional = false;
+      let renovacaoExcede = false;
+      let renovacaoSolicId: string | null = null;
+      let renovacaoValorSolicitado: number | null = null;
+      let renovacaoValorLimite: number | null = null;
+      let renovacaoEmprestimoId: string | null = null;
       
       (solicData || []).forEach(s => {
         if (s.tipo_solicitacao === 'RENEGOCIACAO') {
@@ -425,6 +443,12 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           }
         } else if (s.tipo_solicitacao === 'EMPRESTIMO_ADICIONAL' && s.status === 'PENDENTE') {
           temAdicional = true;
+        } else if (s.tipo_solicitacao === 'RENOVACAO_EXCEDE_ANTERIOR' && s.status === 'PENDENTE') {
+          renovacaoExcede = true;
+          renovacaoSolicId = s.id;
+          renovacaoValorSolicitado = s.valor_solicitado || null;
+          renovacaoValorLimite = s.valor_limite || null;
+          renovacaoEmprestimoId = s.emprestimo_id || null;
         }
       });
       
@@ -433,6 +457,11 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
         renegociacao_id: renegSolicId,
         aprovacao_emprestimo_id: aprovEmpId,
         adicional: temAdicional,
+        renovacao_excede: renovacaoExcede,
+        renovacao_solic_id: renovacaoSolicId,
+        renovacao_valor_solicitado: renovacaoValorSolicitado,
+        renovacao_valor_limite: renovacaoValorLimite,
+        renovacao_emprestimo_id: renovacaoEmprestimoId,
       });
     } catch (e) {
       console.error('Erro ao carregar detalhes:', e);
@@ -1168,17 +1197,72 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       <ScrollView style={S.abaContent} showsVerticalScrollIndicator={false}>
         {/* ⭐ Botão Novo Empréstimo (cliente-level) */}
         {podeMostrarNovoEmprestimo && cliente && onNovoEmprestimo && (
-          <TouchableOpacity 
-            style={S.btnNovoEmprestimo} 
-            onPress={() => {
-              onClose();
-              onNovoEmprestimo(cliente);
-            }}
-            activeOpacity={0.7}
-          >
-            <Text style={S.btnNovoEmprestimoIcon}>➕</Text>
-            <Text style={S.btnNovoEmprestimoText}>{t.novoEmprestimo}</Text>
-          </TouchableOpacity>
+          solicitacoesPendentes.renovacao_excede && solicitacoesPendentes.renovacao_solic_id ? (
+            // Há solicitação de renovação pendente — mostrar opções
+            <TouchableOpacity
+              style={[S.btnNovoEmprestimo, { backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#F59E0B' }]}
+              onPress={() => {
+                const solicId = solicitacoesPendentes.renovacao_solic_id!;
+                const empId = solicitacoesPendentes.renovacao_emprestimo_id!;
+                const valorSolic = solicitacoesPendentes.renovacao_valor_solicitado || 0;
+                const valorLimite = solicitacoesPendentes.renovacao_valor_limite || 0;
+                const msgOpcoes = lang === 'es'
+                  ? `Hay una solicitud pendiente de renovación por $ ${valorSolic} (límite: $ ${valorLimite}).`
+                  : `Há uma solicitação pendente de renovação por $ ${valorSolic} (limite: $ ${valorLimite}).`;
+                if (Platform.OS === 'web') {
+                  const opcao = window.confirm(`${msgOpcoes}
+
+OK = Alterar e cancelar solicitação
+Cancelar = Cancelar solicitação`);
+                  if (opcao) {
+                    onClose();
+                    onAlterarSolicitacaoRenovacao?.(cliente, solicId, empId, valorSolic);
+                  } else {
+                    onCancelarSolicitacaoRenovacao?.(solicId);
+                  }
+                } else {
+                  Alert.alert(
+                    lang === 'es' ? 'Solicitud pendiente' : 'Solicitação pendente',
+                    msgOpcoes,
+                    [
+                      {
+                        text: lang === 'es' ? 'Cancelar solicitación' : 'Cancelar solicitação',
+                        style: 'destructive',
+                        onPress: () => onCancelarSolicitacaoRenovacao?.(solicId),
+                      },
+                      {
+                        text: lang === 'es' ? 'Alterar y cancelar' : 'Alterar e cancelar',
+                        onPress: () => {
+                          onClose();
+                          onAlterarSolicitacaoRenovacao?.(cliente, solicId, empId, valorSolic);
+                        },
+                      },
+                      { text: lang === 'es' ? 'Volver' : 'Voltar', style: 'cancel' },
+                    ]
+                  );
+                }
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="time-outline" size={16} color="#92400E" />
+              <Text style={[S.btnNovoEmprestimoText, { color: '#92400E' }]}>
+                {lang === 'es' ? 'Solicitud pendiente' : 'Solicitação pendente'}
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            // Sem solicitação pendente — fluxo normal
+            <TouchableOpacity 
+              style={S.btnNovoEmprestimo} 
+              onPress={() => {
+                onClose();
+                onNovoEmprestimo(cliente);
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={S.btnNovoEmprestimoIcon}>➕</Text>
+              <Text style={S.btnNovoEmprestimoText}>{t.novoEmprestimo}</Text>
+            </TouchableOpacity>
+          )
         )}
         
         {/* ⭐ Aviso quando precisa de autorização — agora é botão clicável */}
