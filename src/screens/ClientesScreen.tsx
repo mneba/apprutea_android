@@ -501,6 +501,10 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [parcelasModal, setParcelasModal] = useState<ParcelaModal[]>([]);
   const [loadingParcelas, setLoadingParcelas] = useState(false);
   const [pagamentosDetalhados, setPagamentosDetalhados] = useState<Map<string, PagamentoDetalhe[]>>(new Map());
+  const [solicitacoesRenovacaoMap, setSolicitacoesRenovacaoMap] = useState<Map<string, {
+    solic_id: string; status: string;
+    valor_solicitado: number; valor_limite: number; emprestimo_id: string | null;
+  }>>(new Map());
   const [creditoDisponivel, setCreditoDisponivel] = useState(0);
   const [clienteModal, setClienteModal] = useState<{ id: string; nome: string; emprestimo_id: string; emprestimo_status?: string; saldo_emprestimo?: number } | null>(null);
   
@@ -750,7 +754,22 @@ export default function ClientesScreen({ navigation, route }: any) {
         setTodosList([]);
         loadTodosClientes(true);
       }
-    }, [tab, loadLiq, loadTodosClientes])
+      // Recarregar mapa de solicitações (pode ter mudado ao voltar de NovaVenda)
+      if (rotaId) {
+        supabase
+          .from('solicitacoes_autorizacao')
+          .select('id, cliente_id, status, valor_solicitado, valor_limite, emprestimo_id')
+          .eq('rota_id', rotaId)
+          .eq('tipo_solicitacao', 'RENOVACAO_EXCEDE_ANTERIOR')
+          .in('status', ['PENDENTE', 'APROVADO'])
+          .order('created_at', { ascending: false })
+          .then(({ data }) => {
+            const m = new Map<string, { solic_id: string; status: string; valor_solicitado: number; valor_limite: number; emprestimo_id: string | null }>();
+            (data || []).forEach((s: any) => { if (!m.has(s.cliente_id)) m.set(s.cliente_id, { solic_id: s.id, status: s.status, valor_solicitado: s.valor_solicitado || 0, valor_limite: s.valor_limite || 0, emprestimo_id: s.emprestimo_id }); });
+            setSolicitacoesRenovacaoMap(m);
+          });
+      }
+    }, [tab, loadLiq, loadTodosClientes, rotaId])
   );
 
   const onRefresh = useCallback(() => {
@@ -758,6 +777,25 @@ export default function ClientesScreen({ navigation, route }: any) {
     if (tab === 'liquidacao') loadLiq(true);
     else { setTodosList([]); loadTodosClientes(true); }
   }, [tab, loadLiq, loadTodosClientes]);
+
+  // Carrega solicitações RENOVACAO_EXCEDE_ANTERIOR (PENDENTE ou APROVADO) da rota
+  // Roda independente da aba para estar pronto quando o usuário navegar para "todos"
+  useEffect(() => {
+    if (!rotaId) return;
+    const carregar = async () => {
+      const { data } = await supabase
+        .from('solicitacoes_autorizacao')
+        .select('id, cliente_id, status, valor_solicitado, valor_limite, emprestimo_id')
+        .eq('rota_id', rotaId)
+        .eq('tipo_solicitacao', 'RENOVACAO_EXCEDE_ANTERIOR')
+        .in('status', ['PENDENTE', 'APROVADO'])
+        .order('created_at', { ascending: false });
+      const m = new Map<string, { solic_id: string; status: string; valor_solicitado: number; valor_limite: number; emprestimo_id: string | null }>();
+      (data || []).forEach((s: any) => { if (!m.has(s.cliente_id)) m.set(s.cliente_id, { solic_id: s.id, status: s.status, valor_solicitado: s.valor_solicitado || 0, valor_limite: s.valor_limite || 0, emprestimo_id: s.emprestimo_id }); });
+      setSolicitacoesRenovacaoMap(m);
+    };
+    carregar();
+  }, [rotaId]);
 
   const abrirParcelas = useCallback(async (clienteId: string, clienteNome: string, emprestimoId: string, empStatus?: string) => {
     // Buscar status do empréstimo se não informado
@@ -1489,6 +1527,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         onAbrirParcelas={abrirParcelas}
         onAbrirNotas={(id, nome) => { setNotasClienteId(id); setNotasClienteNome(nome); setModalNotasClienteVisible(true); }}
         onAbrirDetalhes={(cli) => { setDetalhesCliente(cli); setModalDetalhesVisible(true); }}
+        solicitacaoRenovacao={solicitacoesRenovacaoMap.get(c.id) || null}
         onNovoEmprestimo={(cli) => {
           const nav = navigation.getParent() || navigation;
           nav.navigate('NovoCliente', { 
@@ -1526,6 +1565,8 @@ export default function ClientesScreen({ navigation, route }: any) {
             .from('solicitacoes_autorizacao')
             .update({ status: 'CANCELADO', motivo_resolucao: 'Cancelado pelo vendedor', data_resolucao: new Date().toISOString() })
             .eq('id', solicId);
+          // Atualizar mapa local imediatamente
+          setSolicitacoesRenovacaoMap(prev => { const m = new Map(prev); m.forEach((v, k) => { if (v.solic_id === solicId) m.delete(k); }); return m; });
           // Recarregar detalhes do cliente para atualizar UI
           setModalDetalhesVisible(false);
           setTimeout(() => setModalDetalhesVisible(true), 100);

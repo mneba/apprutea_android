@@ -1210,15 +1210,17 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                   ? `Hay una solicitud pendiente de renovación por $ ${valorSolic} (límite: $ ${valorLimite}).`
                   : `Há uma solicitação pendente de renovação por $ ${valorSolic} (limite: $ ${valorLimite}).`;
                 if (Platform.OS === 'web') {
-                  const opcao = window.confirm(`${msgOpcoes}
-
-OK = Alterar e cancelar solicitação
-Cancelar = Cancelar solicitação`);
-                  if (opcao) {
+                  const msgWeb = lang === 'es'
+                    ? 'Solicitud pendiente de renovacion. OK = Alterar y cancelar / Cancelar = Ver mas opciones'
+                    : 'Solicitacao pendente de renovacao. OK = Alterar e cancelar / Cancelar = Ver mais opcoes';
+                  const alterar = window.confirm(msgWeb);
+                  if (alterar) {
                     onClose();
                     onAlterarSolicitacaoRenovacao?.(cliente, solicId, empId, valorSolic);
                   } else {
-                    onCancelarSolicitacaoRenovacao?.(solicId);
+                    const msgCancelar = lang === 'es' ? 'Cancelar la solicitud pendiente?' : 'Cancelar a solicitacao pendente?';
+                    const cancelar = window.confirm(msgCancelar);
+                    if (cancelar) onCancelarSolicitacaoRenovacao?.(solicId);
                   }
                 } else {
                   Alert.alert(
@@ -1237,7 +1239,7 @@ Cancelar = Cancelar solicitação`);
                           onAlterarSolicitacaoRenovacao?.(cliente, solicId, empId, valorSolic);
                         },
                       },
-                      { text: lang === 'es' ? 'Volver' : 'Voltar', style: 'cancel' },
+                      { text: lang === 'es' ? 'Cerrar' : 'Fechar', style: 'cancel' },
                     ]
                   );
                 }

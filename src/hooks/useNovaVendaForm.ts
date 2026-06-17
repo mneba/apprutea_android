@@ -3,22 +3,32 @@ import { useRef, useState } from 'react';
 import { Alert, TextInput } from 'react-native';
 import {
   amanha,
-  calcularDataMensal,
-  parseMoeda,
   DDI_LIST,
+  parseMoeda,
   type DDIOption,
   type Segmento,
-  type Textos,
+  type Textos
 } from '../constants/novaVendaConstants';
 
 // ============================================================
 // HOOK: Estados do formulário + validação + handlers
 // ============================================================
 
+interface SolicitacaoRenovacao {
+  solic_id: string;
+  valor_principal: number;
+  numero_parcelas: number;
+  taxa_juros: number;
+  frequencia: string;
+  dia_semana_cobranca?: number | null;
+  dia_mes_cobranca?: number | null;
+}
+
 interface UseNovaVendaFormParams {
   clienteExistente: any;
   renegociacao: any;
   isRenegociacao: boolean;
+  solicitacaoRenovacao?: SolicitacaoRenovacao | null;
   t: Textos;
 }
 
@@ -26,8 +36,11 @@ export function useNovaVendaForm({
   clienteExistente,
   renegociacao,
   isRenegociacao,
+  solicitacaoRenovacao,
   t,
 }: UseNovaVendaFormParams) {
+  // Flag: campos travados quando há solicitação de renovação (como vendaPendente aprovada)
+  const isRenovacaoTravada = !!solicitacaoRenovacao;
 
   // -----------------------------------------------------------
   // ESTADOS - CLIENTE
@@ -57,13 +70,25 @@ export function useNovaVendaForm({
   // -----------------------------------------------------------
   // ESTADOS - EMPRÉSTIMO
   // -----------------------------------------------------------
-  const [valorEmprestimo, setValorEmprestimo] = useState('');
-  const [numeroParcelas, setNumeroParcelas] = useState('');
-  const [taxaJuros, setTaxaJuros] = useState('');
+  const [valorEmprestimo, setValorEmprestimo] = useState(
+    solicitacaoRenovacao ? String(solicitacaoRenovacao.valor_principal) : ''
+  );
+  const [numeroParcelas, setNumeroParcelas] = useState(
+    solicitacaoRenovacao ? String(solicitacaoRenovacao.numero_parcelas) : ''
+  );
+  const [taxaJuros, setTaxaJuros] = useState(
+    solicitacaoRenovacao ? String(solicitacaoRenovacao.taxa_juros) : ''
+  );
   const [taxaJurosPersonalizada, setTaxaJurosPersonalizada] = useState(false);
-  const [frequencia, setFrequencia] = useState('DIARIO');
-  const [diaSemanaPagamento, setDiaSemanaPagamento] = useState('1');
-  const [diaMesPagamento, setDiaMesPagamento] = useState('15');
+  const [frequencia, setFrequencia] = useState(
+    solicitacaoRenovacao?.frequencia || 'DIARIO'
+  );
+  const [diaSemanaPagamento, setDiaSemanaPagamento] = useState(
+    solicitacaoRenovacao?.dia_semana_cobranca != null ? String(solicitacaoRenovacao.dia_semana_cobranca) : '1'
+  );
+  const [diaMesPagamento, setDiaMesPagamento] = useState(
+    solicitacaoRenovacao?.dia_mes_cobranca != null ? String(solicitacaoRenovacao.dia_mes_cobranca) : '15'
+  );
   const [diasMesFlexivel, setDiasMesFlexivel] = useState<number[]>([]);
   const [iniciarProximoMes, setIniciarProximoMes] = useState(false);
   const [dataPrimeiroVencimento, setDataPrimeiroVencimento] = useState(amanha());
@@ -352,5 +377,9 @@ export function useNovaVendaForm({
 
     // --- Reset ---
     limparFormulario,
+
+    // --- Solicitação de renovação ---
+    isRenovacaoTravada,
+    solicitacaoRenovacaoId: solicitacaoRenovacao?.solic_id || null,
   };
 }

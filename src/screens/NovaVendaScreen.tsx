@@ -124,7 +124,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     tipoEmprestimoDetectado: buscaDoc.tipoEmprestimoDetectado,
     emprestimOrigemId: buscaDoc.emprestimOrigemId,
     vendaPendenteId: buscaDoc.vendaPendenteId,
-    isVendaAprovadaTravada: buscaDoc.isVendaAprovadaTravada,
+    isVendaAprovadaTravada: buscaDoc.isVendaAprovadaTravada || form.isRenovacaoTravada,
     validarMaxVendas: config.validarMaxVendas,
     valorMaxVendas: config.valorMaxVendas,
     validarCamposComFeedback: form.validarCamposComFeedback,
@@ -135,7 +135,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   // DERIVADOS
   // -----------------------------------------------------------
   const isClienteReadOnly = !!(clienteExistente?.id || buscaDoc.clienteEncontradoId);
-  const isDisabled = isRenegociacao || buscaDoc.isVendaAprovadaTravada;
+  const isDisabled = isRenegociacao || buscaDoc.isVendaAprovadaTravada || form.isRenovacaoTravada;
 
   const titulo = isRenegociacao
     ? t.tituloRenegociacao
@@ -303,7 +303,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                   valorPrincipal={form.valorPrincipal} taxaNum={form.taxaNum} parcelasNum={form.parcelasNum}
                   valorTotal={form.valorTotal} valorParcela={form.valorParcela} totalJuros={form.totalJuros}
                   taxasPermitidas={config.taxasPermitidas} taxasLivre={config.taxasLivre}
-                  isRenegociacao={isRenegociacao} isVendaAprovadaTravada={buscaDoc.isVendaAprovadaTravada}
+                  isRenegociacao={isRenegociacao} isVendaAprovadaTravada={buscaDoc.isVendaAprovadaTravada || form.isRenovacaoTravada}
                   camposComErro={form.camposComErro} lang={lang}
                   handleValorEmprestimoChange={form.handleValorEmprestimoChange}
                   limparErroCampo={form.limparErroCampo}

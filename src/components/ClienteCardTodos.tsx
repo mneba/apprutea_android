@@ -1,5 +1,8 @@
+import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import {
+  Alert,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -80,6 +83,9 @@ interface ClienteCardTodosProps {
   onAbrirNotas: (clienteId: string, clienteNome: string) => void;
   onAbrirDetalhes: (cliente: { id: string; nome: string; telefone?: string | null; codigo_cliente?: string | number | null }) => void;
   onNovoEmprestimo: (cliente: ClienteTodos) => void;
+  solicitacaoRenovacao?: { solic_id: string; status: string; valor_solicitado: number; valor_limite: number; emprestimo_id: string | null } | null;
+  onAlterarSolicitacaoRenovacao?: (cliente: ClienteTodos, solicId: string, empQuitadoId: string, valorSolic: number) => void;
+  onCancelarSolicitacaoRenovacao?: (solicId: string) => void;
 }
 
 // ─── Componente ─────────────────────────────────────────────────────────────
@@ -101,6 +107,9 @@ export default function ClienteCardTodos({
   onAbrirNotas,
   onAbrirDetalhes,
   onNovoEmprestimo,
+  solicitacaoRenovacao,
+  onAlterarSolicitacaoRenovacao,
+  onCancelarSolicitacaoRenovacao,
 }: ClienteCardTodosProps) {
   const a = c.tem_atraso;
   const vencidas = emp?.total_parcelas_vencidas || 0;
@@ -189,6 +198,61 @@ export default function ClienteCardTodos({
             
             if (!podeNovoEmprestimo) return null;
             
+            if (solicitacaoRenovacao) {
+              // Há solicitação PENDENTE ou APROVADA — botão especial
+              const isPendente = solicitacaoRenovacao.status === 'PENDENTE';
+              const handlePress = () => {
+                const solicId = solicitacaoRenovacao.solic_id;
+                const empId = solicitacaoRenovacao.emprestimo_id || '';
+                const valorSolic = solicitacaoRenovacao.valor_solicitado;
+                const valorLimite = solicitacaoRenovacao.valor_limite;
+                if (!isPendente) {
+                  // APROVADO — ir direto para alterar
+                  onAlterarSolicitacaoRenovacao?.(c, solicId, empId, valorSolic);
+                  return;
+                }
+                const msg = lang === 'es'
+                  ? `Solicitud pendiente de renovación por $ ${valorSolic} (límite: $ ${valorLimite}).`
+                  : `Solicitação pendente de renovação por $ ${valorSolic} (limite: $ ${valorLimite}).`;
+                if (Platform.OS === 'web') {
+                  const msgWeb = lang === 'es'
+                    ? 'Solicitud pendiente de renovacion. OK = Alterar y cancelar / Cancelar = Ver mas opciones'
+                    : 'Solicitacao pendente de renovacao. OK = Alterar e cancelar / Cancelar = Ver mais opcoes';
+                  const alterar = window.confirm(msgWeb);
+                  if (alterar) {
+                    onAlterarSolicitacaoRenovacao?.(c, solicId, empId, valorSolic);
+                  } else {
+                    const msgCancelar = lang === 'es' ? 'Cancelar la solicitud pendiente?' : 'Cancelar a solicitacao pendente?';
+                    const cancelar = window.confirm(msgCancelar);
+                    if (cancelar) onCancelarSolicitacaoRenovacao?.(solicId);
+                  }
+                } else {
+                  Alert.alert(
+                    lang === 'es' ? 'Solicitud pendiente' : 'Solicitação pendente', msg,
+                    [
+                      { text: lang === 'es' ? 'Cancelar solicitud' : 'Cancelar solicitação', style: 'destructive', onPress: () => onCancelarSolicitacaoRenovacao?.(solicId) },
+                      { text: lang === 'es' ? 'Alterar y cancelar' : 'Alterar e cancelar', onPress: () => onAlterarSolicitacaoRenovacao?.(c, solicId, empId, valorSolic) },
+                      { text: lang === 'es' ? 'Cerrar' : 'Fechar', style: 'cancel' },
+                    ]
+                  );
+                }
+              };
+              return (
+                <TouchableOpacity
+                  style={[S.tAddRowActive, { backgroundColor: isPendente ? '#FEF3C7' : '#D1FAE5', borderColor: isPendente ? '#F59E0B' : '#10B981' }]}
+                  onPress={handlePress}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name={isPendente ? 'time-outline' : 'checkmark-circle-outline'} size={16} color={isPendente ? '#92400E' : '#059669'} />
+                  <Text style={[S.tAddTextActive, { color: isPendente ? '#92400E' : '#059669', marginLeft: 6 }]}>
+                    {isPendente
+                      ? (lang === 'es' ? 'Solicitud pendiente' : 'Solicitação pendente')
+                      : (lang === 'es' ? 'Renovación aprobada' : 'Renovação aprovada')}
+                  </Text>
+                </TouchableOpacity>
+              );
+            }
+
             return (
               <TouchableOpacity style={S.tAddRowActive} onPress={() => onNovoEmprestimo(c)}>
                 <Text style={S.tAddIconActive}>＋</Text>
