@@ -158,6 +158,11 @@ export default function ClienteCardTodos({
                   {emp.numero_parcelas}x {fmt(emp.valor_parcela)}
                 </Text>
                 <Text style={S.sLbl}>{lang === 'es' ? 'Total: ' : 'Total: '}{fmt(emp.valor_parcela * emp.numero_parcelas)}</Text>
+                {emp.valor_principal > 0 && (emp.valor_parcela * emp.numero_parcelas) > emp.valor_principal && (
+                  <Text style={[S.sLbl, { color: '#F59E0B' }]}>
+                    {lang === 'es' ? 'Intereses: ' : 'Juros: '}{fmt((emp.valor_parcela * emp.numero_parcelas) - emp.valor_principal)}
+                  </Text>
+                )}
               </View>
             </>
           ) : (

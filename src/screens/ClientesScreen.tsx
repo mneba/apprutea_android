@@ -772,14 +772,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     }, [tab, loadLiq, loadTodosClientes, rotaId])
   );
 
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    if (tab === 'liquidacao') loadLiq(true);
-    else { setTodosList([]); loadTodosClientes(true); }
-  }, [tab, loadLiq, loadTodosClientes]);
-
-  // Carrega solicitações RENOVACAO_EXCEDE_ANTERIOR (PENDENTE ou APROVADO) da rota
-  // Roda independente da aba para estar pronto quando o usuário navegar para "todos"
+  // Carrega solicitações RENOVACAO_EXCEDE_ANTERIOR da rota ao montar
   useEffect(() => {
     if (!rotaId) return;
     const carregar = async () => {
@@ -796,6 +789,12 @@ export default function ClientesScreen({ navigation, route }: any) {
     };
     carregar();
   }, [rotaId]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    if (tab === 'liquidacao') loadLiq(true);
+    else { setTodosList([]); loadTodosClientes(true); }
+  }, [tab, loadLiq, loadTodosClientes]);
 
   const abrirParcelas = useCallback(async (clienteId: string, clienteNome: string, emprestimoId: string, empStatus?: string) => {
     // Buscar status do empréstimo se não informado
@@ -1495,7 +1494,14 @@ export default function ClientesScreen({ navigation, route }: any) {
   }, [todosList, busca, filtroTipo, filtroStatus, filtroFrequencia, ocultarLiquidacao, clientesLiqIds, ordemRotaMap]);
 
   const renderTodos = (c: ClienteTodos) => {
-    const ei = empIdxTodos[c.id] || 0;
+    // Default: ativo/vencido primeiro; sem ativo, usa o último (mais recente)
+    const defaultIdx = (() => {
+      if (!c.emprestimos.length) return 0;
+      const iAtivo = c.emprestimos.findIndex(e => e.status === 'ATIVO' || e.status === 'VENCIDO');
+      if (iAtivo >= 0) return iAtivo;
+      return c.emprestimos.length - 1;
+    })();
+    const ei = empIdxTodos[c.id] ?? defaultIdx;
     const emp = c.emprestimos[Math.min(ei, c.emprestimos.length - 1)];
     return (
       <ClienteCardTodos
@@ -1540,7 +1546,6 @@ export default function ClientesScreen({ navigation, route }: any) {
           });
         }}
         onAlterarSolicitacaoRenovacao={async (cli, solicId, empQuitadoId, valorSolic) => {
-          // Buscar dados do empréstimo quitado para pré-preencher o formulário
           const { data: emp } = await supabase
             .from('emprestimos')
             .select('numero_parcelas, taxa_juros, frequencia_pagamento, dia_semana_cobranca, dia_mes_cobranca')
@@ -1548,7 +1553,7 @@ export default function ClientesScreen({ navigation, route }: any) {
             .single();
           const nav = navigation.getParent() || navigation;
           nav.navigate('NovoCliente', {
-            clienteExistente: { id: cli.id, nome: cli.nome, telefone_celular: (cli as any).telefone_celular, documento: (cli as any).codigo_cliente?.toString() || '' },
+            clienteExistente: { id: cli.id, nome: cli.nome, telefone_celular: cli.telefone_celular, documento: cli.codigo_cliente?.toString() || '' },
             solicitacaoRenovacao: {
               solic_id: solicId,
               valor_principal: valorSolic,
@@ -1565,11 +1570,7 @@ export default function ClientesScreen({ navigation, route }: any) {
             .from('solicitacoes_autorizacao')
             .update({ status: 'CANCELADO', motivo_resolucao: 'Cancelado pelo vendedor', data_resolucao: new Date().toISOString() })
             .eq('id', solicId);
-          // Atualizar mapa local imediatamente
           setSolicitacoesRenovacaoMap(prev => { const m = new Map(prev); m.forEach((v, k) => { if (v.solic_id === solicId) m.delete(k); }); return m; });
-          // Recarregar detalhes do cliente para atualizar UI
-          setModalDetalhesVisible(false);
-          setTimeout(() => setModalDetalhesVisible(true), 100);
         }}
       />
     );
@@ -1977,6 +1978,7 @@ return (
             .from('solicitacoes_autorizacao')
             .update({ status: 'CANCELADO', motivo_resolucao: 'Cancelado pelo vendedor', data_resolucao: new Date().toISOString() })
             .eq('id', solicId);
+          setSolicitacoesRenovacaoMap(prev => { const m = new Map(prev); m.forEach((v, k) => { if (v.solic_id === solicId) m.delete(k); }); return m; });
           setModalDetalhesVisible(false);
           setTimeout(() => setModalDetalhesVisible(true), 100);
         }}
