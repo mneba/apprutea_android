@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, Platform } from 'react-native';
-import { supabase } from '../services/supabase';
 import type { Lang } from '../constants/novaVendaConstants';
+import { supabase } from '../services/supabase';
 
 // ============================================================
 // HOOK: Busca por documento + detecção de tipo de empréstimo
@@ -35,12 +35,23 @@ interface FormSetters {
   setClienteExpanded: (v: boolean) => void;
 }
 
+interface SolicitacaoRenovacaoParam {
+  solic_id: string;
+  valor_principal: number;
+  numero_parcelas: number;
+  taxa_juros: number;
+  frequencia: string;
+  dia_semana_cobranca?: number | null;
+  dia_mes_cobranca?: number | null;
+}
+
 interface UseBuscaDocumentoParams {
   vendedor: any;
   clienteExistente: any;
   renegociacao: any;
   isRenegociacao: boolean;
   vendaPendenteParam: any;
+  solicitacaoRenovacaoParam?: SolicitacaoRenovacaoParam | null;
   lang: Lang;
   navigation: any;
   formSetters: FormSetters;
@@ -52,6 +63,7 @@ export function useBuscaDocumento({
   renegociacao,
   isRenegociacao,
   vendaPendenteParam,
+  solicitacaoRenovacaoParam,
   lang,
   navigation,
   formSetters,
@@ -73,6 +85,9 @@ export function useBuscaDocumento({
 
   // Venda pendente
   const [vendaPendenteIdDetectada, setVendaPendenteIdDetectada] = useState<string | null>(null);
+  const [solicitacaoRenovacaoDetectada, setSolicitacaoRenovacaoDetectada] = useState<SolicitacaoRenovacaoParam | null>(
+    solicitacaoRenovacaoParam || null
+  );
   const vendaPendenteId = vendaPendenteParam?.id || vendaPendenteIdDetectada || null;
   const vendaPendenteModo = vendaPendenteParam?.modo || (vendaPendenteIdDetectada ? 'aprovada' : null);
   const isVendaAprovadaTravada = vendaPendenteModo === 'aprovada';
@@ -207,21 +222,127 @@ export function useBuscaDocumento({
       };
 
       if (!temEmprestimoAtivo) {
+        // ⭐ Verificar se há solicitação RENOVACAO_EXCEDE_ANTERIOR para este cliente
+        if (temHistoricoQuitado && vendedor?.rota_id) {
+          const { data: solicData } = await supabase
+            .from('solicitacoes_autorizacao')
+            .select('id, status, valor_solicitado, valor_limite, emprestimo_id')
+            .eq('cliente_id', cli.id)
+            .eq('rota_id', vendedor.rota_id)
+            .eq('tipo_solicitacao', 'RENOVACAO_EXCEDE_ANTERIOR')
+            .in('status', ['PENDENTE', 'APROVADO'])
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (solicData) {
+            // Buscar dados do último empréstimo quitado para pré-preencher
+            const { data: empQuitado } = await supabase
+              .from('emprestimos')
+              .select('numero_parcelas, taxa_juros, frequencia_pagamento, dia_semana_cobranca, dia_mes_cobranca')
+              .eq('id', solicData.emprestimo_id)
+              .single();
+
+            const solicParam: SolicitacaoRenovacaoParam = {
+              solic_id: solicData.id,
+              valor_principal: solicData.valor_solicitado || 0,
+              numero_parcelas: empQuitado?.numero_parcelas || 10,
+              taxa_juros: empQuitado?.taxa_juros || 20,
+              frequencia: empQuitado?.frequencia_pagamento || 'DIARIO',
+              dia_semana_cobranca: empQuitado?.dia_semana_cobranca || null,
+              dia_mes_cobranca: empQuitado?.dia_mes_cobranca || null,
+            };
+
+            if (solicData.status === 'APROVADO') {
+              // Aprovada — pré-preencher form e travar
+              preencherCliente();
+              setSolicitacaoRenovacaoDetectada(solicParam);
+              s.setValorEmprestimo(String(solicParam.valor_principal));
+              s.setNumeroParcelas(String(solicParam.numero_parcelas));
+              s.setTaxaJuros(String(solicParam.taxa_juros));
+              s.setTaxaJurosPersonalizada(true);
+              s.setFrequencia(solicParam.frequencia);
+              if (solicParam.dia_semana_cobranca != null) s.setDiaSemanaPagamento(String(solicParam.dia_semana_cobranca));
+              if (solicParam.dia_mes_cobranca != null) s.setDiaMesPagamento(String(solicParam.dia_mes_cobranca));
+              setTipoEmprestimoDetectado('RENOVACAO');
+              setModalDocVisible(false);
+              const msg = lang === 'es'
+                ? `Renovacion aprobada para ${cli.nome}. Los campos estan bloqueados segun lo autorizado.`
+                : `Renovacao aprovada para ${cli.nome}. Os campos estao bloqueados conforme autorizado.`;
+              if (Platform.OS === 'web') window.alert(msg);
+              else Alert.alert(lang === 'es' ? 'Renovacion aprobada' : 'Renovacao aprovada', msg, [{ text: 'OK' }]);
+              return;
+            }
+
+            // PENDENTE — mostrar opções
+            const msgPendente = lang === 'es'
+              ? `Solicitud pendiente de renovacion por $ ${solicData.valor_solicitado} (limite: $ ${solicData.valor_limite}) para ${cli.nome}.`
+              : `Solicitacao pendente de renovacao por $ ${solicData.valor_solicitado} (limite: $ ${solicData.valor_limite}) para ${cli.nome}.`;
+
+            const handleAlterar = () => {
+              preencherCliente();
+              setSolicitacaoRenovacaoDetectada(solicParam);
+              s.setValorEmprestimo(String(solicParam.valor_principal));
+              s.setNumeroParcelas(String(solicParam.numero_parcelas));
+              s.setTaxaJuros(String(solicParam.taxa_juros));
+              s.setTaxaJurosPersonalizada(true);
+              s.setFrequencia(solicParam.frequencia);
+              if (solicParam.dia_semana_cobranca != null) s.setDiaSemanaPagamento(String(solicParam.dia_semana_cobranca));
+              if (solicParam.dia_mes_cobranca != null) s.setDiaMesPagamento(String(solicParam.dia_mes_cobranca));
+              setTipoEmprestimoDetectado('RENOVACAO');
+              setModalDocVisible(false);
+            };
+
+            const handleCancelar = async () => {
+              await supabase
+                .from('solicitacoes_autorizacao')
+                .update({ status: 'CANCELADO', motivo_resolucao: 'Cancelado pelo vendedor', data_resolucao: new Date().toISOString() })
+                .eq('id', solicData.id);
+              // Prosseguir como renovação normal sem restrição
+              preencherCliente();
+              setTipoEmprestimoDetectado('RENOVACAO');
+              setModalDocVisible(false);
+            };
+
+            if (Platform.OS === 'web') {
+              const alterar = window.confirm('OK = Alterar e cancelar solicitacao / Cancelar = ver mais opcoes');
+              if (alterar) {
+                handleAlterar();
+              } else {
+                const cancelar = window.confirm(lang === 'es' ? 'Cancelar la solicitud?' : 'Cancelar a solicitacao?');
+                if (cancelar) await handleCancelar();
+              }
+            } else {
+              Alert.alert(
+                lang === 'es' ? 'Solicitud pendiente' : 'Solicitacao pendente',
+                msgPendente,
+                [
+                  { text: lang === 'es' ? 'Cancelar solicitud' : 'Cancelar solicitacao', style: 'destructive', onPress: handleCancelar },
+                  { text: lang === 'es' ? 'Alterar y cancelar' : 'Alterar e cancelar', onPress: handleAlterar },
+                  { text: lang === 'es' ? 'Cerrar' : 'Fechar', style: 'cancel' },
+                ]
+              );
+            }
+            return;
+          }
+        }
+
+        // Sem solicitação pendente — fluxo normal
         preencherCliente();
         if (temHistoricoQuitado) {
           setTipoEmprestimoDetectado('RENOVACAO');
           setModalDocVisible(false);
           const msg = lang === 'es'
-            ? `Cliente encontrado: ${cli.nome}. Este es un préstamo de renovación.`
-            : `Cliente encontrado: ${cli.nome}. Este é um empréstimo de renovação.`;
+            ? `Cliente encontrado: ${cli.nome}. Este es un prestamo de renovacion.`
+            : `Cliente encontrado: ${cli.nome}. Este e um emprestimo de renovacao.`;
           if (Platform.OS === 'web') window.alert(msg);
-          else Alert.alert(lang === 'es' ? 'Renovación' : 'Renovação', msg, [{ text: 'OK' }]);
+          else Alert.alert(lang === 'es' ? 'Renovacao' : 'Renovação', msg, [{ text: 'OK' }]);
         } else {
           setTipoEmprestimoDetectado('NOVO');
           setModalDocVisible(false);
           const msg = lang === 'es'
-            ? `Cliente encontrado: ${cli.nome}. Complete los datos del préstamo.`
-            : `Cliente encontrado: ${cli.nome}. Preencha os dados do empréstimo.`;
+            ? `Cliente encontrado: ${cli.nome}. Complete los datos del prestamo.`
+            : `Cliente encontrado: ${cli.nome}. Preencha os dados do emprestimo.`;
           if (Platform.OS === 'web') window.alert(msg);
           else Alert.alert(lang === 'es' ? 'Cliente encontrado' : 'Cliente encontrado', msg, [{ text: 'OK' }]);
         }
@@ -490,6 +611,9 @@ export function useBuscaDocumento({
     vendaPendenteId,
     vendaPendenteModo,
     isVendaAprovadaTravada,
+
+    // Solicitação de renovação detectada
+    solicitacaoRenovacaoDetectada,
 
     // Actions
     buscarClientePorDocumento,

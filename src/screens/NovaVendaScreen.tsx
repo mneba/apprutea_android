@@ -80,6 +80,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     renegociacao,
     isRenegociacao,
     vendaPendenteParam,
+    solicitacaoRenovacaoParam,
     lang,
     navigation,
     formSetters: {
@@ -124,7 +125,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     tipoEmprestimoDetectado: buscaDoc.tipoEmprestimoDetectado,
     emprestimOrigemId: buscaDoc.emprestimOrigemId,
     vendaPendenteId: buscaDoc.vendaPendenteId,
-    isVendaAprovadaTravada: buscaDoc.isVendaAprovadaTravada || form.isRenovacaoTravada,
+    isVendaAprovadaTravada: buscaDoc.isVendaAprovadaTravada || form.isRenovacaoTravada || !!(buscaDoc.solicitacaoRenovacaoDetectada),
     validarMaxVendas: config.validarMaxVendas,
     valorMaxVendas: config.valorMaxVendas,
     validarCamposComFeedback: form.validarCamposComFeedback,
@@ -135,7 +136,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   // DERIVADOS
   // -----------------------------------------------------------
   const isClienteReadOnly = !!(clienteExistente?.id || buscaDoc.clienteEncontradoId);
-  const isDisabled = isRenegociacao || buscaDoc.isVendaAprovadaTravada || form.isRenovacaoTravada;
+  const isDisabled = isRenegociacao || buscaDoc.isVendaAprovadaTravada || form.isRenovacaoTravada || !!(buscaDoc.solicitacaoRenovacaoDetectada);
 
   const titulo = isRenegociacao
     ? t.tituloRenegociacao

@@ -141,17 +141,41 @@ export default function ClienteCardTodos({
       {/* === LINHA 2: Info empréstimo === */}
       {emp && (
         <View style={S.pRow}>
-          <View>
-            <View style={S.pLblR}>
-              <Text style={S.pLbl}>{t.parcela} {emp.numero_parcela_atual}/{emp.numero_parcelas}</Text>
-              <View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[lang][emp.frequencia_pagamento] || emp.frequencia_pagamento}</Text></View>
-            </View>
-            {emp.data_emprestimo ? <Text style={S.dataEmpLbl}>{lang === 'es' ? 'Préstamo:' : 'Empréstimo:'} {fmtData(emp.data_emprestimo)}</Text> : null}
-          </View>
-          <View style={S.sCol}>
-            <Text style={S.pValBig}>{fmt(emp.valor_parcela)}</Text>
-            <Text style={S.sLbl}>{t.saldoEmprestimo} {fmt(emp.saldo_emprestimo)}</Text>
-          </View>
+          {emp.status === 'QUITADO' ? (
+            // Empréstimo quitado — mini resumo
+            <>
+              <View>
+                <View style={S.pLblR}>
+                  <View style={S.badgeQuitado}>
+                    <Text style={S.badgeQuitadoTx}>{lang === 'es' ? '✓ Liquidado' : '✓ Quitado'}</Text>
+                  </View>
+                  <View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[lang][emp.frequencia_pagamento] || emp.frequencia_pagamento}</Text></View>
+                </View>
+                {emp.data_emprestimo ? <Text style={S.dataEmpLbl}>{lang === 'es' ? 'Préstamo:' : 'Empréstimo:'} {fmtData(emp.data_emprestimo)}</Text> : null}
+              </View>
+              <View style={S.sCol}>
+                <Text style={[S.pValBig, { color: '#10B981', fontSize: 15 }]}>
+                  {emp.numero_parcelas}x {fmt(emp.valor_parcela)}
+                </Text>
+                <Text style={S.sLbl}>{lang === 'es' ? 'Total: ' : 'Total: '}{fmt(emp.valor_parcela * emp.numero_parcelas)}</Text>
+              </View>
+            </>
+          ) : (
+            // Empréstimo ativo/vencido — layout original
+            <>
+              <View>
+                <View style={S.pLblR}>
+                  <Text style={S.pLbl}>{t.parcela} {emp.numero_parcela_atual}/{emp.numero_parcelas}</Text>
+                  <View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[lang][emp.frequencia_pagamento] || emp.frequencia_pagamento}</Text></View>
+                </View>
+                {emp.data_emprestimo ? <Text style={S.dataEmpLbl}>{lang === 'es' ? 'Préstamo:' : 'Empréstimo:'} {fmtData(emp.data_emprestimo)}</Text> : null}
+              </View>
+              <View style={S.sCol}>
+                <Text style={S.pValBig}>{fmt(emp.valor_parcela)}</Text>
+                <Text style={S.sLbl}>{t.saldoEmprestimo} {fmt(emp.saldo_emprestimo)}</Text>
+              </View>
+            </>
+          )}
         </View>
       )}
 
@@ -328,6 +352,8 @@ const S = StyleSheet.create({
   linkDetalhes: { alignItems: 'center', paddingVertical: 4 },
   linkDetalhesTx: { fontSize: 12, color: '#9CA3AF' },
   // ⭐ Botão Novo Empréstimo
+  badgeQuitado: { backgroundColor: '#D1FAE5', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, borderWidth: 1, borderColor: '#6EE7B7' },
+  badgeQuitadoTx: { fontSize: 11, fontWeight: '700' as const, color: '#059669' },
   tAddRowActive: { 
     flexDirection: 'row', 
     alignItems: 'center', 
