@@ -203,6 +203,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const [vendasDia, setVendasDia] = useState<any[]>([]);
   const [renegociacoesDia, setRenegociacoesDia] = useState<any[]>([]);
   const extratoViewRef = useRef<View>(null);
+  const [modalResetVisible, setModalResetVisible] = useState(false);
 
   useEffect(() => {
     if (visible && liquidacaoId) carregarExtrato();
@@ -925,7 +926,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
           </View>
         </ScrollView>
 
-        {/* Botão Compartilhar */}
+        {/* Botões Compartilhar + Reset */}
         <View style={cupom.shareBar}>
           <TouchableOpacity style={cupom.shareBtn} onPress={compartilharExtrato} disabled={compartilhando}>
             {compartilhando ? (
@@ -934,11 +935,214 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
               <Text style={cupom.shareTxt}>📤 {t.compartilhar}</Text>
             )}
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[cupom.shareBtn, { backgroundColor: '#DC2626', marginTop: 8 }]}
+            onPress={() => setModalResetVisible(true)}
+          >
+            <Text style={cupom.shareTxt}>🗑️ {lang === 'es' ? 'Resetar cliente' : 'Resetar cliente'}</Text>
+          </TouchableOpacity>
         </View>
+
+        {/* Modal Reset Cliente */}
+        <ModalResetCliente
+          visible={modalResetVisible}
+          onClose={() => setModalResetVisible(false)}
+          liquidacaoId={liquidacaoId}
+          lang={lang}
+        />
       </View>
     </Modal>
   );
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// ModalResetCliente — Lista clientes com transações na liquidação + reset
+// ══════════════════════════════════════════════════════════════════════════
+
+interface ResetClienteProps {
+  visible: boolean;
+  onClose: () => void;
+  liquidacaoId: string;
+  lang?: Lang;
+}
+
+export function ModalResetCliente({ visible, onClose, liquidacaoId, lang = 'pt-BR' }: ResetClienteProps) {
+  const [clientes, setClientes] = useState<{ id: string; nome: string; qtd_transacoes: number }[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [resetando, setResetando] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (visible && liquidacaoId) carregarClientes();
+  }, [visible, liquidacaoId]);
+
+  const carregarClientes = async () => {
+    setLoading(true);
+    try {
+      // Buscar clientes com pagamentos nessa liquidação
+      const { data: pags } = await supabase
+        .from('pagamentos_parcelas')
+        .select('cliente_id, clientes!pagamentos_parcelas_cliente_id_fkey(nome)')
+        .eq('liquidacao_id', liquidacaoId)
+        .eq('estornado', false);
+
+      // Buscar clientes com empréstimos criados nessa liquidação
+      const { data: emps } = await supabase
+        .from('emprestimos')
+        .select('cliente_id, clientes!emprestimos_cliente_id_fkey(nome)')
+        .eq('liquidacao_id', liquidacaoId);
+
+      // Buscar clientes com microseguros nessa liquidação
+      const { data: micros } = await supabase
+        .from('microseguro_vendas')
+        .select('cliente_id, clientes!microseguro_vendas_cliente_id_fkey(nome)')
+        .eq('liquidacao_id', liquidacaoId);
+
+      // Consolidar em mapa único clienteId → { nome, qtd }
+      const map = new Map<string, { nome: string; qtd: number }>();
+      const add = (rows: any[]) => {
+        (rows || []).forEach((r: any) => {
+          if (!r.cliente_id) return;
+          const nome = r.clientes?.nome || r.cliente_id;
+          const prev = map.get(r.cliente_id) || { nome, qtd: 0 };
+          map.set(r.cliente_id, { nome, qtd: prev.qtd + 1 });
+        });
+      };
+      add(pags || []);
+      add(emps || []);
+      add(micros || []);
+
+      const lista = Array.from(map.entries())
+        .map(([id, v]) => ({ id, nome: v.nome, qtd_transacoes: v.qtd }))
+        .sort((a, b) => a.nome.localeCompare(b.nome));
+      setClientes(lista);
+    } catch (e) {
+      console.error('Erro ao carregar clientes para reset:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReset = (clienteId: string, clienteNome: string) => {
+    const confirmar = async () => {
+      setResetando(clienteId);
+      try {
+        const { data, error } = await supabase.rpc('fn_reset_cliente_liquidacao', {
+          p_cliente_id: clienteId,
+          p_liquidacao_id: liquidacaoId,
+        });
+        if (error) throw error;
+        const res = Array.isArray(data) ? data[0] : data;
+        if (res?.sucesso) {
+          if (Platform.OS === 'web') window.alert(res.mensagem);
+          else Alert.alert(lang === 'es' ? 'Éxito' : 'Sucesso', res.mensagem);
+          // Remover cliente da lista
+          setClientes(prev => prev.filter(c => c.id !== clienteId));
+        } else {
+          if (Platform.OS === 'web') window.alert(res?.mensagem || 'Erro ao resetar');
+          else Alert.alert('Erro', res?.mensagem || 'Erro ao resetar');
+        }
+      } catch (e: any) {
+        if (Platform.OS === 'web') window.alert('Erro: ' + e.message);
+        else Alert.alert('Erro', e.message);
+      } finally {
+        setResetando(null);
+      }
+    };
+
+    const msg = lang === 'es'
+      ? `Desea eliminar TODAS las transacciones de "${clienteNome}" en esta liquidación? Esta acción no se puede deshacer.`
+      : `Deseja apagar TODAS as transações de "${clienteNome}" nesta liquidação? Esta ação não pode ser desfeita.`;
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(msg)) confirmar();
+    } else {
+      Alert.alert(
+        lang === 'es' ? '⚠️ Resetar cliente' : '⚠️ Resetar cliente',
+        msg,
+        [
+          { text: lang === 'es' ? 'Cancelar' : 'Cancelar', style: 'cancel' },
+          { text: lang === 'es' ? 'Sí, eliminar' : 'Sim, apagar', style: 'destructive', onPress: confirmar },
+        ]
+      );
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View style={resetStyles.container}>
+        {/* Header */}
+        <View style={resetStyles.header}>
+          <Text style={resetStyles.headerTxt}>
+            {lang === 'es' ? '🗑️ Resetar cliente' : '🗑️ Resetar cliente'}
+          </Text>
+          <TouchableOpacity onPress={onClose} style={resetStyles.closeBtn}>
+            <Text style={resetStyles.closeTxt}>✕</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Aviso */}
+        <View style={resetStyles.aviso}>
+          <Text style={resetStyles.avisoTxt}>
+            {lang === 'es'
+              ? '⚠️ Esta acción elimina TODAS las transacciones del cliente en esta liquidación (pagos, préstamos, microseguros). No se puede deshacer.'
+              : '⚠️ Esta ação apaga TODAS as transações do cliente nesta liquidação (pagamentos, empréstimos, microseguros). Não pode ser desfeita.'}
+          </Text>
+        </View>
+
+        {/* Lista */}
+        {loading ? (
+          <ActivityIndicator size="large" color="#DC2626" style={{ marginTop: 40 }} />
+        ) : clientes.length === 0 ? (
+          <View style={resetStyles.empty}>
+            <Text style={resetStyles.emptyTxt}>
+              {lang === 'es' ? 'Ningún cliente con transacciones' : 'Nenhum cliente com transações'}
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            data={clientes}
+            keyExtractor={item => item.id}
+            contentContainerStyle={{ padding: 16 }}
+            renderItem={({ item }) => (
+              <View style={resetStyles.clienteRow}>
+                <View style={resetStyles.clienteInfo}>
+                  <Text style={resetStyles.clienteNome}>{item.nome}</Text>
+                </View>
+                <TouchableOpacity
+                  style={[resetStyles.btnReset, resetando === item.id && { opacity: 0.5 }]}
+                  onPress={() => handleReset(item.id, item.nome)}
+                  disabled={resetando === item.id}
+                >
+                  {resetando === item.id
+                    ? <ActivityIndicator size="small" color="#fff" />
+                    : <Text style={resetStyles.btnResetTxt}>🗑️</Text>
+                  }
+                </TouchableOpacity>
+              </View>
+            )}
+          />
+        )}
+      </View>
+    </Modal>
+  );
+}
+
+const resetStyles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#FFF' },
+  header: { backgroundColor: '#DC2626', paddingTop: 50, paddingBottom: 14, paddingHorizontal: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  headerTxt: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  closeBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
+  closeTxt: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  aviso: { backgroundColor: '#FEF2F2', borderLeftWidth: 4, borderLeftColor: '#DC2626', margin: 16, padding: 12, borderRadius: 8 },
+  avisoTxt: { fontSize: 13, color: '#7F1D1D', lineHeight: 18 },
+  empty: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  emptyTxt: { fontSize: 14, color: '#9CA3AF' },
+  clienteRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderRadius: 10, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#E5E7EB' },
+  clienteInfo: { flex: 1 },
+  clienteNome: { fontSize: 15, fontWeight: '600', color: '#1F2937' },
+  btnReset: { backgroundColor: '#DC2626', width: 44, height: 44, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  btnResetTxt: { fontSize: 20 },
+});
 
 const MONO = Platform.OS === 'ios' ? 'Courier' : 'monospace';
 
