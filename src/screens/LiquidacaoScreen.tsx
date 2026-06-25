@@ -700,7 +700,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
            (liquidacao.clientes_novos || 0) + 
            (liquidacao.clientes_renovados || 0) + 
            (liquidacao.clientes_renegociados || 0) - 
-           (liquidacao.clientes_cancelados || 0) - (liquidacao.clientes_quitados || 0);
+           (liquidacao.clientes_cancelados || 0);
   };
 
   // ==================== HANDLERS ====================
