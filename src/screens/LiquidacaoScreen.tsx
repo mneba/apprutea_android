@@ -386,6 +386,14 @@ export default function LiquidacaoScreen({ navigation }: any) {
     carregarLiquidacoes();
   }, []));
 
+  // ⭐ Recarregar quando o contexto da liquidação é atualizado externamente
+  // (ex: após estorno ou pagamento feito na aba de clientes)
+  useEffect(() => {
+    if (liqCtx.liquidacaoAtual?.updated_at) {
+      carregarLiquidacoes();
+    }
+  }, [liqCtx.liquidacaoAtual?.updated_at]);
+
   // Listener de conectividade
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener(state => {
@@ -700,7 +708,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
            (liquidacao.clientes_novos || 0) + 
            (liquidacao.clientes_renovados || 0) + 
            (liquidacao.clientes_renegociados || 0) - 
-           (liquidacao.clientes_cancelados || 0);
+           (liquidacao.clientes_cancelados || 0) - (liquidacao.clientes_quitados || 0);
   };
 
   // ==================== HANDLERS ====================
@@ -1727,7 +1735,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
         <>
           <ModalExtrato
             visible={modalExtratoVisible}
-            onClose={() => setModalExtratoVisible(false)}
+            onClose={() => { setModalExtratoVisible(false); setTimeout(() => carregarLiquidacoes(), 300); }}
             liquidacaoId={liquidacao.id}
             caixaInicial={liquidacao.caixa_inicial || 0}
             caixaFinal={liquidacao.caixa_final || liquidacao.caixa_inicial || 0}

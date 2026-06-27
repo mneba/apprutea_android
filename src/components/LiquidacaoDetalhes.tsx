@@ -204,6 +204,10 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const [renegociacoesDia, setRenegociacoesDia] = useState<any[]>([]);
   const extratoViewRef = useRef<View>(null);
   const [modalResetVisible, setModalResetVisible] = useState(false);
+  const handleResetSuccess = () => {
+    setModalResetVisible(false);
+    onClose(); // Fecha o extrato também
+  };
 
   useEffect(() => {
     if (visible && liquidacaoId) carregarExtrato();
@@ -947,6 +951,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         <ModalResetCliente
           visible={modalResetVisible}
           onClose={() => setModalResetVisible(false)}
+          onResetSuccess={handleResetSuccess}
           liquidacaoId={liquidacaoId}
           lang={lang}
         />
@@ -962,11 +967,12 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
 interface ResetClienteProps {
   visible: boolean;
   onClose: () => void;
+  onResetSuccess?: () => void;
   liquidacaoId: string;
   lang?: Lang;
 }
 
-export function ModalResetCliente({ visible, onClose, liquidacaoId, lang = 'pt-BR' }: ResetClienteProps) {
+export function ModalResetCliente({ visible, onClose, onResetSuccess, liquidacaoId, lang = 'pt-BR' }: ResetClienteProps) {
   const [clientes, setClientes] = useState<{ id: string; nome: string; qtd_transacoes: number }[]>([]);
   const [loading, setLoading] = useState(false);
   const [resetando, setResetando] = useState<string | null>(null);
@@ -1037,6 +1043,8 @@ export function ModalResetCliente({ visible, onClose, liquidacaoId, lang = 'pt-B
           else Alert.alert(lang === 'es' ? 'Éxito' : 'Sucesso', res.mensagem);
           // Remover cliente da lista
           setClientes(prev => prev.filter(c => c.id !== clienteId));
+          // Fechar extrato e atualizar liquidação
+          onResetSuccess?.();
         } else {
           if (Platform.OS === 'web') window.alert(res?.mensagem || 'Erro ao resetar');
           else Alert.alert('Erro', res?.mensagem || 'Erro ao resetar');
