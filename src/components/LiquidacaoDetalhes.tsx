@@ -22,6 +22,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
 
 const { width, height } = Dimensions.get('window');
@@ -187,9 +188,10 @@ interface ExtratoProps {
   rotaNome?: string;
   vendedorNomeExterno?: string;
   lang?: Lang;
+  isLiquidacaoAberta?: boolean;
 }
 
-export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, caixaFinal, rotaNome, vendedorNomeExterno, lang = 'pt-BR' }: ExtratoProps) {
+export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, caixaFinal, rotaNome, vendedorNomeExterno, lang = 'pt-BR', isLiquidacaoAberta = false }: ExtratoProps) {
   const t = i18n[lang];
   const [registros, setRegistros] = useState<any[]>([]);
   const [pagamentos, setPagamentos] = useState<any[]>([]);
@@ -939,12 +941,14 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
               <Text style={cupom.shareTxt}>📤 {t.compartilhar}</Text>
             )}
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[cupom.shareBtn, { backgroundColor: '#DC2626', marginTop: 8 }]}
-            onPress={() => setModalResetVisible(true)}
-          >
-            <Text style={cupom.shareTxt}>🗑️ {lang === 'es' ? 'Resetar cliente' : 'Resetar cliente'}</Text>
-          </TouchableOpacity>
+          {isLiquidacaoAberta && (
+            <TouchableOpacity
+              style={[cupom.shareBtn, { backgroundColor: '#DC2626', marginTop: 8 }]}
+              onPress={() => setModalResetVisible(true)}
+            >
+              <Text style={cupom.shareTxt}>🗑️ {lang === 'es' ? 'Resetar cliente' : 'Resetar cliente'}</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Modal Reset Cliente */}
@@ -973,6 +977,7 @@ interface ResetClienteProps {
 }
 
 export function ModalResetCliente({ visible, onClose, onResetSuccess, liquidacaoId, lang = 'pt-BR' }: ResetClienteProps) {
+  const liqCtx = useLiquidacaoContext();
   const [clientes, setClientes] = useState<{ id: string; nome: string; qtd_transacoes: number }[]>([]);
   const [loading, setLoading] = useState(false);
   const [resetando, setResetando] = useState<string | null>(null);
@@ -1043,6 +1048,8 @@ export function ModalResetCliente({ visible, onClose, onResetSuccess, liquidacao
           else Alert.alert(lang === 'es' ? 'Éxito' : 'Sucesso', res.mensagem);
           // Remover cliente da lista
           setClientes(prev => prev.filter(c => c.id !== clienteId));
+          // ⭐ Disparar sinal para ClientesScreen desmarcar o breadcrumb
+          liqCtx.dispararResetFiltro();
           // Fechar extrato e atualizar liquidação
           onResetSuccess?.();
         } else {

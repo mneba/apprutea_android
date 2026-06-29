@@ -1,12 +1,12 @@
 import React from 'react';
 import {
-    ActivityIndicator,
-    Modal,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Modal,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { Language } from '../contexts/LiquidacaoContext';
 
@@ -17,6 +17,7 @@ interface ParcelaEstorno {
   numero_parcela: number;
   valor_parcela: number;
   valor_pago?: number;
+  credito_usado?: number;
 }
 
 interface EstornoModalProps {
@@ -68,6 +69,16 @@ export default function EstornoModal({
                 <Text style={S.estInfoParcela}>{t.parcela} {parcela.numero_parcela}</Text>
                 <Text style={S.estInfoCliente}>{clienteNome}</Text>
                 <Text style={S.estInfoValor}>{t.pago} {fmt(parcela.valor_pago || parcela.valor_parcela)}</Text>
+                {(parcela.credito_usado || 0) > 0 && (
+                  <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#FCA5A5' }}>
+                    <Text style={S.estInfoDetalhe}>
+                      {lang === 'es' ? 'Efectivo' : 'Dinheiro'}: {fmt((parcela.valor_pago || 0) - (parcela.credito_usado || 0))}
+                    </Text>
+                    <Text style={S.estInfoDetalhe}>
+                      {lang === 'es' ? 'Crédito usado (será devuelto)' : 'Crédito usado (será devolvido)'}: {fmt(parcela.credito_usado || 0)}
+                    </Text>
+                  </View>
+                )}
               </View>
               <View style={S.estInputBox}>
                 <Text style={S.estInputLabel}>{t.motivoEstorno}</Text>
@@ -116,6 +127,7 @@ const S = StyleSheet.create({
   estInfoParcela: { fontSize: 14, fontWeight: '700', color: '#1F2937' },
   estInfoCliente: { fontSize: 13, color: '#6B7280', marginTop: 2 },
   estInfoValor: { fontSize: 16, fontWeight: '700', color: '#DC2626', marginTop: 8 },
+  estInfoDetalhe: { fontSize: 12, color: '#7F1D1D', marginTop: 2 },
   estInputBox: { marginHorizontal: 16 },
   estInputLabel: { fontSize: 12, color: '#6B7280', marginBottom: 8 },
   estInput: { backgroundColor: '#F9FAFB', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#E5E7EB', fontSize: 14, color: '#1F2937', minHeight: 80, textAlignVertical: 'top' },

@@ -386,14 +386,6 @@ export default function LiquidacaoScreen({ navigation }: any) {
     carregarLiquidacoes();
   }, []));
 
-  // ⭐ Recarregar quando o contexto da liquidação é atualizado externamente
-  // (ex: após estorno ou pagamento feito na aba de clientes)
-  useEffect(() => {
-    if (liqCtx.liquidacaoAtual?.updated_at) {
-      carregarLiquidacoes();
-    }
-  }, [liqCtx.liquidacaoAtual?.updated_at]);
-
   // Listener de conectividade
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener(state => {
@@ -1741,6 +1733,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
             caixaFinal={liquidacao.caixa_final || liquidacao.caixa_inicial || 0}
             rotaNome={(vendedor as any)?.rota_nome || ''}
             vendedorNomeExterno={vendedor?.nome || ''}
+            isLiquidacaoAberta={isAberto}
           />
           <ModalPagamentos
             visible={modalPagamentosVisible}

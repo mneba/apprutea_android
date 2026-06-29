@@ -1045,8 +1045,8 @@ export default function ClientesScreen({ navigation, route }: any) {
       Alert.alert(t.atencao, dadosPagamento.mensagem_bloqueio || t.pagamentoNaoPermitido);
       return;
     }
-    const valorNum = parseFloat(valorPagamento.replace(',', '.'));
-    if (isNaN(valorNum) || valorNum < 0) { showAlert(t.erroGenerico, t.valorInvalido); return; }
+    const valorDigitado = parseFloat(valorPagamento.replace(',', '.'));
+    if (isNaN(valorDigitado) || valorDigitado < 0) { showAlert(t.erroGenerico, t.valorInvalido); return; }
     
     // Calcula crédito a usar: no máximo o disponível, mas limitado ao saldo da parcela
     let valorCredito = 0;
@@ -1054,6 +1054,10 @@ export default function ClientesScreen({ navigation, route }: any) {
       const valorSaldoParcela = dadosPagamento.valor_saldo_parcela || parcelaPagamento.valor_parcela;
       valorCredito = Math.min(dadosPagamento.credito_disponivel, valorSaldoParcela);
     }
+    
+    // ⭐ valorDigitado é o TOTAL que o usuário quer aplicar na parcela.
+    // O dinheiro real é o total menos o crédito usado.
+    const valorNum = Math.max(valorDigitado - valorCredito, 0);
     
     // Validação: pelo menos um valor deve ser informado (dinheiro OU crédito)
     if (valorNum === 0 && valorCredito === 0) {

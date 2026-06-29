@@ -41,6 +41,10 @@ interface LiquidacaoContextType {
   // Idioma global
   language: Language;
   setLanguage: (lang: Language) => void;
+
+  // ⭐ Sinal para resetar filtro de breadcrumb (após reset de cliente)
+  resetFiltroSinal: number;
+  dispararResetFiltro: () => void;
 }
 
 const LiquidacaoContext = createContext<LiquidacaoContextType>({
@@ -69,6 +73,9 @@ const LiquidacaoContext = createContext<LiquidacaoContextType>({
 
   language: 'pt-BR',
   setLanguage: () => {},
+
+  resetFiltroSinal: 0,
+  dispararResetFiltro: () => {},
 });
 
 export function LiquidacaoProvider({ children }: { children: ReactNode }) {
@@ -195,6 +202,12 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liquidacaoAtual?.id]);
 
+  // ⭐ Sinal para forçar reset de filtro de breadcrumb na ClientesScreen
+  const [resetFiltroSinal, setResetFiltroSinal] = useState(0);
+  const dispararResetFiltro = useCallback(() => {
+    setResetFiltroSinal(prev => prev + 1);
+  }, []);
+
   return (
     <LiquidacaoContext.Provider value={{
       liquidacaoAtual,
@@ -223,6 +236,9 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
       // Bridge com AuthContext — persiste no AsyncStorage e propaga para todas as telas
       language: idioma,
       setLanguage: setIdioma,
+
+      resetFiltroSinal,
+      dispararResetFiltro,
     }}>
       {children}
     </LiquidacaoContext.Provider>
