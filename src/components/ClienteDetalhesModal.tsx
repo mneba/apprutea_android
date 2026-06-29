@@ -797,15 +797,22 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           </View>
         </TouchableOpacity>
 
-        {/* Info compacta */}
+        {/* Info compacta — linha 1: data, parcelas, % pago */}
         <View style={S.empInfoRow}>
           <Text style={S.empInfoItem}>{fmtData(emp.data_emprestimo)}</Text>
           <Text style={S.empInfoDot}>•</Text>
           <Text style={S.empInfoItem}>{emp.parcelas_pagas}/{emp.numero_parcelas} {t.parcelas.toLowerCase()}</Text>
           <Text style={S.empInfoDot}>•</Text>
           <Text style={S.empInfoItem}>{pct}%</Text>
+        </View>
+
+        {/* Info compacta — linha 2: principal + juros */}
+        <View style={[S.empInfoRow, { marginTop: 2 }]}>
+          <Text style={[S.empInfoItem, { color: '#059669', fontWeight: '600' }]}>
+            {lang === 'es' ? 'Capital' : 'Principal'}: {fmt(emp.valor_principal)}
+          </Text>
           <Text style={S.empInfoDot}>•</Text>
-          <Text style={[S.empInfoItem, { color: '#D97706' }]}>
+          <Text style={[S.empInfoItem, { color: '#D97706', fontWeight: '600' }]}>
             {lang === 'es' ? 'Intereses' : 'Juros'}: {fmt(emp.valor_total - emp.valor_principal)} ({emp.taxa_juros}%)
           </Text>
         </View>

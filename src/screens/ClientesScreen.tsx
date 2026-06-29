@@ -318,6 +318,10 @@ const fmt = (v: number) => '$ ' + v.toLocaleString('pt-BR', { minimumFractionDig
 
 // Busca crédito acumulado (saldo_excedente) por empréstimo
 // Saldo real = valor_saldo - credito_acumulado
+// ⭐ Normaliza texto para busca: remove acentos + lowercase
+const normalizarBusca = (texto: string): string =>
+  texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
 const buscarCreditoMap = async (empIds: string[]): Promise<Map<string, number>> => {
   if (empIds.length === 0) return new Map();
   const { data } = await supabase
@@ -735,6 +739,15 @@ export default function ClientesScreen({ navigation, route }: any) {
     }
   }, [liqCtx.temLiquidacaoAberta, liqCtx.liquidacaoAtual?.id]);
 
+  // ⭐ Observar sinal de reset de filtro (disparado após reset de cliente no extrato)
+  // Quando o reset é feito, recarrega clientes E desmarca o breadcrumb "pagos"
+  useEffect(() => {
+    if (liqCtx.resetFiltroSinal > 0) {
+      setFiltro('todos');
+      loadLiq(true);
+    }
+  }, [liqCtx.resetFiltroSinal]);
+
   // ⭐ Recarregar lista ao voltar para a tela (após criar novo empréstimo, renovar, etc)
   const isFirstMount = useRef(true);
   
@@ -1045,8 +1058,8 @@ export default function ClientesScreen({ navigation, route }: any) {
       Alert.alert(t.atencao, dadosPagamento.mensagem_bloqueio || t.pagamentoNaoPermitido);
       return;
     }
-    const valorDigitado = parseFloat(valorPagamento.replace(',', '.'));
-    if (isNaN(valorDigitado) || valorDigitado < 0) { showAlert(t.erroGenerico, t.valorInvalido); return; }
+    const valorNum = parseFloat(valorPagamento.replace(',', '.'));
+    if (isNaN(valorNum) || valorNum < 0) { showAlert(t.erroGenerico, t.valorInvalido); return; }
     
     // Calcula crédito a usar: no máximo o disponível, mas limitado ao saldo da parcela
     let valorCredito = 0;
@@ -1054,10 +1067,6 @@ export default function ClientesScreen({ navigation, route }: any) {
       const valorSaldoParcela = dadosPagamento.valor_saldo_parcela || parcelaPagamento.valor_parcela;
       valorCredito = Math.min(dadosPagamento.credito_disponivel, valorSaldoParcela);
     }
-    
-    // ⭐ valorDigitado é o TOTAL que o usuário quer aplicar na parcela.
-    // O dinheiro real é o total menos o crédito usado.
-    const valorNum = Math.max(valorDigitado - valorCredito, 0);
     
     // Validação: pelo menos um valor deve ser informado (dinheiro OU crédito)
     if (valorNum === 0 && valorCredito === 0) {
@@ -1337,6 +1346,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       if (res?.sucesso) {
         setModalEstornoVisible(false);
         setParcelaEstorno(null);
+        setFiltro('todos'); // ⭐ Voltar para lista de pendentes após estorno (desmarca breadcrumb "pagos")
         Alert.alert(t.sucessoGenerico, res.mensagem || t.estornoSucesso);
         if (clienteModal?.emprestimo_id) { atualizarSaldoLocalLiq(clienteModal.emprestimo_id); atualizarSaldoLocalTodos(clienteModal.emprestimo_id); }
         if (clienteModal) abrirParcelas(clienteModal.id, clienteModal.nome, clienteModal.emprestimo_id);
@@ -1349,8 +1359,8 @@ export default function ClientesScreen({ navigation, route }: any) {
         // Verificar se cliente tem outras parcelas pagas antes de removê-lo de clientesPagosNaLiq
         // (loadLiq em background vai corrigir)
 
-        // Recarregar dados completos em background
-        setTimeout(() => loadLiq(), 500);
+        // ⭐ Recarregar dados ANTES de fechar para garantir lista atualizada
+        await loadLiq(true);
       } else { 
         setModalEstornoVisible(false);
         Alert.alert(t.erroGenerico, res?.mensagem || t.estornoErro); 
@@ -1414,7 +1424,7 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   const filtered = useMemo(() => {
     let r = [...grouped];
-    if (busca.trim()) { const b = busca.toLowerCase().trim(); r = r.filter(c => c.nome.toLowerCase().includes(b) || (c.telefone_celular && c.telefone_celular.includes(b)) || (c.endereco && c.endereco.toLowerCase().includes(b))); }
+    if (busca.trim()) { const b = normalizarBusca(busca); r = r.filter(c => normalizarBusca(c.nome).includes(b) || (c.telefone_celular && c.telefone_celular.includes(b)) || (c.endereco && normalizarBusca(c.endereco).includes(b))); }
     if (filtroFrequencia !== 'todos') r = r.filter(c => c.emprestimos.some(e => e.frequencia_pagamento === filtroFrequencia));
     if (filtro === 'atrasados') r = r.filter(c => !isCliPago(c) && c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas));
     else if (filtro === 'pagas') r = r.filter(c => isCliPago(c));
@@ -1470,7 +1480,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     // Ocultar clientes da liquidação atual
     if (ocultarLiquidacao && clientesLiqIds.size > 0) { r = r.filter(c => !clientesLiqIds.has(c.id)); }
     // Busca por texto
-    if (busca.trim()) { const b = busca.toLowerCase().trim(); r = r.filter(c => c.nome.toLowerCase().includes(b) || (c.telefone_celular && c.telefone_celular.includes(b))); }
+    if (busca.trim()) { const b = normalizarBusca(busca); r = r.filter(c => normalizarBusca(c.nome).includes(b) || (c.telefone_celular && c.telefone_celular.includes(b))); }
     // Filtro por tipo de empréstimo
     if (filtroTipo !== 'todos') { r = r.filter(c => c.emprestimos.some(e => e.tipo_emprestimo === filtroTipo)); }
     // Filtro por frequência

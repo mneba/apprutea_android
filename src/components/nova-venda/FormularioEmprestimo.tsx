@@ -33,8 +33,6 @@ interface Props {
   // Config
   taxasPermitidas: number[];
   taxasLivre: boolean;
-  // Data operacional — base para amanha() e minDate (respeita liquidação retroativa)
-  dataOperacional?: string;
   // Flags
   isRenegociacao: boolean;
   isVendaAprovadaTravada: boolean;
@@ -66,7 +64,6 @@ export default function FormularioEmprestimo(props: Props) {
     isRenegociacao, isVendaAprovadaTravada, camposComErro, lang,
     handleValorEmprestimoChange, limparErroCampo, toggleDiaFlexivel,
     getDiaSemanaLabel, onOpenDiaSemanaModal, onOpenDatePicker,
-    dataOperacional,
     t,
   } = props;
 
@@ -129,9 +126,16 @@ export default function FormularioEmprestimo(props: Props) {
             {taxasPermitidas.map((taxa) => (
               <TouchableOpacity
                 key={taxa}
-                style={[styles.taxaButton, taxaJuros === String(taxa) && styles.taxaButtonActive]}
-                onPress={() => { setTaxaJuros(String(taxa)); setTaxaJurosPersonalizada(false); limparErroCampo('taxaJuros'); }}
-                activeOpacity={0.7}
+                style={[
+                  styles.taxaButton,
+                  taxaJuros === String(taxa) && styles.taxaButtonActive,
+                  isVendaAprovadaTravada && taxaJuros !== String(taxa) && { opacity: 0.4 },
+                ]}
+                onPress={() => {
+                  if (isVendaAprovadaTravada) return;
+                  setTaxaJuros(String(taxa)); setTaxaJurosPersonalizada(false); limparErroCampo('taxaJuros');
+                }}
+                activeOpacity={isVendaAprovadaTravada ? 1 : 0.7}
               >
                 <Text style={[styles.taxaButtonText, taxaJuros === String(taxa) && styles.taxaButtonTextActive]}>
                   {taxa}%
@@ -139,9 +143,16 @@ export default function FormularioEmprestimo(props: Props) {
               </TouchableOpacity>
             ))}
             <TouchableOpacity
-              style={[styles.taxaButton, taxaJurosPersonalizada && styles.taxaButtonActive]}
-              onPress={() => { setTaxaJurosPersonalizada(true); setTaxaJuros(''); }}
-              activeOpacity={0.7}
+              style={[
+                styles.taxaButton,
+                taxaJurosPersonalizada && styles.taxaButtonActive,
+                isVendaAprovadaTravada && { opacity: 0.4 },
+              ]}
+              onPress={() => {
+                if (isVendaAprovadaTravada) return;
+                setTaxaJurosPersonalizada(true); setTaxaJuros('');
+              }}
+              activeOpacity={isVendaAprovadaTravada ? 1 : 0.7}
             >
               <Text style={[styles.taxaButtonText, taxaJurosPersonalizada && styles.taxaButtonTextActive]}>
                 Outro
@@ -198,9 +209,9 @@ export default function FormularioEmprestimo(props: Props) {
                 setFrequencia(freq.value);
                 limparErroCampo('frequencia');
                 if (freq.value === 'DIARIO') {
-                  setDataPrimeiroVencimento(amanha(dataOperacional));
+                  setDataPrimeiroVencimento(amanha());
                 } else if (freq.value === 'MENSAL' && diaMesPagamento) {
-                  setDataPrimeiroVencimento(calcularDataMensal(parseInt(diaMesPagamento), dataOperacional));
+                  setDataPrimeiroVencimento(calcularDataMensal(parseInt(diaMesPagamento)));
                 }
               }}
               activeOpacity={isVendaAprovadaTravada ? 1 : 0.7}
