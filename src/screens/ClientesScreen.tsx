@@ -1641,6 +1641,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         modoReordenar={modoReordenar}
         lang={lang}
         notasCount={notasCountMap.get(c.id) || 0}
+        todosMode={true}
         t={t}
         onToggleExpand={() => setExpandedTodos(p => p === c.id ? null : c.id)}
         onLongPressStart={() => {
@@ -1916,6 +1917,19 @@ return (
               refreshControl={!isViz ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined}
               showsVerticalScrollIndicator={false}
               onScrollBeginDrag={() => { setShowFiltroTipo(false); setShowFiltroStatus(false); }}
+              ListHeaderComponent={
+                <View style={{ backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#F59E0B', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name="people" size={16} color="#92400E" />
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#92400E', flex: 1 }}>
+                    {lang === 'es' ? `Mostrando todos · ${todosFilt.length} clientes` : `Mostrando todos · ${todosFilt.length} clientes`}
+                  </Text>
+                  <TouchableOpacity onPress={() => setTab('liquidacao')} activeOpacity={0.7}>
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#D97706' }}>
+                      {lang === 'es' ? 'Volver' : 'Voltar'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              }
               ListFooterComponent={<View style={{ height: 90 }} />}
               viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
               onScrollToIndexFailed={(info) => {

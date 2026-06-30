@@ -13,7 +13,8 @@ export interface EmprestimoTodos {
 
 export interface ClienteTodos {
   id: string; codigo_cliente: number | null; nome: string;
-  telefone_celular: string | null; status: string; tem_atraso: boolean;
+  telefone_celular: string | null; foto_url: string | null;
+  status: string; tem_atraso: boolean;
   permite_renegociacao: boolean; permite_emprestimo_adicional: boolean;
   cliente_created_at?: string;
   emprestimos: EmprestimoTodos[];
@@ -64,7 +65,7 @@ export default function useClientesTodos({ rotaId, tab, setOrdemRotaMap, setRefr
       // Query 1: Todos os empréstimos da rota com dados do cliente
       const { data: emps } = await supabase
         .from('emprestimos')
-        .select(`id, valor_principal, valor_saldo, valor_parcela, numero_parcelas, status, frequencia_pagamento, tipo_emprestimo, data_emprestimo, clientes!inner(id, nome, telefone_celular, status, codigo_cliente, permite_renegociacao, permite_emprestimo_adicional, created_at)`)
+        .select(`id, valor_principal, valor_saldo, valor_parcela, numero_parcelas, status, frequencia_pagamento, tipo_emprestimo, data_emprestimo, clientes!inner(id, nome, telefone_celular, foto_url, status, codigo_cliente, permite_renegociacao, permite_emprestimo_adicional, created_at)`)
         .eq('rota_id', rotaId)
         .in('status', ['ATIVO', 'VENCIDO', 'QUITADO', 'RENEGOCIADO']);
 
@@ -101,6 +102,7 @@ export default function useClientesTodos({ rotaId, tab, setOrdemRotaMap, setRefr
             codigo_cliente: c.codigo_cliente,
             nome: c.nome,
             telefone_celular: c.telefone_celular,
+            foto_url: c.foto_url || null,
             status: c.status,
             tem_atraso: false,
             permite_renegociacao: c.permite_renegociacao || false,
@@ -128,17 +130,10 @@ export default function useClientesTodos({ rotaId, tab, setOrdemRotaMap, setRefr
         });
       }
 
-      // Descontar crédito acumulado do saldo de cada empréstimo
-      const empIdsTodos = (emps as any[]).map(e => e.id);
-      const creditoMapTodos = await buscarCreditoMap(empIdsTodos);
-      if (creditoMapTodos.size > 0) {
-        Array.from(cliMap.values()).forEach(cli => {
-          cli.emprestimos.forEach(emp => {
-            const credito = creditoMapTodos.get(emp.id) || 0;
-            if (credito > 0) emp.saldo_emprestimo = Math.max(0, emp.saldo_emprestimo - credito);
-          });
-        });
-      }
+      // ⚠️ REMOVIDO: Desconto de crédito do saldo do empréstimo
+      // A trigger atualizar_saldo_emprestimo já desconta saldo_excedente no banco.
+      // Descontar aqui causava desconto duplo.
+
       setTodosList(Array.from(cliMap.values()));
 
       // Carregar ordem da rota

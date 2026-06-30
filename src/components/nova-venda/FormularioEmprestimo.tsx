@@ -326,6 +326,11 @@ export default function FormularioEmprestimo(props: Props) {
           <Text style={styles.selectFieldText}>{formatarData(dataPrimeiroVencimento)}</Text>
           <Text style={styles.selectFieldChevron}>📅</Text>
         </TouchableOpacity>
+        <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 6, lineHeight: 16 }}>
+          ℹ️ {lang === 'es'
+            ? 'Esta es la fecha de la primera cobranza al cliente.'
+            : 'Esta é a data da primeira cobrança ao cliente.'}
+        </Text>
       </View>
 
       {/* Observações */}

@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import {
   Alert,
+  Image,
   Platform,
   StyleSheet,
   Text,
@@ -22,7 +23,8 @@ export interface EmprestimoTodos {
 
 export interface ClienteTodos {
   id: string; codigo_cliente: number | null; nome: string;
-  telefone_celular: string | null; status: string; tem_atraso: boolean;
+  telefone_celular: string | null; foto_url: string | null;
+  status: string; tem_atraso: boolean;
   permite_renegociacao: boolean; permite_emprestimo_adicional: boolean;
   cliente_created_at?: string;
   emprestimos: EmprestimoTodos[];
@@ -86,6 +88,7 @@ interface ClienteCardTodosProps {
   solicitacaoRenovacao?: { solic_id: string; status: string; valor_solicitado: number; valor_limite: number; emprestimo_id: string | null } | null;
   onAlterarSolicitacaoRenovacao?: (cliente: ClienteTodos, solicId: string, empQuitadoId: string, valorSolic: number) => void;
   onCancelarSolicitacaoRenovacao?: (solicId: string) => void;
+  todosMode?: boolean;
 }
 
 // ─── Componente ─────────────────────────────────────────────────────────────
@@ -110,6 +113,7 @@ export default function ClienteCardTodos({
   solicitacaoRenovacao,
   onAlterarSolicitacaoRenovacao,
   onCancelarSolicitacaoRenovacao,
+  todosMode = false,
 }: ClienteCardTodosProps) {
   const a = c.tem_atraso;
   const vencidas = emp?.total_parcelas_vencidas || 0;
@@ -122,13 +126,17 @@ export default function ClienteCardTodos({
       onPress={() => { if (!modoReordenar) onToggleExpand(); }}
       onPressIn={onLongPressStart}
       onPressOut={onLongPressEnd}
-      style={[S.card, { borderLeftColor: cor }]}
+      style={[S.card, { borderLeftColor: cor }, todosMode && { backgroundColor: '#FFFBEB' }]}
     >
       {/* === LINHA 1: Avatar + Nome + Badges === */}
       <View style={S.cardRow}>
-        <View style={[S.av, { backgroundColor: a ? '#EF4444' : '#64748B' }]}>
-          <Text style={S.avTx}>{getIni(c.nome)}</Text>
-        </View>
+        {c.foto_url ? (
+          <Image source={{ uri: c.foto_url }} style={[S.av, { backgroundColor: '#E5E7EB' }]} />
+        ) : (
+          <View style={[S.av, { backgroundColor: a ? '#EF4444' : '#64748B' }]}>
+            <Text style={S.avTx}>{getIni(c.nome)}</Text>
+          </View>
+        )}
         <View style={S.cardInfo}>
           <View style={S.nameRow}>
             <Text style={S.nome} numberOfLines={1}>{c.nome}</Text>

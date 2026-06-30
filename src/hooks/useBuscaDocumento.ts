@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Platform } from 'react-native';
 import type { Lang } from '../constants/novaVendaConstants';
 import { supabase } from '../services/supabase';
@@ -76,7 +76,11 @@ export function useBuscaDocumento({
   const [modalDocVisible, setModalDocVisible] = useState(
     !clienteExistente && !isRenegociacao && !vendaPendenteParam
   );
-  const [docBusca, setDocBusca] = useState('');
+  const [docBusca, setDocBuscaRaw] = useState('');
+  // ⭐ Wrapper que sanitiza: apenas a-z, A-Z, 0-9 — máximo 20 caracteres
+  const setDocBusca = useCallback((v: string) => {
+    setDocBuscaRaw((v || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 20));
+  }, []);
   const [buscandoDoc, setBuscandoDoc] = useState(false);
   const [clienteEncontradoId, setClienteEncontradoId] = useState<string | null>(null);
   const [clienteEncontradoCodigo, setClienteEncontradoCodigo] = useState<string | null>(null);
@@ -97,11 +101,12 @@ export function useBuscaDocumento({
   // BUSCAR CLIENTE POR DOCUMENTO
   // -----------------------------------------------------------
   const buscarClientePorDocumento = async () => {
-    const doc = docBusca.replace(/\D/g, '');
+    // ⭐ Sanitizar: apenas letras e números, máximo 20 caracteres
+    const doc = docBusca.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20);
     if (!doc) return;
     setBuscandoDoc(true);
     try {
-      const docSemMask = docBusca.replace(/\D/g, '');
+      const docSemMask = doc;
 
       // Verificar venda pendente aprovada
       const { data: vpAprovada } = await supabase
@@ -134,22 +139,12 @@ export function useBuscaDocumento({
         return;
       }
 
-      // Busca exata
-      let { data: clientes } = await supabase
+      // ⭐ Busca APENAS exata (sem fallback por substring para evitar falsos positivos)
+      const { data: clientes } = await supabase
         .from('clientes')
         .select('id, nome, documento, telefone_celular, endereco, codigo_cliente, permite_emprestimo_adicional, permite_renegociacao')
         .or(`documento.eq.${docSemMask},documento.eq.${docBusca}`)
         .limit(1);
-
-      // Fallback ilike
-      if (!clientes?.length && docSemMask.length >= 3) {
-        const { data: clientesFallback } = await supabase
-          .from('clientes')
-          .select('id, nome, documento, telefone_celular, endereco, codigo_cliente, permite_emprestimo_adicional, permite_renegociacao')
-          .or(`documento.ilike.%${docSemMask}%,documento.ilike.%${docBusca}%`)
-          .limit(1);
-        clientes = clientesFallback;
-      }
 
       const cli = clientes?.[0];
       if (!cli) {
@@ -170,15 +165,27 @@ export function useBuscaDocumento({
         p_tipo_emprestimo: 'NOVO',
       });
 
-      // Buscar empréstimo ativo
+      // Buscar empréstimo ativo (incluindo rota_id para validar rota)
       const { data: emps } = await supabase
         .from('emprestimos')
-        .select('id, status, valor_saldo')
+        .select('id, status, valor_saldo, rota_id')
         .eq('cliente_id', cli.id)
         .in('status', ['ATIVO', 'VENCIDO'])
         .order('created_at', { ascending: false })
         .limit(1);
       const emp = emps?.[0];
+
+      // ⭐ Se cliente tem empréstimo ativo em OUTRA rota → BLOQUEAR
+      if (emp && emp.rota_id && vendedor?.rota_id && emp.rota_id !== vendedor.rota_id) {
+        setBuscandoDoc(false);
+        const titulo = lang === 'es' ? 'Cliente de otra ruta' : 'Cliente de outra rota';
+        const msg = lang === 'es'
+          ? `Este cliente tiene un préstamo activo en otra ruta. No es posible registrar venta.`
+          : `Este cliente possui empréstimo ativo em outra rota. Não é possível registrar venda.`;
+        if (Platform.OS === 'web') window.alert(`${titulo}\n\n${msg}`);
+        else Alert.alert(titulo, msg, [{ text: 'OK' }]);
+        return;
+      }
 
       // Verificar histórico quitado
       const { data: empsQuitados } = await supabase

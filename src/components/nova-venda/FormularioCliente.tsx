@@ -6,8 +6,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { styles } from '../../styles/novaVendaStyles';
 import type { Textos } from '../../constants/novaVendaConstants';
+import { styles } from '../../styles/novaVendaStyles';
 
 interface Props {
   // Dados
@@ -106,9 +106,15 @@ export default function FormularioCliente(props: Props) {
         <TextInput
           style={[styles.input, camposComErro.has('documento') && styles.inputError, isDisabled && styles.inputDisabled]}
           value={documento}
-          onChangeText={(text) => { setDocumento(text); limparErroCampo('documento'); }}
+          onChangeText={(text) => {
+            // ⭐ Aceita apenas letras e números (sem caracteres especiais), máximo 20
+            const limpo = text.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20);
+            setDocumento(limpo); limparErroCampo('documento');
+          }}
           placeholder={t.phDoc}
           placeholderTextColor="#9CA3AF"
+          maxLength={20}
+          autoCapitalize="characters"
           editable={!isDisabled}
         />
       </View>
