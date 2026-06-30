@@ -996,17 +996,19 @@ export function ModalResetCliente({ visible, onClose, onResetSuccess, liquidacao
         .eq('liquidacao_id', liquidacaoId)
         .eq('estornado', false);
 
-      // Buscar clientes com empréstimos criados nessa liquidação
+      // Buscar clientes com empréstimos criados nessa liquidação (excluindo cancelados)
       const { data: emps } = await supabase
         .from('emprestimos')
         .select('cliente_id, clientes!emprestimos_cliente_id_fkey(nome)')
-        .eq('liquidacao_id', liquidacaoId);
+        .eq('liquidacao_id', liquidacaoId)
+        .neq('status', 'CANCELADO');
 
-      // Buscar clientes com microseguros nessa liquidação
+      // Buscar clientes com microseguros nessa liquidação (excluindo cancelados)
       const { data: micros } = await supabase
         .from('microseguro_vendas')
         .select('cliente_id, clientes!microseguro_vendas_cliente_id_fkey(nome)')
-        .eq('liquidacao_id', liquidacaoId);
+        .eq('liquidacao_id', liquidacaoId)
+        .neq('status', 'CANCELADO');
 
       // Consolidar em mapa único clienteId → { nome, qtd }
       const map = new Map<string, { nome: string; qtd: number }>();

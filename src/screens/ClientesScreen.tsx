@@ -1155,6 +1155,120 @@ export default function ClientesScreen({ navigation, route }: any) {
     }
   }, [parcelaPagamento, dadosPagamento, valorPagamento, usarCredito, formaPagamento, coords, liqId, t, clienteModal, abrirParcelas, loadLiq, processando]);
 
+  // ═══════════════════════════════════════════════════════════════════
+  // PAGAMENTO MÚLTIPLO DE PARCELAS
+  // ═══════════════════════════════════════════════════════════════════
+  const handlePagarMultiplo = useCallback(async (
+    parcelas: ParcelaModal[], 
+    totalValor: number, 
+    creditoUsado: number
+  ) => {
+    if (processando || parcelas.length === 0 || !liqId || !clienteModal) return;
+
+    const msgConfirm = lang === 'es'
+      ? `¿Pagar ${parcelas.length} cuotas por $ ${fmt(totalValor)}?${creditoUsado > 0 ? `\nCrédito: $ ${fmt(creditoUsado)}` : ''}`
+      : `Pagar ${parcelas.length} parcelas por $ ${fmt(totalValor)}?${creditoUsado > 0 ? `\nCrédito: $ ${fmt(creditoUsado)}` : ''}`;
+
+    const executar = async () => {
+      setProcessando(true);
+      setModalParcelasVisible(false);
+      let sucessos = 0;
+      let erroMsg = '';
+      const ultimaIdx = parcelas.length - 1;
+
+      for (let i = 0; i < parcelas.length; i++) {
+        const p = parcelas[i];
+        const isUltima = i === ultimaIdx;
+        const valorPago = p.valor_pago || 0;
+        const saldoParcela = (valorPago > 0 && p.status !== 'PAGO')
+          ? (p.valor_saldo ?? (p.valor_parcela - valorPago))
+          : p.valor_parcela;
+
+        // Crédito só na última parcela
+        const credito = isUltima ? creditoUsado : 0;
+        // Valor em dinheiro = saldo da parcela - crédito aplicado
+        const valorDinheiro = Math.max(0, saldoParcela - credito);
+
+        try {
+          const { data, error } = await supabase.rpc('fn_registrar_pagamento', {
+            p_parcela_id: p.parcela_id,
+            p_valor_pagamento: valorDinheiro,
+            p_valor_credito: credito,
+            p_forma_pagamento: 'DINHEIRO',
+            p_observacoes: parcelas.length > 1 ? `[LOTE ${i + 1}/${parcelas.length}]` : null,
+            p_latitude: coords?.lat || null,
+            p_longitude: coords?.lng || null,
+            p_precisao_gps: coords?.acc || null,
+            p_liquidacao_id: liqId,
+            p_user_id: vendedor?.user_id || null,
+          });
+
+          if (error) throw error;
+          const res = Array.isArray(data) ? data[0] : data;
+          if (res?.sucesso) {
+            sucessos++;
+            // Atualização otimista por parcela
+            setPagasSet(prev => { const s = new Set(prev); s.add(p.parcela_id); return s; });
+            setPagMap(prev => {
+              const m = new Map(prev);
+              m.set(p.parcela_id, {
+                parcela_id: p.parcela_id,
+                cliente_id: clienteModal.id,
+                valor_pago_atual: valorDinheiro + credito,
+                valor_credito_gerado: 0,
+                valor_parcela: p.valor_parcela,
+                data_pagamento: new Date().toISOString(),
+                liquidacao_id: liqId || '',
+              });
+              return m;
+            });
+          } else {
+            erroMsg = res?.mensagem || `Erro na parcela ${p.numero_parcela}`;
+            break;
+          }
+        } catch (e: any) {
+          erroMsg = e.message || `Erro na parcela ${p.numero_parcela}`;
+          break;
+        }
+      }
+
+      // Marcar cliente como pago na liquidação
+      if (sucessos > 0) {
+        setClientesPagosNaLiq(prev => { const s = new Set(prev); s.add(clienteModal.id); return s; });
+        if (clienteModal.emprestimo_id) {
+          atualizarSaldoLocalLiq(clienteModal.emprestimo_id);
+          atualizarSaldoLocalTodos(clienteModal.emprestimo_id);
+        }
+      }
+
+      setProcessando(false);
+
+      if (erroMsg) {
+        showAlert(t.erroGenerico || 'Erro', 
+          `${sucessos}/${parcelas.length} ${lang === 'es' ? 'cuotas pagadas' : 'parcelas pagas'}. ${erroMsg}`);
+      } else {
+        showAlert(t.sucessoGenerico || 'Sucesso', 
+          `${sucessos} ${lang === 'es' ? 'cuotas pagadas con éxito' : 'parcelas pagas com sucesso'}!`);
+      }
+
+      setClienteModal(null);
+      setTimeout(() => loadLiq(), 500);
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(msgConfirm)) executar();
+    } else {
+      Alert.alert(
+        lang === 'es' ? 'Confirmar pago múltiple' : 'Confirmar pagamento múltiplo',
+        msgConfirm,
+        [
+          { text: t.cancelar || 'Cancelar', style: 'cancel' },
+          { text: t.pagar || 'Pagar', style: 'default', onPress: executar },
+        ]
+      );
+    }
+  }, [processando, liqId, clienteModal, coords, vendedor, lang, t, loadLiq, atualizarSaldoLocalLiq, atualizarSaldoLocalTodos]);
+
   const abrirEstorno = useCallback(async (parcela: ParcelaModal) => {
     console.log('[ESTORNO] abrirEstorno chamada, parcela:', parcela.parcela_id, 'numero:', parcela.numero_parcela);
     console.log('[ESTORNO] configVendedor:', configVendedor);
@@ -1834,8 +1948,10 @@ return (
         isViz={isViz}
         isClientePago={clienteModal ? clientesPagosNaLiq.has(clienteModal.id) : false}
         onPagar={abrirPagamento}
+        onPagarMultiplo={handlePagarMultiplo}
         onEstornar={abrirEstorno}
         pagamentosDetalhados={pagamentosDetalhados}
+        lang={lang}
         t={t}
       />
 
