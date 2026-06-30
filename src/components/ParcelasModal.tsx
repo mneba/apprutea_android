@@ -108,7 +108,9 @@ interface ParcelasModalProps {
   liqId: string | null;
   isViz: boolean;
   isClientePago?: boolean;
+  lang?: 'pt-BR' | 'es';
   onPagar: (parcela: ParcelaModal) => void;
+  onPagarMultiplo?: (parcelas: ParcelaModal[], totalValor: number, creditoUsado: number) => void;
   onEstornar: (parcela: ParcelaModal) => void;
   // Opcional: mapa parcela_id → lista de pagamentos individuais
   // Quando fornecido, cada parcela vira toque que abre o popup de detalhes
@@ -464,11 +466,91 @@ const D = StyleSheet.create({
 
 export default function ParcelasModal({
   visible, onClose, clienteModal, parcelasModal, loadingParcelas,
-  creditoDisponivel, liqId, isViz, isClientePago = false,
-  onPagar, onEstornar, pagamentosDetalhados, t,
+  creditoDisponivel, liqId, isViz, isClientePago = false, lang = 'pt-BR',
+  onPagar, onPagarMultiplo, onEstornar, pagamentosDetalhados, t,
 }: ParcelasModalProps) {
 
   const [parcelaDetalhes, setParcelaDetalhes] = useState<ParcelaModal | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Reset seleção ao fechar/abrir modal
+  useEffect(() => {
+    if (!visible) {
+      setSelectionMode(false);
+      setSelectedIds(new Set());
+    }
+  }, [visible]);
+
+  // Parcelas selecionáveis (pendentes, não canceladas, com parcela_id)
+  const isSelectable = (p: ParcelaModal) => {
+    if (!p.parcela_id) return false;
+    if (p.status === 'PAGO' || p.status === 'CANCELADO') return false;
+    if (['RENEGOCIADO', 'QUITADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '')) return false;
+    if (!liqId || isViz || isClientePago) return false;
+    return true;
+  };
+
+  // Toggle seleção
+  const toggleSelection = (p: ParcelaModal) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(p.parcela_id)) next.delete(p.parcela_id);
+      else next.add(p.parcela_id);
+      // Se desmarcou tudo, sai do modo seleção
+      if (next.size === 0) setSelectionMode(false);
+      return next;
+    });
+  };
+
+  // Long press: ativa modo seleção + seleciona a parcela
+  const handleLongPress = (p: ParcelaModal) => {
+    if (!isSelectable(p)) return;
+    setSelectionMode(true);
+    setSelectedIds(new Set([p.parcela_id]));
+  };
+
+  // Cancelar seleção
+  const cancelarSelecao = () => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  };
+
+  // Parcelas selecionadas ordenadas por numero_parcela
+  const selectedParcelas = parcelasModal
+    .filter(p => selectedIds.has(p.parcela_id))
+    .sort((a, b) => a.numero_parcela - b.numero_parcela);
+
+  // Calcular total: valor_parcela inteira OU saldo (se parcial)
+  const calcValorParcela = (p: ParcelaModal): number => {
+    const valorPago = p.valor_pago || 0;
+    if (valorPago > 0 && p.status !== 'PAGO') {
+      // Parcela com pagamento parcial → cobra só o restante
+      return p.valor_saldo ?? (p.valor_parcela - valorPago);
+    }
+    return p.valor_parcela;
+  };
+
+  // Verificar se a última parcela do empréstimo está selecionada
+  const ultimaParcelaEmprestimo = parcelasModal
+    .filter(p => p.status !== 'PAGO' && p.status !== 'CANCELADO')
+    .sort((a, b) => b.numero_parcela - a.numero_parcela)[0];
+
+  const ultimaSelecionada = ultimaParcelaEmprestimo && selectedIds.has(ultimaParcelaEmprestimo.parcela_id);
+
+  // Calcular totais
+  const subtotal = selectedParcelas.reduce((sum, p) => sum + calcValorParcela(p), 0);
+  const creditoAplicado = ultimaSelecionada && creditoDisponivel > 0
+    ? Math.min(creditoDisponivel, calcValorParcela(ultimaParcelaEmprestimo))
+    : 0;
+  const totalFinal = Math.max(0, subtotal - creditoAplicado);
+
+  // Confirmar pagamento múltiplo
+  const confirmarMultiplo = () => {
+    if (selectedParcelas.length === 0 || !onPagarMultiplo) return;
+    onPagarMultiplo(selectedParcelas, totalFinal, creditoAplicado);
+    cancelarSelecao();
+  };
 
   const abrirDetalhes = (p: ParcelaModal) => {
     if (!pagamentosDetalhados) return;
@@ -538,18 +620,50 @@ export default function ParcelasModal({
 
     // Parcela é toque quando temos pagamentosDetalhados e há algo a mostrar
     const temDetalhes = !!pagamentosDetalhados && (isPago || isParcial || temPagamentoParcial || (isVencida && valorPago > 0));
-    const Wrapper = temDetalhes ? TouchableOpacity : View;
-    const wrapperProps = temDetalhes
-      ? { activeOpacity: 0.7, onPress: () => abrirDetalhes(p) }
-      : {};
+    const isSelected = selectionMode && selectedIds.has(p.parcela_id);
+    const canSelect = isSelectable(p);
+
+    // Handler de toque: em modo seleção → toggle; senão → detalhes
+    const handlePress = () => {
+      if (selectionMode && canSelect) {
+        toggleSelection(p);
+      } else if (temDetalhes) {
+        abrirDetalhes(p);
+      }
+    };
+
+    // Handler de long press: ativa seleção
+    const handleLongPressCard = () => {
+      if (canSelect && !selectionMode) {
+        handleLongPress(p);
+      }
+    };
 
     return (
-      // @ts-ignore — Wrapper dinâmico
-      <Wrapper key={p.parcela_id} style={[S.mParcela, { borderLeftColor: iconColor }]} {...wrapperProps}>
+      <TouchableOpacity
+        key={p.parcela_id}
+        style={[
+          S.mParcela,
+          { borderLeftColor: iconColor },
+          isSelected && S.mParcelaSelected,
+        ]}
+        activeOpacity={0.7}
+        onPress={handlePress}
+        onLongPress={handleLongPressCard}
+        delayLongPress={400}
+      >
         <View style={S.mParcelaRow}>
-          {/* Ícone de status */}
-          <View style={[S.mParcelaIcon, { backgroundColor: iconBg }]}>
-            <Ionicons name={statusIcon} size={16} color={iconColor} />
+          {/* Ícone de status / checkbox de seleção */}
+          <View style={[S.mParcelaIcon, { backgroundColor: isSelected ? '#DBEAFE' : iconBg }]}>
+            {selectionMode && canSelect ? (
+              <Ionicons 
+                name={isSelected ? 'checkbox' : 'square-outline'} 
+                size={18} 
+                color={isSelected ? '#2563EB' : '#9CA3AF'} 
+              />
+            ) : (
+              <Ionicons name={statusIcon} size={16} color={iconColor} />
+            )}
           </View>
 
           {/* Info central */}
@@ -671,9 +785,9 @@ export default function ParcelasModal({
             )}
           </View>
 
-          {/* Lado direito: botões */}
+          {/* Lado direito: botões (escondidos em modo seleção) */}
           <View style={S.mParcelaBtns}>
-            {!isPago && p.parcela_id && !['RENEGOCIADO', 'QUITADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '') && p.status !== 'CANCELADO' && (
+            {!selectionMode && !isPago && p.parcela_id && !['RENEGOCIADO', 'QUITADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '') && p.status !== 'CANCELADO' && (
               <TouchableOpacity
                 style={[S.mBtnPagar, (!liqId || isViz || isClientePago) && S.mBtnPagarDisabled]}
                 onPress={() => onPagar(p)}
@@ -683,7 +797,7 @@ export default function ParcelasModal({
                 <Text style={S.mBtnPagarTx}>{t.pagar}</Text>
               </TouchableOpacity>
             )}
-            {(isPago || valorPago > 0) && p.parcela_id && liqId && !isViz && p.liquidacao_id === liqId && !['QUITADO', 'RENEGOCIADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '') && (
+            {!selectionMode && (isPago || valorPago > 0) && p.parcela_id && liqId && !isViz && p.liquidacao_id === liqId && !['QUITADO', 'RENEGOCIADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '') && (
               <TouchableOpacity style={S.mBtnEstornar} onPress={() => onEstornar(p)}>
                 <Ionicons name="arrow-undo-outline" size={14} color="#EF4444" />
                 <Text style={S.mBtnEstornarTx}>{t.estornar}</Text>
@@ -691,7 +805,7 @@ export default function ParcelasModal({
             )}
           </View>
         </View>
-      </Wrapper>
+      </TouchableOpacity>
     );
   };
 
@@ -717,10 +831,13 @@ export default function ParcelasModal({
             )}
 
             {/* Hint de toque (quando detalhes disponíveis) */}
-            {pagamentosDetalhados && (
+            {/* Hint: detalhes de parcela paga (só quando não tem parcelas selecionáveis) */}
+            {pagamentosDetalhados && !parcelasModal.some(p => isSelectable(p)) && (
               <View style={S.hintBar}>
                 <Ionicons name="information-circle-outline" size={13} color="#6B7280" />
-                <Text style={S.hintText}>Toque em uma parcela paga para ver detalhes</Text>
+                <Text style={S.hintText}>
+                  {lang === 'es' ? 'Toque en una cuota pagada para ver detalles' : 'Toque em uma parcela paga para ver detalhes'}
+                </Text>
               </View>
             )}
 
@@ -735,6 +852,46 @@ export default function ParcelasModal({
               )}
               <View style={{ height: 10 }} />
             </ScrollView>
+
+            {/* Barra de seleção múltipla */}
+            {selectionMode && selectedParcelas.length > 0 && (
+              <View style={S.selBar}>
+                <View style={S.selInfo}>
+                  <Text style={S.selCount}>
+                    {selectedParcelas.length} {selectedParcelas.length === 1
+                      ? (lang === 'es' ? 'cuota' : 'parcela')
+                      : (lang === 'es' ? 'cuotas' : 'parcelas')}
+                  </Text>
+                  {creditoAplicado > 0 && (
+                    <Text style={S.selCredito}>
+                      <Ionicons name="card-outline" size={11} color="#2563EB" /> {lang === 'es' ? 'Crédito' : 'Crédito'}: -{fmt(creditoAplicado)}
+                    </Text>
+                  )}
+                  <Text style={S.selTotal}>
+                    {lang === 'es' ? 'Total' : 'Total'}: {fmt(totalFinal)}
+                  </Text>
+                </View>
+                <View style={S.selBtns}>
+                  <TouchableOpacity style={S.selBtnCancel} onPress={cancelarSelecao} activeOpacity={0.7}>
+                    <Ionicons name="close" size={18} color="#6B7280" />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={S.selBtnPagar} onPress={confirmarMultiplo} activeOpacity={0.7}>
+                    <Ionicons name="cash-outline" size={16} color="#fff" />
+                    <Text style={S.selBtnPagarTx}>{t.pagar}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* Hint de seleção múltipla (apenas fora do modo seleção) */}
+            {!selectionMode && !loadingParcelas && parcelasModal.some(p => isSelectable(p)) && (
+              <View style={S.hintBar}>
+                <Ionicons name="hand-left-outline" size={13} color="#9CA3AF" />
+                <Text style={S.hintText}>
+                  {lang === 'es' ? 'Mantenga presionado para seleccionar varias cuotas' : 'Segure para selecionar várias parcelas'}
+                </Text>
+              </View>
+            )}
 
             {/* Botão Fechar */}
             <View style={S.mBtnFecharWrap}>
@@ -831,4 +988,16 @@ const S = StyleSheet.create({
   mBtnFecharWrap: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 20, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
   mBtnFechar: { backgroundColor: '#3B82F6', paddingVertical: 14, borderRadius: 10, alignItems: 'center' },
   mBtnFecharTx: { fontSize: 15, fontWeight: '700', color: '#fff' },
+
+  // Seleção múltipla
+  mParcelaSelected: { backgroundColor: '#EFF6FF', borderColor: '#3B82F6', borderWidth: 2 },
+  selBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#F0FDF4', borderTopWidth: 1, borderTopColor: '#BBF7D0' },
+  selInfo: { flex: 1 },
+  selCount: { fontSize: 13, fontWeight: '600', color: '#374151' },
+  selCredito: { fontSize: 11, color: '#2563EB', marginTop: 2 },
+  selTotal: { fontSize: 16, fontWeight: '700', color: '#059669', marginTop: 2 },
+  selBtns: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  selBtnCancel: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
+  selBtnPagar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#10B981', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10, gap: 6 },
+  selBtnPagarTx: { color: '#fff', fontSize: 14, fontWeight: '700' },
 });
