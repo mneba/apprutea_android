@@ -113,6 +113,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
   const [valor, setValor] = useState('');
   const [descricao, setDescricao] = useState('');
   const [fotoUri, setFotoUri] = useState<string | null>(null);
+  const [fotoBase64, setFotoBase64] = useState<string | null>(null);
   const [fotoUploading, setFotoUploading] = useState(false);
 
   // Categorias
@@ -216,10 +217,14 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
     }
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
+      allowsEditing: false,
       quality: 0.7,
+      base64: true,
     });
-    if (!result.canceled && result.assets[0]) setFotoUri(result.assets[0].uri);
+    if (!result.canceled && result.assets[0]) {
+      setFotoUri(result.assets[0].uri);
+      setFotoBase64(result.assets[0].base64 || null);
+    }
   };
 
   const abrirGaleria = async () => {
@@ -230,29 +235,47 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
+      allowsEditing: false,
       quality: 0.7,
+      base64: true,
     });
-    if (!result.canceled && result.assets[0]) setFotoUri(result.assets[0].uri);
+    if (!result.canceled && result.assets[0]) {
+      setFotoUri(result.assets[0].uri);
+      setFotoBase64(result.assets[0].base64 || null);
+    }
   };
 
   const uploadFoto = async (liquidacaoId: string, vendedorId: string): Promise<string | null> => {
-    if (!fotoUri) return null;
+    if (!fotoBase64) {
+      console.warn('[UPLOAD-FOTO] fotoBase64 vazio — nada a enviar');
+      return null;
+    }
     setFotoUploading(true);
     try {
-      const ext = fotoUri.split('.').pop()?.toLowerCase() || 'jpg';
+      const ext = (fotoUri?.split('.').pop()?.toLowerCase()) || 'jpg';
       const fileName = `movimentacoes/${vendedorId}/${liquidacaoId}_${Date.now()}.${ext}`;
-      const response = await fetch(fotoUri);
-      const blob = await response.blob();
-      const { error } = await supabase.storage.from('fotos').upload(fileName, blob, {
-        contentType: `image/${ext === 'jpg' ? 'jpeg' : ext}`,
+      const contentType = ext === 'png' ? 'image/png' : 'image/jpeg';
+
+      // ⭐ base64 → Uint8Array (padrão confiável em React Native/Hermes)
+      const byteChars = atob(fotoBase64);
+      const byteArray = new Uint8Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) {
+        byteArray[i] = byteChars.charCodeAt(i);
+      }
+
+      const { error } = await supabase.storage.from('fotos').upload(fileName, byteArray, {
+        contentType,
         upsert: false,
       });
-      if (error) throw error;
+      if (error) {
+        console.error('[UPLOAD-FOTO] erro upload:', error);
+        throw error;
+      }
       const { data: urlData } = supabase.storage.from('fotos').getPublicUrl(fileName);
+      console.log('[UPLOAD-FOTO] URL gerada:', urlData.publicUrl);
       return urlData.publicUrl;
     } catch (err) {
-      console.error('Erro upload foto:', err);
+      console.error('[UPLOAD-FOTO] Erro:', err);
       return null;
     } finally {
       setFotoUploading(false);
@@ -570,7 +593,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
                   <TouchableOpacity style={styles.fotoBtnSecondary} onPress={handleAdicionarFoto} activeOpacity={0.7}>
                     <Text style={styles.fotoBtnSecondaryText}>🔄 {t.trocarFoto}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.fotoBtnRemover} onPress={() => setFotoUri(null)} activeOpacity={0.7}>
+                  <TouchableOpacity style={styles.fotoBtnRemover} onPress={() => { setFotoUri(null); setFotoBase64(null); }} activeOpacity={0.7}>
                     <Text style={styles.fotoBtnRemoverText}>✕ {t.removerFoto}</Text>
                   </TouchableOpacity>
                 </View>
