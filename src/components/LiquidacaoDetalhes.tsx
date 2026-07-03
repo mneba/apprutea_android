@@ -12,6 +12,7 @@ import {
   Alert,
   Dimensions,
   FlatList,
+  Image,
   Modal,
   Platform,
   ScrollView,
@@ -996,19 +997,17 @@ export function ModalResetCliente({ visible, onClose, onResetSuccess, liquidacao
         .eq('liquidacao_id', liquidacaoId)
         .eq('estornado', false);
 
-      // Buscar clientes com empréstimos criados nessa liquidação (excluindo cancelados)
+      // Buscar clientes com empréstimos criados nessa liquidação
       const { data: emps } = await supabase
         .from('emprestimos')
         .select('cliente_id, clientes!emprestimos_cliente_id_fkey(nome)')
-        .eq('liquidacao_id', liquidacaoId)
-        .neq('status', 'CANCELADO');
+        .eq('liquidacao_id', liquidacaoId);
 
-      // Buscar clientes com microseguros nessa liquidação (excluindo cancelados)
+      // Buscar clientes com microseguros nessa liquidação
       const { data: micros } = await supabase
         .from('microseguro_vendas')
         .select('cliente_id, clientes!microseguro_vendas_cliente_id_fkey(nome)')
-        .eq('liquidacao_id', liquidacaoId)
-        .neq('status', 'CANCELADO');
+        .eq('liquidacao_id', liquidacaoId);
 
       // Consolidar em mapa único clienteId → { nome, qtd }
       const map = new Map<string, { nome: string; qtd: number }>();
@@ -1476,6 +1475,8 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
   const [cancelandoEmprestimo, setCancelandoEmprestimo] = useState<any | null>(null);
   const [motivoCancelamento, setMotivoCancelamento] = useState('');
   const [confirmandoCancelamento, setConfirmandoCancelamento] = useState(false);
+  // ⭐ Modal de visualização de comprovante (foto)
+  const [fotoVisualizacaoUrl, setFotoVisualizacaoUrl] = useState<string | null>(null);
   // Microseguro vinculado ao empréstimo (se houver) — null = ainda buscando, undefined = não tem
   const [microseguroVinculado, setMicroseguroVinculado] = useState<number | null | undefined>(undefined);
 
@@ -1519,7 +1520,7 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
 
       let query = supabase
         .from('financeiro')
-        .select('id, tipo, categoria, descricao, valor, created_at, forma_pagamento, cliente_nome, vendedor_nome, status')
+        .select('id, tipo, categoria, descricao, valor, created_at, forma_pagamento, cliente_nome, vendedor_nome, status, foto_url')
         .eq('liquidacao_id', liquidacaoId)
         .in('status', ['PAGO', 'ANULADO'])  // Inclui anulados para mostrar riscados
         .order('created_at', { ascending: false });
@@ -1771,9 +1772,20 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
         </Text>
       </View>
       <View style={[dStyles.finItemBottom, { justifyContent: 'space-between' }]}>
-        <View style={{ flexDirection: 'row', gap: 16 }}>
+        <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
           <Text style={dStyles.finItemHora}>{fmtHora(item.created_at)}</Text>
           {item.forma_pagamento && <Text style={dStyles.finItemForma}>{item.forma_pagamento}</Text>}
+          {item.foto_url && (
+            <TouchableOpacity
+              onPress={() => setFotoVisualizacaoUrl(item.foto_url)}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}
+            >
+              <Ionicons name="image-outline" size={14} color="#3B82F6" />
+              <Text style={{ fontSize: 11, fontWeight: '600', color: '#3B82F6' }}>
+                {lang === 'es' ? 'Comprobante' : 'Comprovante'}
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
         {podeExcluir && (
           <TouchableOpacity 
@@ -1858,6 +1870,39 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
           />
         )}
       </View>
+
+      {/* ⭐ MODAL VISUALIZAÇÃO DE COMPROVANTE (foto) */}
+      <Modal
+        visible={!!fotoVisualizacaoUrl}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFotoVisualizacaoUrl(null)}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={() => setFotoVisualizacaoUrl(null)}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center', padding: 20 }}
+        >
+          {fotoVisualizacaoUrl && (
+            <Image
+              source={{ uri: fotoVisualizacaoUrl }}
+              style={{ width: '100%', height: '80%' }}
+              resizeMode="contain"
+            />
+          )}
+          <TouchableOpacity
+            onPress={() => setFotoVisualizacaoUrl(null)}
+            style={{
+              position: 'absolute', top: 40, right: 20,
+              backgroundColor: 'rgba(255,255,255,0.2)',
+              borderRadius: 20, width: 40, height: 40,
+              justifyContent: 'center', alignItems: 'center',
+            }}
+          >
+            <Ionicons name="close" size={24} color="#fff" />
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
 
       {/* ⭐ MODAL DE CONFIRMAÇÃO DE CANCELAMENTO DE EMPRÉSTIMO */}
       <Modal
