@@ -129,6 +129,19 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
   const [valorConfirmado, setValorConfirmado] = useState('');
   const [descConfirmada, setDescConfirmada] = useState('');
 
+  // ⭐ Solicitação de autorização (quando excede limite)
+  const [modalSolicitacaoVisible, setModalSolicitacaoVisible] = useState(false);
+  const [justificativa, setJustificativa] = useState('');
+  const [enviandoSolicitacao, setEnviandoSolicitacao] = useState(false);
+  const [limiteExcedidoInfo, setLimiteExcedidoInfo] = useState<{
+    limite: number;
+    totalAcumulado: number;
+    liquidacaoId: string;
+    rotaId: string;
+    empresaId: string;
+    vendedorId: string;
+  } | null>(null);
+
   // -----------------------------------------------------------
   // CARREGAR CATEGORIAS
   // -----------------------------------------------------------
@@ -285,6 +298,58 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
   // -----------------------------------------------------------
   // SUBMIT
   // -----------------------------------------------------------
+  // ⭐ Enviar solicitação de autorização (quando excede limite)
+  const enviarSolicitacao = async () => {
+    if (!limiteExcedidoInfo) return;
+    if (!justificativa.trim()) {
+      Alert.alert(t.atencao || 'Atenção', lang === 'es'
+        ? 'La justificación es obligatoria'
+        : 'A justificativa é obrigatória');
+      return;
+    }
+    setEnviandoSolicitacao(true);
+    try {
+      // Upload foto se houver (antes de criar a solicitação)
+      let fotoUrl: string | null = null;
+      if (fotoBase64) {
+        fotoUrl = await uploadFoto(limiteExcedidoInfo.liquidacaoId, limiteExcedidoInfo.vendedorId);
+      }
+
+      const tipoMov = tipo === 'PAGAR' ? 'DESPESA' : 'RECEITA';
+      const { data, error } = await supabase.rpc('fn_solicitar_movimentacao_pendente', {
+        p_vendedor_id:     limiteExcedidoInfo.vendedorId,
+        p_rota_id:         limiteExcedidoInfo.rotaId,
+        p_liquidacao_id:   limiteExcedidoInfo.liquidacaoId,
+        p_tipo:            tipoMov,
+        p_categoria:       categoria,
+        p_descricao:       descricao.trim() || null,
+        p_valor:           valorNumerico,
+        p_forma_pagamento: 'DINHEIRO',
+        p_foto_url:        fotoUrl,
+        p_justificativa:   justificativa.trim(),
+        p_valor_limite:    limiteExcedidoInfo.limite,
+      });
+      if (error) throw error;
+      const res = Array.isArray(data) ? data[0] : data;
+      if (!res?.sucesso) throw new Error(res?.mensagem || 'Erro ao solicitar');
+
+      setModalSolicitacaoVisible(false);
+      setJustificativa('');
+      setLimiteExcedidoInfo(null);
+      Alert.alert(
+        lang === 'es' ? 'Solicitud enviada' : 'Solicitação enviada',
+        lang === 'es'
+          ? 'Aguarde la aprobación del administrador.'
+          : 'Aguarde a aprovação do administrador.',
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
+      );
+    } catch (err: any) {
+      Alert.alert(t.erro || 'Erro', err?.message || 'Erro ao enviar solicitação');
+    } finally {
+      setEnviandoSolicitacao(false);
+    }
+  };
+
   const handleSubmit = async () => {
     // Etapa 1 - Validação
     if (valorNumerico <= 0) {
@@ -324,12 +389,12 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
 
     setEnviando(true);
     try {
-      // Etapa 3 - Buscar liquidação ABERTA
+      // Etapa 3 - Buscar liquidação ABERTA (com totais para validação de limite)
       const { data: liqData, error: liqError } = await supabase
         .from('liquidacoes_diarias')
-        .select('id')
+        .select('id, total_despesas_dia, total_receitas_dia')
         .eq('rota_id', rotaId)
-        .in('status', ['ABERTO', 'ABERTA'])
+        .in('status', ['ABERTO', 'ABERTA', 'REABERTO'])
         .order('data_abertura', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -340,6 +405,53 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
           'Nenhuma liquidação aberta encontrada. Abra uma liquidação antes de registrar movimentações.'
         );
         return;
+      }
+
+      // ⭐ Etapa 3.5 - Verificar limite do vendedor
+      const { data: restr } = await supabase
+        .from('restricoes_vendedor')
+        .select('validar_valor_gastos, valor_max_gastos, validar_valor_entradas, valor_max_entradas')
+        .eq('vendedor_id', vendedorId)
+        .maybeSingle();
+
+      const isDespesa = tipo === 'PAGAR';
+      const validarLimite = isDespesa
+        ? (restr?.validar_valor_gastos && Number(restr?.valor_max_gastos || 0) > 0)
+        : (restr?.validar_valor_entradas && Number(restr?.valor_max_entradas || 0) > 0);
+      const limite = isDespesa ? Number(restr?.valor_max_gastos || 0) : Number(restr?.valor_max_entradas || 0);
+
+      if (validarLimite) {
+        // Total já efetivado hoje
+        const totalEfetivado = isDespesa
+          ? Number(liqData.total_despesas_dia || 0)
+          : Number(liqData.total_receitas_dia || 0);
+
+        // Soma das movimentações PENDENTES do mesmo tipo nessa liquidação
+        const tipoMov = isDespesa ? 'DESPESA' : 'RECEITA';
+        const { data: pendData } = await supabase
+          .from('movimentacoes_pendentes')
+          .select('valor')
+          .eq('liquidacao_id', liqData.id)
+          .eq('tipo', tipoMov)
+          .eq('status', 'PENDENTE');
+        const totalPendente = (pendData || []).reduce((s, m) => s + Number(m.valor || 0), 0);
+
+        const totalAcumulado = totalEfetivado + totalPendente + valorNumerico;
+
+        if (totalAcumulado > limite) {
+          // ⭐ Excedeu — abrir modal de solicitação
+          setLimiteExcedidoInfo({
+            limite,
+            totalAcumulado,
+            liquidacaoId: liqData.id,
+            rotaId: rotaId!,
+            empresaId,
+            vendedorId,
+          });
+          setModalSolicitacaoVisible(true);
+          setEnviando(false);
+          return;
+        }
       }
 
       // Etapa 4 - RPC
@@ -664,6 +776,88 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
           )}
         </TouchableOpacity>
       </View>
+
+      {/* ================================================ */}
+      {/* ⭐ MODAL: Solicitação de Autorização (limite)   */}
+      {/* ================================================ */}
+      <Modal
+        visible={modalSolicitacaoVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { if (!enviandoSolicitacao) { setModalSolicitacaoVisible(false); setJustificativa(''); } }}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 20 }}>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: '#DC2626', marginBottom: 8 }}>
+              ⚠️ {lang === 'es' ? 'Límite excedido' : 'Limite excedido'}
+            </Text>
+            {limiteExcedidoInfo && (
+              <View style={{ backgroundColor: '#FEF3C7', padding: 12, borderRadius: 8, marginBottom: 12 }}>
+                <Text style={{ fontSize: 13, color: '#78350F', marginBottom: 4 }}>
+                  {lang === 'es' ? 'Su límite:' : 'Seu limite:'} $ {limiteExcedidoInfo.limite.toFixed(2)}
+                </Text>
+                <Text style={{ fontSize: 13, color: '#78350F', marginBottom: 4 }}>
+                  {lang === 'es' ? 'Con esta operación:' : 'Com esta operação:'} $ {limiteExcedidoInfo.totalAcumulado.toFixed(2)}
+                </Text>
+                <Text style={{ fontSize: 12, color: '#92400E', marginTop: 6 }}>
+                  {lang === 'es'
+                    ? 'Esta operación necesita aprobación del administrador.'
+                    : 'Esta operação precisa de aprovação do administrador.'}
+                </Text>
+              </View>
+            )}
+            <Text style={{ fontSize: 14, fontWeight: '600', color: '#374151', marginBottom: 6 }}>
+              {lang === 'es' ? 'Justificación *' : 'Justificativa *'}
+            </Text>
+            <TextInput
+              style={{
+                backgroundColor: '#F9FAFB',
+                borderRadius: 10,
+                padding: 12,
+                borderWidth: 1,
+                borderColor: '#E5E7EB',
+                fontSize: 14,
+                color: '#111827',
+                minHeight: 90,
+                textAlignVertical: 'top',
+                marginBottom: 16,
+              }}
+              value={justificativa}
+              onChangeText={setJustificativa}
+              placeholder={lang === 'es'
+                ? 'Explique el motivo de esta operación...'
+                : 'Explique o motivo desta operação...'}
+              placeholderTextColor="#9CA3AF"
+              multiline
+              editable={!enviandoSolicitacao}
+            />
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity
+                style={{ flex: 1, backgroundColor: '#F3F4F6', paddingVertical: 14, borderRadius: 10, alignItems: 'center' }}
+                onPress={() => { setModalSolicitacaoVisible(false); setJustificativa(''); }}
+                disabled={enviandoSolicitacao}
+              >
+                <Text style={{ fontSize: 14, fontWeight: '600', color: '#6B7280' }}>
+                  {lang === 'es' ? 'Cancelar' : 'Cancelar'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ flex: 1, backgroundColor: enviandoSolicitacao ? '#93C5FD' : '#3B82F6', paddingVertical: 14, borderRadius: 10, alignItems: 'center' }}
+                onPress={enviarSolicitacao}
+                disabled={enviandoSolicitacao || !justificativa.trim()}
+              >
+                {enviandoSolicitacao ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>
+                    {lang === 'es' ? 'Enviar solicitud' : 'Enviar solicitação'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* ================================================ */}
       {/* MODAL: Seleção de Categoria                      */}
