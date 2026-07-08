@@ -300,7 +300,8 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
   // -----------------------------------------------------------
   // ⭐ Enviar solicitação de autorização (quando excede limite)
   const enviarSolicitacao = async () => {
-    if (!limiteExcedidoInfo) return;
+    console.log('[SOL] enviarSolicitacao chamado. limiteExcedidoInfo:', limiteExcedidoInfo, 'justificativa:', justificativa);
+    if (!limiteExcedidoInfo) { console.log('[SOL] SEM limiteExcedidoInfo'); return; }
     if (!justificativa.trim()) {
       Alert.alert(t.atencao || 'Atenção', lang === 'es'
         ? 'La justificación es obligatoria'
@@ -316,6 +317,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
       }
 
       const tipoMov = tipo === 'PAGAR' ? 'DESPESA' : 'RECEITA';
+      console.log('[SOL] chamando RPC');
       const { data, error } = await supabase.rpc('fn_solicitar_movimentacao_pendente', {
         p_vendedor_id:     limiteExcedidoInfo.vendedorId,
         p_rota_id:         limiteExcedidoInfo.rotaId,
@@ -329,6 +331,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
         p_justificativa:   justificativa.trim(),
         p_valor_limite:    limiteExcedidoInfo.limite,
       });
+      console.log('[SOL] RPC retornou:', { data, error });
       if (error) throw error;
       const res = Array.isArray(data) ? data[0] : data;
       if (!res?.sucesso) throw new Error(res?.mensagem || 'Erro ao solicitar');
