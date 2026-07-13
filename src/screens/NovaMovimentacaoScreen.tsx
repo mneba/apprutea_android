@@ -336,16 +336,28 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
       const res = Array.isArray(data) ? data[0] : data;
       if (!res?.sucesso) throw new Error(res?.mensagem || 'Erro ao solicitar');
 
+      // ⭐ Fechar modal + resetar estados
       setModalSolicitacaoVisible(false);
       setJustificativa('');
       setLimiteExcedidoInfo(null);
-      Alert.alert(
-        lang === 'es' ? 'Solicitud enviada' : 'Solicitação enviada',
-        lang === 'es'
-          ? 'Aguarde la aprobación del administrador.'
-          : 'Aguarde a aprovação do administrador.',
-        [{ text: 'OK', onPress: () => navigation.goBack() }]
-      );
+      setEnviandoSolicitacao(false);
+
+      const titulo = lang === 'es' ? 'Solicitud enviada' : 'Solicitação enviada';
+      const msg = lang === 'es'
+        ? 'Aguarde la aprobación del administrador.'
+        : 'Aguarde a aprovação do administrador.';
+
+      // Fecha a tela IMEDIATAMENTE e depois mostra alerta
+      // (não depende do OK do Alert para navegar)
+      navigation.goBack();
+      setTimeout(() => {
+        if (Platform.OS === 'web') {
+          window.alert(`${titulo}\n\n${msg}`);
+        } else {
+          Alert.alert(titulo, msg);
+        }
+      }, 300);
+      return;
     } catch (err: any) {
       Alert.alert(t.erro || 'Erro', err?.message || 'Erro ao enviar solicitação');
     } finally {
