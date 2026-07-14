@@ -321,13 +321,25 @@ export const SolicitacoesWidget: React.FC<Props> = ({ vendedorId, rotaId, lang =
   };
 
   const formatarData = (data: string) => {
-    const d = new Date(data);
-    return d.toLocaleDateString(lang === 'es' ? 'es-ES' : 'pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    // ⭐ Fallback manual (evita bugs de Intl no RN Android com timezone UTC-3)
+    // Se o backend retornar timestamp com timezone (ex: 2026-07-13T23:13:00Z),
+    // convertemos manualmente para America/Sao_Paulo (UTC-3)
+    try {
+      const d = new Date(data);
+      if (isNaN(d.getTime())) return data;
+
+      // Ajuste manual: subtrai 3h (UTC-3 de São Paulo)
+      const offsetMs = 3 * 60 * 60 * 1000;
+      const local = new Date(d.getTime() - offsetMs);
+
+      const dia = String(local.getUTCDate()).padStart(2, '0');
+      const mes = String(local.getUTCMonth() + 1).padStart(2, '0');
+      const hora = String(local.getUTCHours()).padStart(2, '0');
+      const min = String(local.getUTCMinutes()).padStart(2, '0');
+      return `${dia}/${mes}, ${hora}:${min}`;
+    } catch {
+      return data;
+    }
   };
 
   const formatarValor = (valor: number) => {
