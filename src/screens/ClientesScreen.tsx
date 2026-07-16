@@ -430,17 +430,6 @@ export default function ClientesScreen({ navigation, route }: any) {
     onReload: liqCtx.recarregarClientes,
   });
 
-  // DEBUG TEMPORÁRIO - REMOVER DEPOIS
-  console.log('🔍 DEBUG ClientesScreen:', JSON.stringify({
-    liqId: liqId || 'NULL',
-    ctxAtualId: liqCtx.liquidacaoAtual?.id || 'NULL',
-    ctxAtualStatus: liqCtx.liquidacaoAtual?.status || 'NULL',
-    ctxTemAberta: liqCtx.temLiquidacaoAberta,
-    ctxLoading: liqCtx.loadingLiquidacao,
-    ctxIdViz: liqCtx.liquidacaoIdVisualizacao || 'NULL',
-    vendedorRotaId: vendedor?.rota_id || 'NULL',
-  }));
-
   const lang = liqCtx.language || 'pt-BR';
   // Se não há liquidação aberta, força tab "todos"
   const [tab, setTab] = useState<TabAtiva>(!liqId ? 'todos' : 'liquidacao');

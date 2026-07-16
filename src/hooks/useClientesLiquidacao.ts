@@ -59,7 +59,6 @@ export default function useClientesLiquidacao({ rotaId, dataLiq, liqId }: UseCli
   useEffect(() => {
     if (ctx.clientesUpdatedAt > 0 && ctx.clientesUpdatedAt !== lastCtxUpdate.current) {
       lastCtxUpdate.current = ctx.clientesUpdatedAt;
-      console.log('⚡ Clientes espelhados do contexto (updatedAt=' + ctx.clientesUpdatedAt + ')');
       setRaw(ctx.clientesRaw as ClienteRotaDia[]);
       setPagasSet(new Set(ctx.pagasSet));
       setPagMap(new Map(ctx.pagMap as Map<string, PagamentoParcela>));

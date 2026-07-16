@@ -49,29 +49,17 @@ const RESULTADO_VAZIO: ClientesDiaResult = {
   ordemRotaMap: null,
 };
 
-// ─── Helper interno ───────────────────────────────────────────────────────────
-
-const buscarCreditoMap = async (empIds: string[]): Promise<Map<string, number>> => {
-  if (empIds.length === 0) return new Map();
-  const { data } = await supabase
-    .from('emprestimo_parcelas')
-    .select('emprestimo_id, saldo_excedente')
-    .in('emprestimo_id', empIds)
-    .gt('saldo_excedente', 0);
-  const creditoMap = new Map<string, number>();
-  (data || []).forEach((p: any) => {
-    const atual = creditoMap.get(p.emprestimo_id) || 0;
-    creditoMap.set(p.emprestimo_id, atual + parseFloat(p.saldo_excedente || 0));
-  });
-  return creditoMap;
-};
-
 // ─── Função principal de leitura ──────────────────────────────────────────────
 //
-// COSTURA OFFLINE: hoje esta função lê direto do Supabase (online).
-// No futuro (Track 2 — offline), é AQUI que entra a lógica "ler do store local
-// primeiro, sincronizar com a rede em background". As telas e o contexto não
-// precisam saber a origem dos dados — só chamam getClientesDia.
+// UMA ONDA. A RPC fn_liquidacao_dia_completa devolve, num único payload, tudo
+// que antes exigia 3 idas ao Supabase:
+//   • clientes/parcelas do dia            (antiga Onda 1)
+//   • foto_url + data_emprestimo          (antiga Onda 2 — embutidas)
+//   • estado de pagamento + ordem da rota (antiga Onda 4 — colunas prontas)
+//   • parcelas já pagas nesta liquidação  (antiga Onda 3 — braço B do UNION)
+//
+// COSTURA OFFLINE: continua sendo aqui que, no futuro (Track 2), entra o
+// "ler do store local primeiro". As telas/contexto não sabem a origem dos dados.
 //
 export async function getClientesDia(
   { rotaId, dataLiq, liqId }: ClientesDiaParams
@@ -82,192 +70,103 @@ export async function getClientesDia(
   }
   console.log('🔍 getClientesDia:', { rotaId, dataLiq, liqId });
 
-  // 1. Busca clientes para a liquidação do dia via function
-  const { data, error } = await supabase
-    .rpc('fn_clientes_liquidacao_dia', {
-      p_rota_id: rotaId,
-      p_data_referencia: dataLiq,
-    });
+  // ⏱️ INSTRUMENTAÇÃO — comparar com o "antes" (~1100ms, 3 ondas). Remover depois.
+  const __t0 = performance.now();
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ÚNICA VIAGEM — RPC completa
+  // ═══════════════════════════════════════════════════════════════════════
+  const { data, error } = await supabase.rpc('fn_liquidacao_dia_completa', {
+    p_rota_id: rotaId,
+    p_data_referencia: dataLiq,
+    p_liquidacao_id: liqId,
+  });
+  const __tRede = performance.now();
 
   if (error) throw error;
 
-  let allData = ((data || []) as any[]).map(r => ({
-    ...r,
-    codigo_cliente: r.codigo_cliente ?? r.consecutivo ?? null,
-  })) as ClienteRotaDia[];
-  const existingParcelaIds = new Set(allData.map(r => r.parcela_id));
+  const rows = (data || []) as any[];
 
   // ═══════════════════════════════════════════════════════════════════════
-  // ENRIQUECIMENTO PARALELO (Q2 + Q4 + Q5 ao mesmo tempo)
+  // MONTAGEM 100% LOCAL (medido em ~0,1ms com N pequeno)
   // ═══════════════════════════════════════════════════════════════════════
-  const empIdsUnicos = [...new Set(allData.map(r => r.emprestimo_id).filter(Boolean))];
-  const clienteIdsUnicos = [...new Set(allData.map(r => r.cliente_id).filter(Boolean))];
+  const raw: ClienteRotaDia[] = [];
+  const pagasSet = new Set<string>();
+  const pagMap = new Map<string, PagamentoParcela>();
+  const clientesPagosNaLiq = new Set<string>();
+  const ordemTmp = new Map<string, number>();
+  let temAlgumaOrdem = false;
 
-  const [empsResult, fotosResult, pagLiqResult] = await Promise.all([
-    // Q2: data_emprestimo
-    empIdsUnicos.length > 0
-      ? supabase.from('emprestimos').select('id, data_emprestimo').in('id', empIdsUnicos)
-      : Promise.resolve({ data: null }),
-    // Q4: foto_url
-    clienteIdsUnicos.length > 0
-      ? supabase.from('clientes').select('id, foto_url').in('id', clienteIdsUnicos).not('foto_url', 'is', null)
-      : Promise.resolve({ data: null }),
-    // Q5: pagamentos da liquidação atual
-    liqId
-      ? supabase.from('pagamentos_parcelas')
-          .select('parcela_id, cliente_id, emprestimo_id, liquidacao_id, numero_parcela, valor_parcela, valor_pago_atual, valor_credito_gerado, estornado')
-          .eq('liquidacao_id', liqId).eq('estornado', false)
-      : Promise.resolve({ data: null }),
-  ]);
+  for (const r of rows) {
+    // 1) linha do cliente/parcela (formato ClienteRotaDia)
+    raw.push({
+      cliente_id: r.cliente_id,
+      codigo_cliente: r.codigo_cliente ?? (r.consecutivo != null ? Number(r.consecutivo) : null),
+      nome: r.nome,
+      telefone_celular: r.telefone_celular,
+      endereco: r.endereco,
+      foto_url: r.foto_url ?? null,
+      latitude: r.latitude,
+      longitude: r.longitude,
+      emprestimo_id: r.emprestimo_id,
+      saldo_emprestimo: r.saldo_emprestimo,
+      valor_principal: r.valor_principal,
+      numero_parcelas: r.numero_parcelas,
+      status_emprestimo: r.status_emprestimo,
+      rota_id: r.rota_id,
+      frequencia_pagamento: r.frequencia_pagamento,
+      parcela_id: r.parcela_id,
+      numero_parcela: r.numero_parcela,
+      valor_parcela: r.valor_parcela,
+      valor_pago_parcela: r.valor_pago_parcela ?? 0,
+      saldo_parcela: r.saldo_parcela,
+      status_parcela: r.status_parcela,
+      data_vencimento: r.data_vencimento,
+      ordem_visita_dia: r.ordem_visita_dia ?? null,
+      liquidacao_id: r.liquidacao_id ?? null,
+      tem_parcelas_vencidas: r.tem_parcelas_vencidas,
+      total_parcelas_vencidas: r.total_parcelas_vencidas,
+      valor_total_vencido: r.valor_total_vencido,
+      status_dia: r.status_dia,
+      permite_emprestimo_adicional: r.permite_emprestimo_adicional,
+      is_parcela_atrasada: r.is_parcela_atrasada,
+      data_emprestimo: r.data_emprestimo ?? null,
+    });
 
-  // Aplicar data_emprestimo
-  if (empsResult.data && empsResult.data.length > 0) {
-    const empDataMap = new Map((empsResult.data as any[]).map(e => [e.id, e.data_emprestimo]));
-    allData = allData.map(r => ({ ...r, data_emprestimo: empDataMap.get(r.emprestimo_id) || null }));
-  }
+    // 2) pagasSet — flag pronta vinda do banco
+    if (r.parcela_paga) pagasSet.add(r.parcela_id);
 
-  // ⚠️ REMOVIDO: buscarCreditoMap — trigger atualizar_saldo_emprestimo já desconta crédito no banco
-
-  // Aplicar foto_url
-  if (fotosResult.data && fotosResult.data.length > 0) {
-    const fotoMap = new Map((fotosResult.data as any[]).map(c => [c.id, c.foto_url]));
-    allData = allData.map(r => ({ ...r, foto_url: fotoMap.get(r.cliente_id) || null }));
-  }
-
-  // 2. Processar parcelas pagas na liquidação atual (pagamentos novos)
-  const pagamentos = pagLiqResult.data;
-  if (pagamentos && pagamentos.length > 0) {
-    const pagamentosNovos = pagamentos.filter((p: any) => !existingParcelaIds.has(p.parcela_id));
-
-    if (pagamentosNovos.length > 0) {
-      const clienteIds = [...new Set(pagamentosNovos.map((p: any) => p.cliente_id))];
-      const empIds = [...new Set(pagamentosNovos.map((p: any) => p.emprestimo_id))];
-      const parcIds = pagamentosNovos.map((p: any) => p.parcela_id);
-
-      // Sub-queries em paralelo (Q5a + Q5b + Q5c)
-      const [cliResult, empResult, parcResult] = await Promise.all([
-        supabase.from('clientes')
-          .select('id, nome, telefone_celular, endereco, latitude, longitude, codigo_cliente, foto_url')
-          .in('id', clienteIds),
-        supabase.from('emprestimos')
-          .select('id, valor_principal, valor_saldo, numero_parcelas, status, frequencia_pagamento, rota_id, data_emprestimo')
-          .in('id', empIds),
-        supabase.from('emprestimo_parcelas')
-          .select('id, data_vencimento, status')
-          .in('id', parcIds),
-      ]);
-
-      const cliMap = new Map(((cliResult.data || []) as any[]).map(c => [c.id, c]));
-      const empMap = new Map(((empResult.data || []) as any[]).map(e => [e.id, e]));
-      const parcMap = new Map(((parcResult.data || []) as any[]).map(p => [p.id, p]));
-
-      pagamentosNovos.forEach((pag: any) => {
-        const cli = cliMap.get(pag.cliente_id);
-        const emp = empMap.get(pag.emprestimo_id);
-        const parc = parcMap.get(pag.parcela_id);
-        if (!cli || !emp) return;
-
-        const pagaRow: ClienteRotaDia = {
-          cliente_id: cli.id,
-          nome: cli.nome,
-          telefone_celular: cli.telefone_celular,
-          endereco: cli.endereco,
-          latitude: cli.latitude,
-          longitude: cli.longitude,
-          codigo_cliente: cli.codigo_cliente,
-          foto_url: cli.foto_url || null,
-          emprestimo_id: emp.id,
-          saldo_emprestimo: emp.valor_saldo,
-          valor_principal: emp.valor_principal,
-          numero_parcelas: emp.numero_parcelas,
-          status_emprestimo: emp.status,
-          rota_id: emp.rota_id,
-          frequencia_pagamento: emp.frequencia_pagamento,
-          parcela_id: pag.parcela_id,
-          numero_parcela: pag.numero_parcela,
-          valor_parcela: pag.valor_parcela,
-          valor_pago_parcela: pag.valor_pago_atual,
-          saldo_parcela: 0,
-          status_parcela: parc?.status || 'PAGO',
-          data_vencimento: parc?.data_vencimento || new Date().toISOString(),
-          ordem_visita_dia: null,
-          liquidacao_id: pag.liquidacao_id,
-          tem_parcelas_vencidas: false,
-          total_parcelas_vencidas: 0,
-          valor_total_vencido: 0,
-          status_dia: 'PAGO',
-          permite_emprestimo_adicional: false,
-          is_parcela_atrasada: false,
-          data_emprestimo: (emp as any).data_emprestimo || null,
-        };
-        allData.push(pagaRow);
-        existingParcelaIds.add(pag.parcela_id);
+    // 3) pagMap — só para parcelas que tiveram pagamento
+    if (r.valor_pago_atual && r.valor_pago_atual > 0) {
+      pagMap.set(r.parcela_id, {
+        parcela_id: r.parcela_id,
+        cliente_id: r.cliente_id,
+        valor_pago_atual: r.valor_pago_atual,
+        valor_credito_gerado: r.valor_credito_gerado ?? 0,
+        valor_parcela: r.valor_parcela,
+        data_pagamento: r.data_pagamento,
       });
     }
+
+    // 4) clientesPagosNaLiq — flag pronta vinda do banco
+    if (r.pago_nesta_liq) clientesPagosNaLiq.add(r.cliente_id);
+
+    // 5) ordem da rota — só marca se houver valor
+    if (r.ordem_visita_dia != null) {
+      ordemTmp.set(r.cliente_id, Number(r.ordem_visita_dia));
+      temAlgumaOrdem = true;
+    }
   }
 
-  console.log('📊 getClientesDia resultado:', {
-    countOriginal: data?.length || 0,
-    countTotal: allData.length,
-    rotaId, dataLiq, liqId,
-  });
+  // null = sem ordem para aplicar (o contexto não deve sobrescrever o map atual)
+  const ordemRotaMap: Map<string, number> | null = temAlgumaOrdem ? ordemTmp : null;
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // 3. PagasSet / PagMap / ClientesPagos + Ordem da rota — EM PARALELO
-  // ═══════════════════════════════════════════════════════════════════════
-  let pagasSet = new Set<string>();
-  let pagMap = new Map<string, PagamentoParcela>();
-  let clientesPagosNaLiq = new Set<string>();
+  const __total = +(performance.now() - __t0).toFixed(1);
+  const __rede = +(__tRede - __t0).toFixed(1);
+  console.log(
+    `⏱️ getClientesDia [RPC única] — TOTAL ${__total}ms · REDE ${__rede}ms (1 onda) · JS ${+(__total - __rede).toFixed(1)}ms\n` +
+    `   → clientes: ${raw.length}`
+  );
 
-  const ids = allData.map((r: any) => r.parcela_id).filter(Boolean);
-  const clienteIdsOrdem = [...new Set(allData.map(r => r.cliente_id))];
-
-  const [pagsResult, todosPagLiqResult, ordensResult] = await Promise.all([
-    // Q6: pagamentos de todas as parcelas
-    ids.length > 0
-      ? supabase.from('pagamentos_parcelas')
-          .select('parcela_id, cliente_id, valor_pago_atual, valor_credito_gerado, valor_parcela, data_pagamento, created_at, liquidacao_id')
-          .in('parcela_id', ids).eq('estornado', false)
-          .order('created_at', { ascending: true })
-      : Promise.resolve({ data: null }),
-    // Q7: todos os clientes que pagaram nesta liquidação
-    liqId
-      ? supabase.from('pagamentos_parcelas')
-          .select('cliente_id').eq('liquidacao_id', liqId).eq('estornado', false)
-      : Promise.resolve({ data: null }),
-    // Q8: ordem da rota
-    clienteIdsOrdem.length > 0
-      ? supabase.from('ordem_rota_cliente')
-          .select('cliente_id, ordem').eq('rota_id', rotaId).in('cliente_id', clienteIdsOrdem)
-      : Promise.resolve({ data: null }),
-  ]);
-
-  // Processar pagamentos
-  ((pagsResult.data || []) as any[]).forEach((p: any) => {
-    pagMap.set(p.parcela_id, p);
-    if (p.valor_pago_atual >= p.valor_parcela) pagasSet.add(p.parcela_id);
-    if (liqId && p.liquidacao_id === liqId) {
-      clientesPagosNaLiq.add(p.cliente_id);
-    }
-  });
-
-  // Clientes pagos na liquidação
-  ((todosPagLiqResult.data || []) as any[]).forEach((p: any) => clientesPagosNaLiq.add(p.cliente_id));
-
-  // Status das parcelas no raw
-  allData.forEach((r: any) => {
-    if (r.status_dia === 'PAGO' || r.status_parcela === 'PAGO') {
-      pagasSet.add(r.parcela_id);
-    }
-  });
-
-  // Ordem da rota
-  let ordemRotaMap: Map<string, number> | null = null;
-  if (ordensResult.data && ordensResult.data.length > 0) {
-    const m = new Map<string, number>();
-    (ordensResult.data as any[]).forEach(o => m.set(o.cliente_id, Number(o.ordem)));
-    ordemRotaMap = m;
-  }
-
-  return { raw: allData, pagasSet, pagMap, clientesPagosNaLiq, ordemRotaMap };
+  return { raw, pagasSet, pagMap, clientesPagosNaLiq, ordemRotaMap };
 }
