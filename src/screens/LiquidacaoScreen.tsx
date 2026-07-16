@@ -1963,7 +1963,7 @@ const { width } = Dimensions.get('window');
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#EEF2FF' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EEF2FF' },
-  header: { backgroundColor: '#3B82F6', paddingTop: 50, paddingBottom: 20, paddingHorizontal: 16, borderBottomLeftRadius: 24, borderBottomRightRadius: 24, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  header: { backgroundColor: '#3B82F6', paddingTop: 50, paddingBottom: 20, paddingHorizontal: 20, borderBottomLeftRadius: 24, borderBottomRightRadius: 24, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   headerTitle: { color: '#fff', fontSize: 18, fontWeight: '600' },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   statusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
@@ -1975,13 +1975,13 @@ const styles = StyleSheet.create({
   avatarSmall: { width: 32, height: 32, borderRadius: 16, borderWidth: 2, borderColor: 'rgba(255,255,255,0.6)' },
   avatarSmallPlaceholder: { width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.25)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.6)' },
   avatarSmallText: { fontSize: 16 },
-  fecharCalendarioBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#DBEAFE', marginHorizontal: 16, marginTop: 12, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1, borderColor: '#93C5FD' },
+  fecharCalendarioBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#DBEAFE', marginHorizontal: 20, marginTop: 12, paddingVertical: 12, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1, borderColor: '#93C5FD' },
   fecharCalendarioIcon: { fontSize: 18, color: '#2563EB', fontWeight: '700', marginRight: 10 },
   fecharCalendarioText: { fontSize: 14, color: '#2563EB', fontWeight: '600' },
-  content: { flex: 1, paddingHorizontal: 16, paddingTop: 16 },
+  content: { flex: 1, paddingHorizontal: 20, paddingTop: 16 },
   
   // Banner Visualização
-  bannerVisualizacao: { backgroundColor: '#FEF3C7', paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#FDE68A' },
+  bannerVisualizacao: { backgroundColor: '#FEF3C7', paddingVertical: 12, paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: '#FDE68A' },
   bannerConteudo: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   bannerIcone: { fontSize: 18, marginRight: 10 },
   bannerTextos: { flex: 1 },

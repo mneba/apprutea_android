@@ -10,7 +10,6 @@ import {
   Platform,
   RefreshControl,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -100,6 +99,7 @@ interface EmprestimoTodos {
 interface PagamentoParcela {
   parcela_id: string; cliente_id: string; valor_pago_atual: number;
   valor_credito_gerado: number; valor_parcela: number; data_pagamento: string;
+  created_at?: string; liquidacao_id?: string;
 }
 
 interface ParcelaModal {
@@ -154,7 +154,7 @@ const textos = {
     modoVisualizacaoSair: 'Sair',
     estornar: 'Estornar', venc: 'Venc:', em: 'Pago em:', liq: 'Liquidação:', fechar: 'Fechar',
     quitarTudo: 'QUITAR TUDO', confirmar: 'Confirmar', cancelar: 'Cancelar',
-    atencaoQuitacao: '⚠️ Quitação de Empréstimo',
+    atencaoQuitacao: 'Quitação de Empréstimo',
     confirmarQuitar: 'Sim, Quitar',
     creditoDisponivel: 'Crédito disponível:',
     registrarPagamento: 'Registrar Pagamento', valorAPagar: 'Valor a pagar',
@@ -248,7 +248,7 @@ const textos = {
     modoVisualizacaoSair: 'Salir',
     estornar: 'Reversar', venc: 'Venc:', em: 'Pagado:', liq: 'Liquidación:', fechar: 'Cerrar',
     quitarTudo: 'LIQUIDAR TODO', confirmar: 'Confirmar', cancelar: 'Cancelar',
-    atencaoQuitacao: '⚠️ Liquidación de Préstamo',
+    atencaoQuitacao: 'Liquidación de Préstamo',
     confirmarQuitar: 'Sí, Liquidar',
     creditoDisponivel: 'Crédito disponible:',
     registrarPagamento: 'Registrar Pago', valorAPagar: 'Valor a pagar',
@@ -711,7 +711,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         // Atualizar set local
         setNaoPagosSet(prev => new Set([...prev, naoPagoParcelaInfo.parcela_id]));
         setModalNaoPagoVisible(false);
-        showAlert('✓', res.mensagem || (lang === 'es' ? 'Cliente registrado como no pagó' : 'Cliente registrado como não pagou'));
+        showAlert('OK', res.mensagem || (lang === 'es' ? 'Cliente registrado como no pagó' : 'Cliente registrado como não pagou'));
       } else {
         showAlert('Erro', res?.mensagem || 'Erro ao registrar');
       }
@@ -759,13 +759,18 @@ export default function ClientesScreen({ navigation, route }: any) {
         return;
       }
       
-      // Ao voltar para a tela, recarrega a lista ativa
-      console.log('🔄 useFocusEffect: Tela recebeu foco, recarregando lista...');
-      if (tab === 'liquidacao') {
-        loadLiq();
+      // Ao voltar para a tela, só recarrega se dados estão stale (>30s)
+      const agora = Date.now();
+      const stale = agora - (liqCtx.clientesUpdatedAt || 0) > 30000;
+      if (stale) {
+        console.log('🔄 useFocusEffect: Dados stale, recarregando...');
+        if (tab === 'liquidacao') {
+          loadLiq();
+        } else {
+          loadTodosClientes(true);
+        }
       } else {
-        setTodosList([]);
-        loadTodosClientes(true);
+        console.log('✅ useFocusEffect: Dados frescos, sem recarregar');
       }
       // Recarregar mapa de solicitações (pode ter mudado ao voltar de NovaVenda)
       if (rotaId) {
@@ -806,7 +811,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     if (tab === 'liquidacao') loadLiq(true);
-    else { setTodosList([]); loadTodosClientes(true); }
+    else loadTodosClientes(true);
   }, [tab, loadLiq, loadTodosClientes]);
 
   const abrirParcelas = useCallback(async (clienteId: string, clienteNome: string, emprestimoId: string, empStatus?: string) => {
@@ -1118,6 +1123,7 @@ export default function ClientesScreen({ navigation, route }: any) {
               valor_credito_gerado: 0,
               valor_parcela: dadosPagamento?.valor_parcela || parcelaPagamento.valor_parcela,
               data_pagamento: new Date().toISOString(),
+              created_at: new Date().toISOString(),
               liquidacao_id: liqId || '',
             });
             return m;
@@ -1136,13 +1142,13 @@ export default function ClientesScreen({ navigation, route }: any) {
     // Se vai quitar, pedir confirmação
     if (vaiQuitar) {
       const msgQuitar = t.confirmarQuitacao || 
-        `Este pagamento irá QUITAR o empréstimo.\n\nSaldo: ${fmt(saldoEmp)}\nPagando: ${fmt(totalPagando)}\n\nTodas as parcelas restantes serão marcadas como pagas.\n\n⚠️ Esta ação é irreversível.`;
+        `Este pagamento irá QUITAR o empréstimo.\n\nSaldo: ${fmt(saldoEmp)}\nPagando: ${fmt(totalPagando)}\n\nTodas as parcelas restantes serão marcadas como pagas.\n\nEsta ação é irreversível.`;
       
       if (Platform.OS === 'web') {
         if (window.confirm(msgQuitar)) executarPagamento();
       } else {
         Alert.alert(
-          t.atencaoQuitacao || '⚠️ Quitação de Empréstimo',
+          t.atencaoQuitacao || 'Quitação de Empréstimo',
           msgQuitar,
           [
             { text: t.cancelar || 'Cancelar', style: 'cancel' },
@@ -1218,6 +1224,7 @@ export default function ClientesScreen({ navigation, route }: any) {
                 valor_credito_gerado: 0,
                 valor_parcela: p.valor_parcela,
                 data_pagamento: new Date().toISOString(),
+                created_at: new Date().toISOString(),
                 liquidacao_id: liqId || '',
               });
               return m;
@@ -1555,8 +1562,9 @@ export default function ClientesScreen({ navigation, route }: any) {
   }, [grouped, busca, filtro, filtroFrequencia, ord, isCliPago, ordemRotaMap]);
 
   const cntTotal = grouped.filter(c => !isCliPago(c)).length;
-  const cntAtraso = grouped.filter(c => c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas)).length;
+  const cntAtraso = grouped.filter(c => !isCliPago(c) && c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas)).length;
   const cntPagas = grouped.filter(c => isCliPago(c)).length;
+  const cntTotalGeral = grouped.length;
   const clientesLiqIds = useMemo(() => new Set(grouped.map(c => c.cliente_id)), [grouped]);
   const eIdx = (cid: string) => empIdxMap[cid] || 0;
   const eSet = (cid: string, i: number) => setEmpIdxMap(p => ({ ...p, [cid]: i }));
@@ -1730,7 +1738,7 @@ return (
         t={t}
       />
 
-      {isViz && (<View style={S.vizBanner}><View style={S.vizBannerContent}><Text style={S.vizBannerIcon}>⚠️</Text><View style={S.vizBannerTexts}><Text style={S.vizBannerTitle}>{t.modoVisualizacao}</Text><Text style={S.vizBannerDesc}>{t.modoVisualizacaoDesc} {fmtData(dataLiq)}</Text></View></View></View>)}
+      {isViz && (<View style={S.vizBanner}><View style={S.vizBannerContent}><Ionicons name="alert-circle" size={20} color="#D97706" /><View style={S.vizBannerTexts}><Text style={S.vizBannerTitle}>{t.modoVisualizacao}</Text><Text style={S.vizBannerDesc}>{t.modoVisualizacaoDesc} {fmtData(dataLiq)}</Text></View></View></View>)}
       
       {/* Banner de liquidação fechada quando não há liqId */}
       {!liqId && !isViz && (
@@ -1747,21 +1755,16 @@ return (
           NOVO HEADER REDESENHADO
           ═══════════════════════════════════════════════════════════════════════ */}
       
-      {/* Linha 1: Título + Toggle Todos */}
+      {/* Linha 1: Título */}
       <View style={S.newHeader}>
         <Text style={S.newTitle}>{t.titulo || 'Clientes'}</Text>
-        <View style={S.toggleContainer}>
-          <Switch
-            value={tab === 'todos'}
-            onValueChange={(v) => {
-              if (v) setTab('todos');
-              else if (liqId) setTab('liquidacao');
-            }}
-            trackColor={{ false: '#D1D5DB', true: '#3B82F6' }}
-            thumbColor="#FFF"
-            disabled={!liqId && tab === 'liquidacao'}
-          />
-          <Text style={S.toggleLabel}>{t.todosList || 'Todos'}</Text>
+        <View style={S.filterRight}>
+          <TouchableOpacity style={S.filterBtn} onPress={openDrawer} activeOpacity={0.7}>
+            <Ionicons name="options-outline" size={20} color="#374151" />
+          </TouchableOpacity>
+          <TouchableOpacity style={S.helpBtn} onPress={() => setModalLegendaVisible(true)} activeOpacity={0.7}>
+            <Ionicons name="help-circle-outline" size={20} color="#9CA3AF" />
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -1784,37 +1787,45 @@ return (
         </View>
       </View>
 
-      {/* Linha 3: Contador + Badge Pagas + Botão Filtro */}
-      <View style={S.filterRow}>
-        <View style={S.filterLeft}>
-          {tab === 'liquidacao' ? (
-            <Text style={S.counterText}>
-              {t.liquidacao} {cntTotal - cntPagas}/{cntTotal}
+      {/* Linha 3: Controle Segmentado */}
+      <View style={S.segmentRow}>
+        <View style={S.segmentGroup}>
+          {/* Liquidação */}
+          <TouchableOpacity
+            style={[S.segmentBtn, tab === 'liquidacao' && filtro !== 'pagas' && S.segmentBtnActive]}
+            onPress={() => { if (liqId) { setTab('liquidacao'); setFiltro('todos'); } }}
+            activeOpacity={0.7}
+            disabled={!liqId}
+          >
+            <Ionicons name="receipt-outline" size={14} color={tab === 'liquidacao' && filtro !== 'pagas' ? '#fff' : (liqId ? '#374151' : '#9CA3AF')} />
+            <Text style={[S.segmentBtnText, tab === 'liquidacao' && filtro !== 'pagas' && S.segmentBtnTextActive, !liqId && { color: '#9CA3AF' }]}>
+              {lang === 'es' ? 'Liquidación' : 'Liquidação'} {liqId ? cntTotal : ''}
             </Text>
-          ) : (
-            <Text style={S.counterText}>
-              {t.todosList} {todosFilt.length}
-            </Text>
-          )}
-          {tab === 'liquidacao' && cntPagas > 0 && (
-            <TouchableOpacity 
-              style={[S.badgePagas, filtro === 'pagas' && S.badgePagasActive]} 
-              onPress={() => setFiltro(filtro === 'pagas' ? 'todos' : 'pagas')}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="checkmark-circle" size={14} color={filtro === 'pagas' ? '#FFF' : '#10B981'} />
-              <Text style={[S.badgePagasText, filtro === 'pagas' && S.badgePagasTextActive]}>
-                {t.filtroPagas} {cntPagas}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-        <View style={S.filterRight}>
-          <TouchableOpacity style={S.filterBtn} onPress={openDrawer} activeOpacity={0.7}>
-            <Ionicons name="options-outline" size={20} color="#374151" />
           </TouchableOpacity>
-          <TouchableOpacity style={S.helpBtn} onPress={() => setModalLegendaVisible(true)} activeOpacity={0.7}>
-            <Ionicons name="help-circle-outline" size={20} color="#9CA3AF" />
+
+          {/* Pagos */}
+          <TouchableOpacity
+            style={[S.segmentBtn, tab === 'liquidacao' && filtro === 'pagas' && S.segmentBtnActivePagos]}
+            onPress={() => { if (liqId && cntPagas > 0) { setTab('liquidacao'); setFiltro('pagas'); } }}
+            activeOpacity={0.7}
+            disabled={!liqId || cntPagas === 0}
+          >
+            <Ionicons name="checkmark-circle-outline" size={14} color={tab === 'liquidacao' && filtro === 'pagas' ? '#fff' : (cntPagas > 0 ? '#10B981' : '#9CA3AF')} />
+            <Text style={[S.segmentBtnText, tab === 'liquidacao' && filtro === 'pagas' && S.segmentBtnTextActive, cntPagas === 0 && { color: '#9CA3AF' }]}>
+              {lang === 'es' ? 'Pagados' : 'Pagos'} {cntPagas > 0 ? cntPagas : ''}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Todos */}
+          <TouchableOpacity
+            style={[S.segmentBtn, tab === 'todos' && S.segmentBtnActiveTodos]}
+            onPress={() => setTab('todos')}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="people-outline" size={14} color={tab === 'todos' ? '#fff' : '#374151'} />
+            <Text style={[S.segmentBtnText, tab === 'todos' && S.segmentBtnTextActive]}>
+              {lang === 'es' ? 'Todos' : 'Todos'} {todosCount ?? ''}
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -1854,16 +1865,47 @@ return (
         }}
         t={t}
       />
-      {tab === 'liquidacao' ? (
-        filtered.length === 0 ? (
-          <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View>
+      {/* ═══════════════════════════════════════════════════════════════════════
+          LISTAS — ambas sempre montadas, visibilidade via display
+          ═══════════════════════════════════════════════════════════════════════ */}
+      
+      {/* Lista Liquidação (hidden quando tab !== 'liquidacao') */}
+      <View style={[{ flex: 1 }, tab !== 'liquidacao' && { display: 'none' }]}>
+        {filtered.length === 0 ? (
+          <View style={S.em}><Ionicons name="document-text-outline" size={48} color="#9CA3AF" /><Text style={S.emT}>{t.semClientes}</Text></View>
         ) : (
           <View style={{ flex: 1 }}>
             <FlatList
               ref={flatListLiqRef}
               data={filtered}
               keyExtractor={(item) => item.cliente_id}
-              renderItem={({ item }) => renderCard(item)}
+              renderItem={({ item }) => {
+                if (filtro === 'pagas') {
+                  const e = eAtual(item);
+                  const pag = pagMap.get(e.parcela_id);
+                  const dtSrc = pag?.created_at || pag?.data_pagamento;
+                  const fmtDtPag = dtSrc ? (() => {
+                    if (dtSrc.includes('T') || dtSrc.includes('+') || dtSrc.length > 10) {
+                      const d = new Date(dtSrc);
+                      return `${d.toLocaleDateString(lang === 'es' ? 'es' : 'pt-BR', { day: '2-digit', month: '2-digit' })} · ${d.toLocaleTimeString(lang === 'es' ? 'es' : 'pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+                    }
+                    const [y, m, day] = dtSrc.split('-');
+                    return `${day}/${m}`;
+                  })() : null;
+                  return (
+                    <View>
+                      {fmtDtPag && (
+                        <View style={S.pagDateHeader}>
+                          <Ionicons name="time-outline" size={12} color="#10B981" />
+                          <Text style={S.pagDateText}>{lang === 'es' ? 'Pagado' : 'Pago'}: {fmtDtPag}</Text>
+                        </View>
+                      )}
+                      {renderCard(item)}
+                    </View>
+                  );
+                }
+                return renderCard(item);
+              }}
               style={S.ls}
               contentContainerStyle={S.lsI}
               refreshControl={!isViz ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined}
@@ -1899,12 +1941,15 @@ return (
               <View style={S.alphaIndicator}><Text style={S.alphaIndicatorText}>{activeLetterLiq}</Text></View>
             )}
           </View>
-        )
-      ) : (
-        loadTodos ? (
+        )}
+      </View>
+
+      {/* Lista Todos (hidden quando tab !== 'todos') */}
+      <View style={[{ flex: 1 }, tab !== 'todos' && { display: 'none' }]}>
+        {loadTodos ? (
           <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
         ) : todosFilt.length === 0 ? (
-          <View style={S.em}><Text style={S.emI}>📋</Text><Text style={S.emT}>{t.semClientes}</Text></View>
+          <View style={S.em}><Ionicons name="document-text-outline" size={48} color="#9CA3AF" /><Text style={S.emT}>{t.semClientes}</Text></View>
         ) : (
           <View style={{ flex: 1 }}>
             <FlatList
@@ -1947,8 +1992,8 @@ return (
               <View style={S.alphaIndicator}><Text style={S.alphaIndicatorText}>{activeLetterTodos}</Text></View>
             )}
           </View>
-        )
-      )}
+        )}
+      </View>
 
       {/* MODAL PARCELAS */}
       <ParcelasModal
@@ -2220,23 +2265,23 @@ const S = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingTop: 16,
-    paddingBottom: 12,
+    paddingBottom: 8,
   },
   newTitle: {
     fontSize: 24,
     fontWeight: '700',
     color: '#1F2937',
   },
-  toggleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  toggleLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#6B7280',
-  },
+
+  // Controle segmentado
+  segmentRow: { paddingHorizontal: 16, paddingBottom: 10 },
+  segmentGroup: { flexDirection: 'row', backgroundColor: '#E5E7EB', borderRadius: 10, padding: 3 },
+  segmentBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 8, gap: 4 },
+  segmentBtnActive: { backgroundColor: '#3B82F6', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.15, shadowRadius: 2, elevation: 2 },
+  segmentBtnActivePagos: { backgroundColor: '#10B981', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.15, shadowRadius: 2, elevation: 2 },
+  segmentBtnActiveTodos: { backgroundColor: '#D97706', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.15, shadowRadius: 2, elevation: 2 },
+  segmentBtnText: { fontSize: 12, fontWeight: '600', color: '#374151' },
+  segmentBtnTextActive: { color: '#fff' },
 
   // Search
   searchRow: {
@@ -2261,44 +2306,7 @@ const S = StyleSheet.create({
     padding: 0,
   },
 
-  // Filter row
-  filterRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-  },
-  filterLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  counterText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#6B7280',
-  },
-  badgePagas: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#D1FAE5',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 16,
-    gap: 5,
-  },
-  badgePagasActive: {
-    backgroundColor: '#10B981',
-  },
-  badgePagasText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#10B981',
-  },
-  badgePagasTextActive: {
-    color: '#FFF',
-  },
+  // Filter buttons
   filterRight: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2350,8 +2358,12 @@ const S = StyleSheet.create({
   emT: { fontSize: 14, color: '#9CA3AF' },
 
   // Alphabet sidebar indicator
-  alphaIndicator: { position: 'absolute', left: '50%', top: '45%', marginLeft: -30, marginTop: -30, width: 60, height: 60, borderRadius: 12, backgroundColor: 'rgba(59,130,246,0.9)', justifyContent: 'center', alignItems: 'center', zIndex: 200 },
+  alphaIndicator: { position: 'absolute', left: '50%', top: '45%', marginLeft: -30, marginTop: -30, width: 60, height: 60, borderRadius: 12, backgroundColor: 'rgba(59,130,246,0.9)', justifyContent: 'center', alignItems: 'center', zIndex: 200, pointerEvents: 'none' },
   alphaIndicatorText: { color: '#fff', fontSize: 28, fontWeight: '800' },
+
+  // Data/hora pagamento (visão Pagos)
+  pagDateHeader: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 2 },
+  pagDateText: { fontSize: 11, fontWeight: '600', color: '#10B981' },
 
   // ⭐ Modal Não Pago
   naoPagoOverlay: {

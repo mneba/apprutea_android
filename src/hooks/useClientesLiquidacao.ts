@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// ─── Types (re-exportados do repo) ──────────────────────────────────────────
 
 export interface ClienteRotaDia {
   cliente_id: string; codigo_cliente: number | null; nome: string;
@@ -23,26 +24,13 @@ export interface ClienteRotaDia {
 export interface PagamentoParcela {
   parcela_id: string; cliente_id: string; valor_pago_atual: number;
   valor_credito_gerado: number; valor_parcela: number; data_pagamento: string;
+  created_at?: string; liquidacao_id?: string;
 }
 
-// ─── Helper ─────────────────────────────────────────────────────────────────
-
-const buscarCreditoMap = async (empIds: string[]): Promise<Map<string, number>> => {
-  if (empIds.length === 0) return new Map();
-  const { data } = await supabase
-    .from('emprestimo_parcelas')
-    .select('emprestimo_id, saldo_excedente')
-    .in('emprestimo_id', empIds)
-    .gt('saldo_excedente', 0);
-  const creditoMap = new Map<string, number>();
-  (data || []).forEach((p: any) => {
-    const atual = creditoMap.get(p.emprestimo_id) || 0;
-    creditoMap.set(p.emprestimo_id, atual + parseFloat(p.saldo_excedente || 0));
-  });
-  return creditoMap;
-};
-
 // ─── Hook ───────────────────────────────────────────────────────────────────
+// Wrapper fino sobre o LiquidacaoContext.
+// NÃO faz queries próprias — espelha os dados do contexto e expõe setters
+// para atualizações otimistas (pagamento, estorno).
 
 interface UseClientesLiquidacaoParams {
   rotaId: string | null | undefined;
@@ -51,6 +39,9 @@ interface UseClientesLiquidacaoParams {
 }
 
 export default function useClientesLiquidacao({ rotaId, dataLiq, liqId }: UseClientesLiquidacaoParams) {
+  const ctx = useLiquidacaoContext();
+
+  // Estado local — espelha o contexto, mas permite atualizações otimistas
   const [raw, setRaw] = useState<ClienteRotaDia[]>([]);
   const [pagasSet, setPagasSet] = useState<Set<string>>(new Set());
   const [pagMap, setPagMap] = useState<Map<string, PagamentoParcela>>(new Map());
@@ -59,224 +50,43 @@ export default function useClientesLiquidacao({ rotaId, dataLiq, liqId }: UseCli
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Ref para evitar loop: marca quando dados vieram do contexto
+  const lastCtxUpdate = useRef(0);
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Sincronizar contexto → estado local (quando contexto atualiza)
+  // ═══════════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (ctx.clientesUpdatedAt > 0 && ctx.clientesUpdatedAt !== lastCtxUpdate.current) {
+      lastCtxUpdate.current = ctx.clientesUpdatedAt;
+      console.log('⚡ Clientes espelhados do contexto (updatedAt=' + ctx.clientesUpdatedAt + ')');
+      setRaw(ctx.clientesRaw as ClienteRotaDia[]);
+      setPagasSet(new Set(ctx.pagasSet));
+      setPagMap(new Map(ctx.pagMap as Map<string, PagamentoParcela>));
+      setClientesPagosNaLiq(new Set(ctx.clientesPagosNaLiq));
+      if (ctx.ordemRotaMap.size > 0) setOrdemRotaMap(new Map(ctx.ordemRotaMap));
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [ctx.clientesUpdatedAt]);
+
+  // Se o contexto ainda está carregando na montagem, refletir no loading
+  useEffect(() => {
+    if (ctx.carregandoClientes) setLoading(true);
+  }, [ctx.carregandoClientes]);
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // loadLiq: delega ao contexto (sem queries próprias)
+  // ═══════════════════════════════════════════════════════════════════════
   const loadLiq = useCallback(async () => {
     if (!rotaId) {
-      console.log('❌ loadLiq: rotaId não definido');
       setLoading(false);
       setRefreshing(false);
       return;
     }
-    console.log('🔍 loadLiq: Buscando clientes...', { rotaId, dataLiq, liqId });
-    try {
-      // 1. Busca clientes para a liquidação do dia via function
-      const { data, error } = await supabase
-        .rpc('fn_clientes_liquidacao_dia', {
-          p_rota_id: rotaId,
-          p_data_referencia: dataLiq
-        });
-
-      if (error) throw error;
-
-      let allData = ((data || []) as any[]).map(r => ({
-        ...r,
-        codigo_cliente: r.codigo_cliente ?? r.consecutivo ?? null,
-      })) as ClienteRotaDia[];
-      const existingParcelaIds = new Set(allData.map(r => r.parcela_id));
-
-      // Enriquecer com data_emprestimo (RPC não retorna esse campo)
-      const empIdsUnicos = [...new Set(allData.map(r => r.emprestimo_id).filter(Boolean))];
-      if (empIdsUnicos.length > 0) {
-        const { data: empsData } = await supabase
-          .from('emprestimos')
-          .select('id, data_emprestimo')
-          .in('id', empIdsUnicos);
-        if (empsData && empsData.length > 0) {
-          const empDataMap = new Map((empsData as any[]).map(e => [e.id, e.data_emprestimo]));
-          allData = allData.map(r => ({ ...r, data_emprestimo: empDataMap.get(r.emprestimo_id) || null }));
-        }
-
-        // ⚠️ REMOVIDO: Desconto de crédito do saldo do empréstimo
-        // A trigger atualizar_saldo_emprestimo já desconta saldo_excedente no banco.
-        // Descontar aqui causava desconto duplo.
-      }
-
-      // Enriquecer com foto_url dos clientes
-      const clienteIdsUnicos = [...new Set(allData.map(r => r.cliente_id).filter(Boolean))];
-      if (clienteIdsUnicos.length > 0) {
-        const { data: fotosData } = await supabase
-          .from('clientes')
-          .select('id, foto_url')
-          .in('id', clienteIdsUnicos)
-          .not('foto_url', 'is', null);
-        if (fotosData && fotosData.length > 0) {
-          const fotoMap = new Map((fotosData as any[]).map(c => [c.id, c.foto_url]));
-          allData = allData.map(r => ({ ...r, foto_url: fotoMap.get(r.cliente_id) || null }));
-        }
-      }
-
-      // 2. Busca parcelas que foram pagas NA liquidação atual (para mostrar como "pagas")
-      if (liqId) {
-        console.log('🔍 Buscando parcelas pagas na liquidação:', liqId);
-
-        const { data: pagamentos, error: errPag } = await supabase
-          .from('pagamentos_parcelas')
-          .select('parcela_id, cliente_id, emprestimo_id, liquidacao_id, numero_parcela, valor_parcela, valor_pago_atual, valor_credito_gerado, estornado')
-          .eq('liquidacao_id', liqId)
-          .eq('estornado', false);
-
-        console.log('📦 Pagamentos na liquidação:', { count: pagamentos?.length, error: errPag?.message });
-
-        if (pagamentos && pagamentos.length > 0) {
-          const pagamentosNovos = pagamentos.filter(p => !existingParcelaIds.has(p.parcela_id));
-          console.log('📋 Pagamentos não listados:', pagamentosNovos.length);
-
-          if (pagamentosNovos.length > 0) {
-            const clienteIds = [...new Set(pagamentosNovos.map(p => p.cliente_id))];
-            const { data: clientes } = await supabase
-              .from('clientes')
-              .select('id, nome, telefone_celular, endereco, latitude, longitude, codigo_cliente, foto_url')
-              .in('id', clienteIds);
-            const cliMap = new Map((clientes || []).map(c => [c.id, c]));
-
-            const empIds = [...new Set(pagamentosNovos.map(p => p.emprestimo_id))];
-            const { data: emps } = await supabase
-              .from('emprestimos')
-              .select('id, valor_principal, valor_saldo, numero_parcelas, status, frequencia_pagamento, rota_id, data_emprestimo')
-              .in('id', empIds);
-            const empMap = new Map((emps || []).map(e => [e.id, e]));
-
-            const parcIds = pagamentosNovos.map(p => p.parcela_id);
-            const { data: parcs } = await supabase
-              .from('emprestimo_parcelas')
-              .select('id, data_vencimento, status')
-              .in('id', parcIds);
-            const parcMap = new Map((parcs || []).map(p => [p.id, p]));
-
-            pagamentosNovos.forEach(pag => {
-              const cli = cliMap.get(pag.cliente_id);
-              const emp = empMap.get(pag.emprestimo_id);
-              const parc = parcMap.get(pag.parcela_id);
-              if (!cli || !emp) return;
-
-              const pagaRow: ClienteRotaDia = {
-                cliente_id: cli.id,
-                nome: cli.nome,
-                telefone_celular: cli.telefone_celular,
-                endereco: cli.endereco,
-                latitude: cli.latitude,
-                longitude: cli.longitude,
-                codigo_cliente: cli.codigo_cliente,
-                foto_url: cli.foto_url || null,
-                emprestimo_id: emp.id,
-                saldo_emprestimo: emp.valor_saldo,
-                valor_principal: emp.valor_principal,
-                numero_parcelas: emp.numero_parcelas,
-                status_emprestimo: emp.status,
-                rota_id: emp.rota_id,
-                frequencia_pagamento: emp.frequencia_pagamento,
-                parcela_id: pag.parcela_id,
-                numero_parcela: pag.numero_parcela,
-                valor_parcela: pag.valor_parcela,
-                valor_pago_parcela: pag.valor_pago_atual,
-                saldo_parcela: 0,
-                status_parcela: parc?.status || 'PAGO',
-                data_vencimento: parc?.data_vencimento || new Date().toISOString(),
-                ordem_visita_dia: null,
-                liquidacao_id: pag.liquidacao_id,
-                tem_parcelas_vencidas: false,
-                total_parcelas_vencidas: 0,
-                valor_total_vencido: 0,
-                status_dia: 'PAGO',
-                permite_emprestimo_adicional: false,
-                is_parcela_atrasada: false,
-                data_emprestimo: (emp as any).data_emprestimo || null,
-              };
-              allData.push(pagaRow);
-              existingParcelaIds.add(pag.parcela_id);
-              console.log('✅ Adicionado cliente pago:', cli.nome, 'parcela:', pag.numero_parcela);
-            });
-          }
-        }
-      }
-
-      console.log('📊 loadLiq resultado:', {
-        countOriginal: data?.length || 0,
-        countTotal: allData.length,
-        rotaId,
-        dataLiq,
-        liqId
-      });
-
-      setRaw(allData);
-      const ids = allData.map((r: any) => r.parcela_id).filter(Boolean);
-      if (ids.length > 0) {
-        const { data: pags } = await supabase
-          .from('pagamentos_parcelas')
-          .select('parcela_id, cliente_id, valor_pago_atual, valor_credito_gerado, valor_parcela, data_pagamento, liquidacao_id')
-          .in('parcela_id', ids)
-          .eq('estornado', false);
-
-        const m = new Map<string, PagamentoParcela>();
-        const s = new Set<string>();
-        const cliPagos = new Set<string>();
-
-        (pags || []).forEach((p: any) => {
-          m.set(p.parcela_id, p);
-          if (p.valor_pago_atual >= p.valor_parcela) s.add(p.parcela_id);
-          if (liqId && p.liquidacao_id === liqId) {
-            cliPagos.add(p.cliente_id);
-          }
-        });
-
-        if (liqId) {
-          const { data: todosPagLiq } = await supabase
-            .from('pagamentos_parcelas')
-            .select('cliente_id')
-            .eq('liquidacao_id', liqId)
-            .eq('estornado', false);
-          (todosPagLiq || []).forEach((p: any) => cliPagos.add(p.cliente_id));
-        }
-
-        allData.forEach((r: any) => {
-          if (r.status_dia === 'PAGO' || r.status_parcela === 'PAGO') {
-            s.add(r.parcela_id);
-          }
-        });
-
-        console.log('📋 PagasSet:', { total: s.size, ids: Array.from(s).slice(0, 5) });
-        console.log('📋 ClientesPagosNaLiq:', { total: cliPagos.size, ids: Array.from(cliPagos).slice(0, 5) });
-        setPagMap(m);
-        setPagasSet(s);
-        setClientesPagosNaLiq(cliPagos);
-      } else {
-        setPagMap(new Map());
-        setPagasSet(new Set());
-        setClientesPagosNaLiq(new Set());
-      }
-
-      // Carregar ordem da rota para aba Liquidação
-      if (rotaId) {
-        const clienteIds = [...new Set(allData.map(r => r.cliente_id))];
-        if (clienteIds.length > 0) {
-          const { data: ordens } = await supabase
-            .from('ordem_rota_cliente')
-            .select('cliente_id, ordem')
-            .eq('rota_id', rotaId)
-            .in('cliente_id', clienteIds);
-          if (ordens && ordens.length > 0) {
-            const m = new Map<string, number>();
-            (ordens as any[]).forEach(o => m.set(o.cliente_id, Number(o.ordem)));
-            setOrdemRotaMap(m);
-          }
-        }
-      }
-    } catch (e) {
-      console.error('Erro loadLiq:', e);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [rotaId, dataLiq, liqId]);
+    await ctx.recarregarClientes(true);
+    setRefreshing(false);
+  }, [rotaId, ctx.recarregarClientes]);
 
   // Atualiza saldo do empréstimo localmente após pagamento — sem recarregar tudo
   const atualizarSaldoLocal = useCallback(async (emprestimoId: string) => {
@@ -294,9 +104,6 @@ export default function useClientesLiquidacao({ rotaId, dataLiq, liqId }: UseCli
         : r
     ));
   }, []);
-
-  // Carga inicial
-  useEffect(() => { loadLiq(); }, [loadLiq]);
 
   return {
     raw,
