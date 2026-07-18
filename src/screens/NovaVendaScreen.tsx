@@ -19,6 +19,7 @@ import { useBuscaDocumento } from '../hooks/useBuscaDocumento';
 import { useNovaVendaConfig } from '../hooks/useNovaVendaConfig';
 import { useNovaVendaForm } from '../hooks/useNovaVendaForm';
 import { useNovaVendaSubmit } from '../hooks/useNovaVendaSubmit';
+import { supabase } from '../services/supabase';
 
 // Componentes
 import FormularioCliente from '../components/nova-venda/FormularioCliente';
@@ -45,17 +46,37 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   const lang = liqCtx.language;
   const t = textos[lang];
 
-  // Data base da liquidação: dataVisualizacao (retroativa) ou data_liquidacao da aberta
-  // minDate do calendário = amanha(dataLiquidacao) = dia seguinte à liquidação
-  // Exemplo: liquidação 04/06, hoje 08/06 → minDate = 05/06 (permite cadastrar a partir do dia 5)
+  // Data base da liquidação: route param → context → busca direta
+  const dataLiqParam = route?.params?.dataLiq as string | undefined;
+  const [dataLiqFetched, setDataLiqFetched] = React.useState<string | undefined>(undefined);
+
+  React.useEffect(() => {
+    if (!dataLiqParam && !liqCtx.liquidacaoAtual && vendedor?.rota_id) {
+      (async () => {
+        const { data } = await supabase
+          .from('liquidacoes_diarias')
+          .select('data_liquidacao, data_abertura')
+          .eq('rota_id', vendedor.rota_id)
+          .in('status', ['ABERTO', 'ABERTA', 'REABERTO'])
+          .order('data_abertura', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (data) {
+          const dt = data.data_liquidacao || data.data_abertura?.split('T')[0];
+          if (dt) setDataLiqFetched(dt);
+        }
+      })();
+    }
+  }, [dataLiqParam, liqCtx.liquidacaoAtual, vendedor?.rota_id]);
+
   const dataLiquidacaoBase: string | undefined =
+    dataLiqParam ||
     liqCtx.dataVisualizacao ||
     (liqCtx.liquidacaoAtual as any)?.data_liquidacao ||
+    (liqCtx.liquidacaoAtual as any)?.data_abertura?.split('T')[0] ||
+    dataLiqFetched ||
     undefined;
-  // Dia seguinte à liquidação = primeira data permitida para vencimento
-  const dataOperacional: string | undefined = dataLiquidacaoBase
-    ? amanha(dataLiquidacaoBase)
-    : undefined;
+  const dataOperacional: string | undefined = dataLiquidacaoBase || undefined;
 
   const clienteExistente = route?.params?.clienteExistente || null;
   const renegociacao = route?.params?.renegociacao || null;
@@ -73,6 +94,13 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     vendedorId: vendedor?.id,
     rotaId: vendedor?.rota_id,
   });
+
+  // Ajustar data default do 1º vencimento para dia seguinte à liquidação
+  React.useEffect(() => {
+    if (dataLiquidacaoBase && !clienteExistente && !renegociacao) {
+      form.setDataPrimeiroVencimento(amanha(dataLiquidacaoBase));
+    }
+  }, [dataLiquidacaoBase]);
 
   const buscaDoc = useBuscaDocumento({
     vendedor,

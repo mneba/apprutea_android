@@ -430,6 +430,17 @@ export default function ClientesScreen({ navigation, route }: any) {
     onReload: liqCtx.recarregarClientes,
   });
 
+  // DEBUG TEMPORÁRIO - REMOVER DEPOIS
+  console.log('🔍 DEBUG ClientesScreen:', JSON.stringify({
+    liqId: liqId || 'NULL',
+    ctxAtualId: liqCtx.liquidacaoAtual?.id || 'NULL',
+    ctxAtualStatus: liqCtx.liquidacaoAtual?.status || 'NULL',
+    ctxTemAberta: liqCtx.temLiquidacaoAberta,
+    ctxLoading: liqCtx.loadingLiquidacao,
+    ctxIdViz: liqCtx.liquidacaoIdVisualizacao || 'NULL',
+    vendedorRotaId: vendedor?.rota_id || 'NULL',
+  }));
+
   const lang = liqCtx.language || 'pt-BR';
   // Se não há liquidação aberta, força tab "todos"
   const [tab, setTab] = useState<TabAtiva>(!liqId ? 'todos' : 'liquidacao');
@@ -1662,7 +1673,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         solicitacaoRenovacao={solicitacoesRenovacaoMap.get(c.id) || null}
         onNovoEmprestimo={(cli) => {
           const nav = navigation.getParent() || navigation;
-          nav.navigate('NovoCliente', { 
+          nav.navigate('NovoCliente', { dataLiq, 
             clienteExistente: { 
               id: cli.id, 
               nome: cli.nome, 
@@ -1678,7 +1689,7 @@ export default function ClientesScreen({ navigation, route }: any) {
             .eq('id', empQuitadoId)
             .single();
           const nav = navigation.getParent() || navigation;
-          nav.navigate('NovoCliente', {
+          nav.navigate('NovoCliente', { dataLiq,
             clienteExistente: { id: cli.id, nome: cli.nome, telefone_celular: cli.telefone_celular, documento: cli.codigo_cliente?.toString() || '' },
             solicitacaoRenovacao: {
               solic_id: solicId,
@@ -1813,7 +1824,7 @@ return (
           >
             <Ionicons name="people-outline" size={14} color={tab === 'todos' ? '#fff' : '#374151'} />
             <Text style={[S.segmentBtnText, tab === 'todos' && S.segmentBtnTextActive]}>
-              {lang === 'es' ? 'Todos' : 'Todos'} {todosCount ?? ''}
+              {lang === 'es' ? 'Todos' : 'Todos'} {todosList.length > 0 ? todosList.length : ''}
             </Text>
           </TouchableOpacity>
         </View>
@@ -1858,10 +1869,23 @@ return (
           LISTAS — ambas sempre montadas, visibilidade via display
           ═══════════════════════════════════════════════════════════════════════ */}
       
-      {/* Lista Liquidação (hidden quando tab !== 'liquidacao') */}
-      <View style={[{ flex: 1 }, tab !== 'liquidacao' && { display: 'none' }]}>
+      {/* Lista Liquidação (colapsada quando inativa, mas sempre montada) */}
+      <View style={tab === 'liquidacao' ? { flex: 1 } : { height: 0, overflow: 'hidden' }}>
         {filtered.length === 0 ? (
-          <View style={S.em}><Ionicons name="document-text-outline" size={48} color="#9CA3AF" /><Text style={S.emT}>{t.semClientes}</Text></View>
+          <View style={[S.em, { justifyContent: 'center' }]}>
+            <Ionicons name="document-text-outline" size={48} color="#9CA3AF" />
+            <Text style={S.emT}>{t.semClientes}</Text>
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#EFF6FF', paddingVertical: 14, paddingHorizontal: 24, borderRadius: 12, marginTop: 20, borderWidth: 1, borderColor: '#BFDBFE' }}
+              onPress={() => setShowProximosDias(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="calendar-outline" size={18} color="#2563EB" />
+              <Text style={{ fontSize: 14, fontWeight: '600', color: '#2563EB' }}>
+                {lang === 'es' ? 'Próximos días' : 'Próximos dias'}
+              </Text>
+            </TouchableOpacity>
+          </View>
         ) : (
           <View style={{ flex: 1 }}>
             <FlatList
@@ -1933,8 +1957,8 @@ return (
         )}
       </View>
 
-      {/* Lista Todos (hidden quando tab !== 'todos') */}
-      <View style={[{ flex: 1 }, tab !== 'todos' && { display: 'none' }]}>
+      {/* Lista Todos (colapsada quando inativa, mas sempre montada) */}
+      <View style={tab === 'todos' ? { flex: 1 } : { height: 0, overflow: 'hidden' }}>
         {loadTodos ? (
           <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
         ) : todosFilt.length === 0 ? (
@@ -2113,7 +2137,7 @@ return (
           // Mesmo fluxo do onNovoEmprestimo do ClienteCardTodos
           const confirmar = () => { 
             const nav = navigation.getParent() || navigation; 
-            nav.navigate('NovoCliente', { 
+            nav.navigate('NovoCliente', { dataLiq, 
               clienteExistente: { 
                 id: cli.id, 
                 nome: cli.nome, 
@@ -2138,7 +2162,7 @@ return (
             .eq('id', empQuitadoId)
             .single();
           const nav = navigation.getParent() || navigation;
-          nav.navigate('NovoCliente', {
+          nav.navigate('NovoCliente', { dataLiq,
             clienteExistente: { id: cli.id, nome: cli.nome, telefone_celular: (cli as any).telefone_celular, documento: (cli as any).codigo_cliente?.toString() || '' },
             solicitacaoRenovacao: {
               solic_id: solicId,
@@ -2163,7 +2187,7 @@ return (
         onRenegociar={(cli, emp) => {
           // Mesmo fluxo do onRenegociar do ClienteCardTodos
           const nav = navigation.getParent() || navigation;
-          nav.navigate('NovoCliente', { 
+          nav.navigate('NovoCliente', { dataLiq, 
             renegociacao: { 
               emprestimo_id: emp.id, 
               cliente_id: cli.id, 
