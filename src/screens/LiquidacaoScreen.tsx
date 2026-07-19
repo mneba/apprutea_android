@@ -1,6 +1,6 @@
 import NetInfo from '@react-native-community/netinfo';
 import { useFocusEffect } from '@react-navigation/native';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -257,6 +257,22 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const [mesAtual, setMesAtual] = useState(new Date().getMonth());
   const [anoAtual, setAnoAtual] = useState(new Date().getFullYear());
   
+  // ⭐ Espelhos em ref, atualizados no corpo do render (portanto antes de
+  //    qualquer efeito). `carregarLiquidacoes` é capturada pelo useFocusEffect
+  //    com deps [] e NUNCA se atualiza — lendo o state direto, ela enxergava
+  //    para sempre os valores do primeiro render (modoVisualizacao = false).
+  //    Era por isso que voltar para esta tela sempre caía no calendário.
+  // 🔬 INSTRUMENTAÇÃO TEMPORÁRIA — detectar remontagem da tela
+  useEffect(() => {
+    console.log('🟩 [LiqScreen] MONTOU');
+    return () => console.log('🟥 [LiqScreen] DESMONTOU');
+  }, []);
+
+  const modoVisualizacaoRef = useRef(false);
+  modoVisualizacaoRef.current = modoVisualizacao;
+  const liquidacaoRef = useRef<LiquidacaoDiaria | null>(null);
+  liquidacaoRef.current = liquidacao;
+
   // Wrappers que sincronizam estado local → contexto compartilhado
   const setModoVisualizacao = useCallback((v: boolean) => {
     setModoVisualizacaoLocal(v);
@@ -366,6 +382,21 @@ export default function LiquidacaoScreen({ navigation }: any) {
   } | null>(null);
   const [loadingVisualizacao, setLoadingVisualizacao] = useState(false);
 
+  // ⭐ Limpeza ATÔMICA da seleção de visualização.
+  //    A seleção vive em três campos do contexto. Antes, estas funções
+  //    limpavam apenas dois (modo + data) e deixavam
+  //    `liquidacaoIdVisualizacao` pendurado, porque esse campo só é escrito
+  //    pelo efeito que observa `liquidacao` — e elas não tocavam em
+  //    `liquidacao`. A ClientesScreen então via "há seleção" com uma data que
+  //    já não existia mais, e carregava um dia inexistente.
+  const limparVisualizacao = useCallback(() => {
+    setModoVisualizacao(false);
+    setDataVisualizacao(null);
+    setDadosVisualizacao(null);
+    liqCtx.setLiquidacaoIdVisualizacao(null);
+  }, [setModoVisualizacao, setDataVisualizacao, liqCtx]);
+
+
   // Estado de conectividade
   const [isConnected, setIsConnected] = useState(true);
 
@@ -416,10 +447,32 @@ export default function LiquidacaoScreen({ navigation }: any) {
           const s = l.status?.toUpperCase();
           return s === 'ABERTO' || s === 'ABERTA' || s === 'REABERTO' || s === 'REABERTA';
         });
-        setLiquidacao(aberta || null);
-        
-        // Se não tem liquidação ativa, mostrar calendário para escolher data
-        if (!aberta && !modoVisualizacao) {
+        // ⭐ PERSISTÊNCIA DA VISUALIZAÇÃO
+        // Antes: `setLiquidacao(aberta || null)` zerava a liquidação em
+        // visualização a cada foco. O efeito de sincronia então propagava
+        // `setLiquidacaoIdVisualizacao(null)` para o contexto, deixando
+        // `dataVisualizacao` órfã — e a ClientesScreen seguia buscando
+        // aquele dia pela data, sem liquidação nenhuma selecionada.
+        const emViz = modoVisualizacaoRef.current;
+        const liqViz = liquidacaoRef.current;
+
+        // 🔬 INSTRUMENTAÇÃO TEMPORÁRIA
+        console.log('🔎 [LiqScreen] carregarLiquidacoes:', JSON.stringify({
+          aberta: aberta?.id || 'NULL',
+          emViz,
+          liqVizId: liqViz?.id || 'NULL',
+          decisao: aberta ? 'USA_ABERTA' : (emViz && liqViz ? 'MANTEM_VIZ' : 'CALENDARIO'),
+        }));
+
+        if (aberta) {
+          setLiquidacao(aberta);
+        } else if (emViz && liqViz) {
+          // Mantém a liquidação em visualização até o usuário escolher outra
+          // data. Reaproveita a versão recém-buscada (status pode ter mudado).
+          const atualizada = data.find(l => l.id === liqViz.id);
+          setLiquidacao(atualizada || liqViz);
+        } else {
+          setLiquidacao(null);
           setMostrarCalendario(true);
         }
       } else {
@@ -581,9 +634,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
     });
     if (aberta) {
       setLiquidacao(aberta);
-      setModoVisualizacao(false);
-      setDataVisualizacao(null);
-      setDadosVisualizacao(null);
+      limparVisualizacao();
       setMostrarCalendario(false);
     }
   };
@@ -626,16 +677,13 @@ export default function LiquidacaoScreen({ navigation }: any) {
   };
 
   const exitFutureView = () => {
-    setModoVisualizacao(false);
-    setDataVisualizacao(null);
-    setDadosVisualizacao(null);
-    setMostrarCalendario(true); // Volta ao calendário, NÃO para hoje
+    limparVisualizacao();
+    setLiquidacao(null);          // mantém o estado local coerente com o contexto
+    setMostrarCalendario(true);   // Volta ao calendário, NÃO para hoje
   };
 
   const handleVoltarHoje = () => {
-    setModoVisualizacao(false);
-    setDataVisualizacao(null);
-    setDadosVisualizacao(null);
+    limparVisualizacao();
     const aberta = todasLiquidacoes.find(l => l.status === 'ABERTO' || l.status === 'ABERTA');
     setLiquidacao(aberta || null);
     if (!aberta) setMostrarCalendario(true);

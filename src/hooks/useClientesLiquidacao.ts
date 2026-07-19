@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
+import { getClientesDia } from '../services/clientesLiquidacaoRepo';
 import { supabase } from '../services/supabase';
 
 // ─── Types (re-exportados do repo) ──────────────────────────────────────────
@@ -27,19 +28,65 @@ export interface PagamentoParcela {
   created_at?: string; liquidacao_id?: string;
 }
 
+// Formato do cache do contexto repassado pela tela quando ela decide que o
+// CONTEXTO é a fonte única (liquidação aberta). Ver `usarCacheCtx` na tela.
+export interface ClientesLiquidacaoSeed {
+  raw: ClienteRotaDia[];
+  pagasSet: Set<string>;
+  pagMap: Map<string, PagamentoParcela>;
+  clientesPagosNaLiq: Set<string>;
+  ordemRotaMap: Map<string, number>;
+  updatedAt: number;
+}
+
 // ─── Hook ───────────────────────────────────────────────────────────────────
-// Wrapper fino sobre o LiquidacaoContext.
-// NÃO faz queries próprias — espelha os dados do contexto e expõe setters
-// para atualizações otimistas (pagamento, estorno).
+//
+// DOIS MODOS DE OPERAÇÃO
+//
+// 1) MODO ESPELHO  (enabled = false, seed presente)
+//    A tela está na liquidação ABERTA. O contexto já carregou tudo; o hook
+//    apenas espelha o `seed` no estado local e expõe setters para atualizações
+//    otimistas (pagamento, estorno). ZERO queries — sem busca duplicada.
+//
+// 2) MODO AUTÔNOMO (enabled = true)
+//    Visualização de liquidação passada/fechada, ou navegação por route-param
+//    (liquidacaoId / dataLiquidacao). O contexto NÃO tem esses dados, então o
+//    hook busca sozinho via repositório. Antes esse modo não existia: o hook
+//    ignorava os params e sempre devolvia os dados da liquidação aberta.
+//
+// GARANTIA DE LOADING
+//    `loading` sempre resolve. Três saídas:
+//      a) seed.updatedAt > 0            → sincroniza e resolve
+//      b) sem liqId + liq. já resolvida → estado vazio explícito, resolve
+//      c) modo autônomo                 → resolve no fim do fetch (ok ou erro)
+//    O bug anterior: `setLoading(false)` só existia dentro do efeito de sync,
+//    que exigia `clientesUpdatedAt > 0`. Sem liquidação aberta o contexto zera
+//    esse campo → o efeito nunca rodava → tela presa em "Carregando...".
 
 interface UseClientesLiquidacaoParams {
   rotaId: string | null | undefined;
   dataLiq: string;
   liqId: string | null;
+  /** true = busca própria (autônomo). false/undefined = espelha o `seed`. */
+  enabled?: boolean;
+  /** Cache do contexto (modo espelho). */
+  seed?: ClientesLiquidacaoSeed;
+  /** Recarga delegada ao contexto (modo espelho). */
+  onReload?: (force?: boolean) => Promise<void>;
 }
 
-export default function useClientesLiquidacao({ rotaId, dataLiq, liqId }: UseClientesLiquidacaoParams) {
+export default function useClientesLiquidacao({
+  rotaId,
+  dataLiq,
+  liqId,
+  enabled,
+  seed,
+  onReload,
+}: UseClientesLiquidacaoParams) {
   const ctx = useLiquidacaoContext();
+
+  // Default seguro: sem `seed` não há o que espelhar → autônomo.
+  const autonomo = enabled ?? !seed;
 
   // Estado local — espelha o contexto, mas permite atualizações otimistas
   const [raw, setRaw] = useState<ClienteRotaDia[]>([]);
@@ -50,42 +97,135 @@ export default function useClientesLiquidacao({ rotaId, dataLiq, liqId }: UseCli
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Ref para evitar loop: marca quando dados vieram do contexto
-  const lastCtxUpdate = useRef(0);
+  // Ref para evitar loop: marca qual updatedAt do seed já foi absorvido
+  const lastSeedUpdate = useRef(0);
+  // Ref de concorrência do modo autônomo: só a resposta mais recente vale
+  const reqIdRef = useRef(0);
+
+  const limparEstado = useCallback(() => {
+    setRaw([]);
+    setPagasSet(new Set());
+    setPagMap(new Map());
+    setClientesPagosNaLiq(new Set());
+  }, []);
 
   // ═══════════════════════════════════════════════════════════════════════
-  // Sincronizar contexto → estado local (quando contexto atualiza)
+  // MODO ESPELHO — sincronizar seed (contexto) → estado local
   // ═══════════════════════════════════════════════════════════════════════
   useEffect(() => {
-    if (ctx.clientesUpdatedAt > 0 && ctx.clientesUpdatedAt !== lastCtxUpdate.current) {
-      lastCtxUpdate.current = ctx.clientesUpdatedAt;
-      setRaw(ctx.clientesRaw as ClienteRotaDia[]);
-      setPagasSet(new Set(ctx.pagasSet));
-      setPagMap(new Map(ctx.pagMap as Map<string, PagamentoParcela>));
-      setClientesPagosNaLiq(new Set(ctx.clientesPagosNaLiq));
-      if (ctx.ordemRotaMap.size > 0) setOrdemRotaMap(new Map(ctx.ordemRotaMap));
+    if (autonomo) return;
+
+    const upd = seed?.updatedAt ?? 0;
+
+    // (a) Contexto entregou dados novos → absorve
+    if (upd > 0 && upd !== lastSeedUpdate.current) {
+      lastSeedUpdate.current = upd;
+      setRaw((seed!.raw || []) as ClienteRotaDia[]);
+      setPagasSet(new Set(seed!.pagasSet));
+      setPagMap(new Map(seed!.pagMap));
+      setClientesPagosNaLiq(new Set(seed!.clientesPagosNaLiq));
+      if (seed!.ordemRotaMap && seed!.ordemRotaMap.size > 0) {
+        setOrdemRotaMap(new Map(seed!.ordemRotaMap));
+      }
       setLoading(false);
       setRefreshing(false);
+      return;
     }
-  }, [ctx.clientesUpdatedAt]);
 
-  // Se o contexto ainda está carregando na montagem, refletir no loading
+    // (b) Não há liquidação e o contexto já terminou de decidir isso
+    //     → estado vazio EXPLÍCITO. Sem isso, `loading` ficava preso em true.
+    if (upd === 0 && !liqId && !ctx.loadingLiquidacao && !ctx.carregandoClientes) {
+      lastSeedUpdate.current = 0;
+      limparEstado();
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
+    // (c) Há liqId mas os dados ainda não vieram → mantém spinner.
+    //     Evita o flash de "nenhum cliente" na janela entre o contexto achar a
+    //     liquidação e efetivamente começar a buscar os clientes.
+    if (upd === 0 && liqId) {
+      setLoading(true);
+    }
+  }, [
+    autonomo,
+    seed?.updatedAt,
+    liqId,
+    ctx.loadingLiquidacao,
+    ctx.carregandoClientes,
+    limparEstado,
+  ]);
+
+  // Modo espelho: refletir o loading do contexto enquanto ele busca
   useEffect(() => {
+    if (autonomo) return;
     if (ctx.carregandoClientes) setLoading(true);
-  }, [ctx.carregandoClientes]);
+  }, [autonomo, ctx.carregandoClientes]);
 
   // ═══════════════════════════════════════════════════════════════════════
-  // loadLiq: delega ao contexto (sem queries próprias)
+  // MODO AUTÔNOMO — busca própria via repositório
   // ═══════════════════════════════════════════════════════════════════════
-  const loadLiq = useCallback(async () => {
+  const buscarAutonomo = useCallback(async () => {
+    if (!rotaId || !dataLiq) {
+      limparEstado();
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
+    const reqId = ++reqIdRef.current;
+    setLoading(true);
+    try {
+      const res = await getClientesDia({ rotaId, dataLiq, liqId });
+      // Resposta obsoleta (params mudaram no meio do caminho) → descarta
+      if (reqId !== reqIdRef.current) return;
+
+      setRaw(res.raw as ClienteRotaDia[]);
+      setPagasSet(res.pagasSet);
+      setPagMap(res.pagMap as Map<string, PagamentoParcela>);
+      setClientesPagosNaLiq(res.clientesPagosNaLiq);
+      if (res.ordemRotaMap) setOrdemRotaMap(res.ordemRotaMap);
+    } catch (e) {
+      if (reqId !== reqIdRef.current) return;
+      console.error('Erro [hook autônomo] getClientesDia:', e);
+      limparEstado();
+    } finally {
+      if (reqId === reqIdRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    }
+  }, [rotaId, dataLiq, liqId, limparEstado]);
+
+  useEffect(() => {
+    if (!autonomo) return;
+    buscarAutonomo();
+  }, [autonomo, buscarAutonomo]);
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // loadLiq — recarga sob demanda (pull-to-refresh, pós-pagamento, etc.)
+  // ═══════════════════════════════════════════════════════════════════════
+  const loadLiq = useCallback(async (force = false) => {
     if (!rotaId) {
       setLoading(false);
       setRefreshing(false);
       return;
     }
-    await ctx.recarregarClientes(true);
+
+    if (autonomo) {
+      await buscarAutonomo();
+      return;
+    }
+
+    // Modo espelho: delega ao contexto (fonte única).
+    // Passa `true` sempre — comportamento idêntico ao anterior. O guard de
+    // concorrência do contexto é furado justamente por esse `force` (item 5
+    // do diagnóstico); quando ele for corrigido, este `force` volta a valer.
+    const reload = onReload ?? ctx.recarregarClientes;
+    await reload(true);
     setRefreshing(false);
-  }, [rotaId, ctx.recarregarClientes]);
+  }, [rotaId, autonomo, buscarAutonomo, onReload, ctx.recarregarClientes]);
 
   // Atualiza saldo do empréstimo localmente após pagamento — sem recarregar tudo
   const atualizarSaldoLocal = useCallback(async (emprestimoId: string) => {

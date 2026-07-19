@@ -383,20 +383,63 @@ export default function ClientesScreen({ navigation, route }: any) {
   // Fallback: data_abertura.substring(0,10) sem conversão UTC
   // Último fallback: data local do dispositivo
   const _liqAtual = liqCtx.liquidacaoAtual as any;
-  const dataLiq = liqCtx.dataVisualizacao
-    || route?.params?.dataLiquidacao
-    || _liqAtual?.data_liquidacao?.substring(0, 10)
-    || (_liqAtual?.data_abertura ? _liqAtual.data_abertura.substring(0, 10) : null)
-    || (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`; })();
-  // ⭐ FIX: Fallback direto pelo status (evita problema de timing com temLiquidacaoAberta)
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // ORIGEM ÚNICA DO PAR (liqId, dataLiq)
+  //
+  // `liqId` e `dataLiq` DEVEM sair sempre da MESMA fonte. Antes eram duas
+  // cascatas independentes de `||`, e bastava um dos campos do contexto ser
+  // limpo sem os outros para produzir um par corrompido — por exemplo
+  // `liqId` do dia 17 combinado com `dataLiq` de hoje, fazendo a RPC devolver
+  // um conjunto de clientes que não corresponde a dia nenhum.
+  //
+  // A "seleção de visualização" vive partida em três campos do contexto
+  // (modoVisualizacao / liquidacaoIdVisualizacao / dataVisualizacao), escritos
+  // por caminhos diferentes. Aqui ela só é aceita se os TRÊS concordarem;
+  // qualquer estado pela metade é tratado como "sem seleção".
+  // ═══════════════════════════════════════════════════════════════════════
+  const vizCoerente = !!(
+    liqCtx.modoVisualizacao &&
+    liqCtx.liquidacaoIdVisualizacao &&
+    liqCtx.dataVisualizacao
+  );
+  const routeCoerente = !!(route?.params?.liquidacaoId || route?.params?.dataLiquidacao);
   const statusLiq = liqCtx.liquidacaoAtual?.status;
-  const liqIdFallback = (statusLiq === 'ABERTO' || statusLiq === 'ABERTA' || statusLiq === 'REABERTO') ? liqCtx.liquidacaoAtual?.id : null;
-  const liqId = liqCtx.liquidacaoIdVisualizacao || route?.params?.liquidacaoId || (liqCtx.temLiquidacaoAberta ? liqCtx.liquidacaoAtual?.id : null) || liqIdFallback;
-  const isViz = liqCtx.modoVisualizacao || route?.params?.isVisualizacao || false;
+  const abertaCoerente = !!(
+    (statusLiq === 'ABERTO' || statusLiq === 'ABERTA' || statusLiq === 'REABERTO') &&
+    liqCtx.liquidacaoAtual?.id
+  );
+
+  const hojeStr = () => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`; };
+
+  let liqId: string | null = null;
+  let dataLiq: string;
+  if (vizCoerente) {
+    liqId = liqCtx.liquidacaoIdVisualizacao;
+    dataLiq = liqCtx.dataVisualizacao as string;
+  } else if (routeCoerente) {
+    liqId = route?.params?.liquidacaoId || null;
+    dataLiq = route?.params?.dataLiquidacao || hojeStr();
+  } else if (abertaCoerente) {
+    liqId = liqCtx.liquidacaoAtual?.id || null;
+    dataLiq = _liqAtual?.data_liquidacao?.substring(0, 10)
+      || (_liqAtual?.data_abertura ? _liqAtual.data_abertura.substring(0, 10) : null)
+      || hojeStr();
+  } else {
+    // Sem seleção coerente: nada de liquidação é carregado (só a aba Todos).
+    liqId = null;
+    dataLiq = hojeStr();
+  }
+
+  const isViz = vizCoerente || route?.params?.isVisualizacao || false;
 
   // FASE 2.1 — quando a tela está na liquidação ABERTA, o CONTEXTO é a fonte
   // única: o hook não busca sozinho, só espelha o cache (sem busca duplicada).
   // Visualização ou navegação por route-param => modo autônomo (busca direto).
+  // Sem liquidação selecionada não existe "liquidação" nem "pagos" para
+  // mostrar — só a aba Todos. Nada de liquidação é buscado.
+  const temSelecaoLiq = !!liqId;
+
   const usarCacheCtx = !!(
     !isViz &&
     !route?.params?.liquidacaoId &&
@@ -425,7 +468,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     rotaId,
     dataLiq,
     liqId,
-    enabled: !usarCacheCtx,
+    enabled: !usarCacheCtx && temSelecaoLiq,
     seed: seedClientes,
     onReload: liqCtx.recarregarClientes,
   });
@@ -433,12 +476,20 @@ export default function ClientesScreen({ navigation, route }: any) {
   // DEBUG TEMPORÁRIO - REMOVER DEPOIS
   console.log('🔍 DEBUG ClientesScreen:', JSON.stringify({
     liqId: liqId || 'NULL',
+    dataLiq,
+    isViz,
+    temSelecaoLiq,
+    enabledHook: !usarCacheCtx && temSelecaoLiq,
+    usarCacheCtx,
     ctxAtualId: liqCtx.liquidacaoAtual?.id || 'NULL',
     ctxAtualStatus: liqCtx.liquidacaoAtual?.status || 'NULL',
     ctxTemAberta: liqCtx.temLiquidacaoAberta,
-    ctxLoading: liqCtx.loadingLiquidacao,
     ctxIdViz: liqCtx.liquidacaoIdVisualizacao || 'NULL',
-    vendedorRotaId: vendedor?.rota_id || 'NULL',
+    ctxModoViz: liqCtx.modoVisualizacao,
+    ctxDataViz: liqCtx.dataVisualizacao || 'NULL',
+    routeLiqId: route?.params?.liquidacaoId || 'NULL',
+    routeDataLiq: route?.params?.dataLiquidacao || 'NULL',
+    qtdRaw: raw.length,
   }));
 
   const lang = liqCtx.language || 'pt-BR';
@@ -449,9 +500,10 @@ export default function ClientesScreen({ navigation, route }: any) {
     todosList, setTodosList,
     loadTodos,
     todosCount,
+    todosUpdatedAt,
     loadTodosClientes,
     atualizarSaldoLocalTodos,
-  } = useClientesTodos({ rotaId, tab, setOrdemRotaMap, setRefreshing });
+  } = useClientesTodos({ rotaId, setOrdemRotaMap, setRefreshing });
   const [modalLegendaVisible, setModalLegendaVisible] = useState(false);
   const [busca, setBusca] = useState('');
 
@@ -732,12 +784,21 @@ export default function ClientesScreen({ navigation, route }: any) {
     buscarNotasCountPorClientes(Array.from(ids), vendedor?.id).then(setNotasCountMap);
   }, [raw.length, todosList.length]);
   
-  // Quando o contexto carrega a liquidação aberta, ativar aba liquidação
+  // ⭐ Aba x seleção de liquidação
+  //    Antes esta troca dependia de `temLiquidacaoAberta`, que é sempre false
+  //    ao visualizar uma liquidação FECHADA — a aba ficava presa em "Todos"
+  //    mesmo com os dados carregados (a lista existe, mas com height: 0).
+  //    Agora reage a `liqId`, que cobre aberta e visualização.
+  const tabManualRef = useRef(false);
   useEffect(() => {
-    if (liqCtx.temLiquidacaoAberta && liqCtx.liquidacaoAtual?.id && tab === 'todos') {
-      setTab('liquidacao');
+    if (!liqId) {
+      // Sem seleção: só existe "Todos". Volta a permitir troca automática.
+      setTab('todos');
+      tabManualRef.current = false;
+      return;
     }
-  }, [liqCtx.temLiquidacaoAberta, liqCtx.liquidacaoAtual?.id]);
+    if (!tabManualRef.current) setTab('liquidacao');
+  }, [liqId]);
 
   // ⭐ Observar sinal de reset de filtro (disparado após reset de cliente no extrato)
   // Quando o reset é feito, recarrega clientes E desmarca o breadcrumb "pagos"
@@ -750,7 +811,57 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   // ⭐ Recarregar lista ao voltar para a tela (após criar novo empréstimo, renovar, etc)
   const isFirstMount = useRef(true);
-  
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // REFS DE LEITURA DO FOCUS EFFECT
+  //
+  // O useFocusEffect do React Navigation re-executa o callback sempre que a
+  // IDENTIDADE dele muda — não só quando a tela ganha foco. Antes, `tab`
+  // estava nas dependências do useCallback: cada toque no segmentado recriava
+  // o callback, o efeito rodava de novo e disparava refetch + query de
+  // solicitações. Como loadTodosClientes(true) faz setLoadTodos(true), a lista
+  // era substituída por um spinner de tela cheia — parecia recarga da tela.
+  //
+  // Agora tudo que o efeito precisa LER vive em refs, e as deps são [].
+  // O callback só roda em foco real. Trocar de aba = só trocar visibilidade.
+  //
+  // ⚠️ Refs (e não closures) são obrigatórias aqui: com deps [], valores
+  // capturados no corpo do callback ficariam congelados na montagem.
+  // ═══════════════════════════════════════════════════════════════════════
+  const tabRef = useRef(tab);
+  useEffect(() => { tabRef.current = tab; }, [tab]);
+
+  const clientesUpdatedAtRef = useRef(0);
+  useEffect(() => { clientesUpdatedAtRef.current = liqCtx.clientesUpdatedAt || 0; }, [liqCtx.clientesUpdatedAt]);
+
+  const todosUpdatedAtRef = useRef(0);
+  useEffect(() => { todosUpdatedAtRef.current = todosUpdatedAt || 0; }, [todosUpdatedAt]);
+
+  const loadLiqRef = useRef(loadLiq);
+  useEffect(() => { loadLiqRef.current = loadLiq; }, [loadLiq]);
+
+  const loadTodosClientesRef = useRef(loadTodosClientes);
+  useEffect(() => { loadTodosClientesRef.current = loadTodosClientes; }, [loadTodosClientes]);
+
+  // Solicitações RENOVACAO_EXCEDE_ANTERIOR da rota — função única,
+  // usada tanto na montagem quanto ao reganhar foco.
+  const carregarSolicitacoesRenovacao = useCallback(async () => {
+    if (!rotaId) return;
+    const { data } = await supabase
+      .from('solicitacoes_autorizacao')
+      .select('id, cliente_id, status, valor_solicitado, valor_limite, emprestimo_id')
+      .eq('rota_id', rotaId)
+      .eq('tipo_solicitacao', 'RENOVACAO_EXCEDE_ANTERIOR')
+      .in('status', ['PENDENTE', 'APROVADO'])
+      .order('created_at', { ascending: false });
+    const m = new Map<string, { solic_id: string; status: string; valor_solicitado: number; valor_limite: number; emprestimo_id: string | null }>();
+    (data || []).forEach((s: any) => { if (!m.has(s.cliente_id)) m.set(s.cliente_id, { solic_id: s.id, status: s.status, valor_solicitado: s.valor_solicitado || 0, valor_limite: s.valor_limite || 0, emprestimo_id: s.emprestimo_id }); });
+    setSolicitacoesRenovacaoMap(m);
+  }, [rotaId]);
+
+  const carregarSolicitacoesRef = useRef(carregarSolicitacoesRenovacao);
+  useEffect(() => { carregarSolicitacoesRef.current = carregarSolicitacoesRenovacao; }, [carregarSolicitacoesRenovacao]);
+
   useFocusEffect(
     useCallback(() => {
       // Na primeira montagem, não recarrega (os outros useEffects já fazem isso)
@@ -758,55 +869,34 @@ export default function ClientesScreen({ navigation, route }: any) {
         isFirstMount.current = false;
         return;
       }
-      
-      // Ao voltar para a tela, só recarrega se dados estão stale (>30s)
+
+      // Ao voltar para a tela, só recarrega se os dados DA ABA ATIVA estão
+      // stale (>30s). Cada aba tem seu próprio timestamp: antes, o de "Todos"
+      // era avaliado pelo clientesUpdatedAt da liquidação, sem relação nenhuma.
       const agora = Date.now();
-      const stale = agora - (liqCtx.clientesUpdatedAt || 0) > 30000;
+      const tabAtual = tabRef.current;
+      const ultimaCarga = tabAtual === 'liquidacao'
+        ? clientesUpdatedAtRef.current
+        : todosUpdatedAtRef.current;
+      const stale = agora - ultimaCarga > 30000;
+
       if (stale) {
-        console.log('🔄 useFocusEffect: Dados stale, recarregando...');
-        if (tab === 'liquidacao') {
-          loadLiq();
-        } else {
-          loadTodosClientes(true);
-        }
+        console.log('🔄 useFocusEffect: Dados stale, recarregando aba', tabAtual);
+        if (tabAtual === 'liquidacao') loadLiqRef.current();
+        else loadTodosClientesRef.current(true);
       } else {
         console.log('✅ useFocusEffect: Dados frescos, sem recarregar');
       }
-      // Recarregar mapa de solicitações (pode ter mudado ao voltar de NovaVenda)
-      if (rotaId) {
-        supabase
-          .from('solicitacoes_autorizacao')
-          .select('id, cliente_id, status, valor_solicitado, valor_limite, emprestimo_id')
-          .eq('rota_id', rotaId)
-          .eq('tipo_solicitacao', 'RENOVACAO_EXCEDE_ANTERIOR')
-          .in('status', ['PENDENTE', 'APROVADO'])
-          .order('created_at', { ascending: false })
-          .then(({ data }) => {
-            const m = new Map<string, { solic_id: string; status: string; valor_solicitado: number; valor_limite: number; emprestimo_id: string | null }>();
-            (data || []).forEach((s: any) => { if (!m.has(s.cliente_id)) m.set(s.cliente_id, { solic_id: s.id, status: s.status, valor_solicitado: s.valor_solicitado || 0, valor_limite: s.valor_limite || 0, emprestimo_id: s.emprestimo_id }); });
-            setSolicitacoesRenovacaoMap(m);
-          });
-      }
-    }, [tab, loadLiq, loadTodosClientes, rotaId])
+
+      // Solicitações podem ter mudado ao voltar de NovaVenda
+      carregarSolicitacoesRef.current();
+    }, [])
   );
 
   // Carrega solicitações RENOVACAO_EXCEDE_ANTERIOR da rota ao montar
   useEffect(() => {
-    if (!rotaId) return;
-    const carregar = async () => {
-      const { data } = await supabase
-        .from('solicitacoes_autorizacao')
-        .select('id, cliente_id, status, valor_solicitado, valor_limite, emprestimo_id')
-        .eq('rota_id', rotaId)
-        .eq('tipo_solicitacao', 'RENOVACAO_EXCEDE_ANTERIOR')
-        .in('status', ['PENDENTE', 'APROVADO'])
-        .order('created_at', { ascending: false });
-      const m = new Map<string, { solic_id: string; status: string; valor_solicitado: number; valor_limite: number; emprestimo_id: string | null }>();
-      (data || []).forEach((s: any) => { if (!m.has(s.cliente_id)) m.set(s.cliente_id, { solic_id: s.id, status: s.status, valor_solicitado: s.valor_solicitado || 0, valor_limite: s.valor_limite || 0, emprestimo_id: s.emprestimo_id }); });
-      setSolicitacoesRenovacaoMap(m);
-    };
-    carregar();
-  }, [rotaId]);
+    carregarSolicitacoesRenovacao();
+  }, [carregarSolicitacoesRenovacao]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -1793,7 +1883,7 @@ return (
           {/* Liquidação */}
           <TouchableOpacity
             style={[S.segmentBtn, tab === 'liquidacao' && filtro !== 'pagas' && S.segmentBtnActive]}
-            onPress={() => { if (liqId) { setTab('liquidacao'); setFiltro('todos'); } }}
+            onPress={() => { if (liqId) { tabManualRef.current = true; setTab('liquidacao'); setFiltro('todos'); } }}
             activeOpacity={0.7}
             disabled={!liqId}
           >
@@ -1806,7 +1896,7 @@ return (
           {/* Pagos */}
           <TouchableOpacity
             style={[S.segmentBtn, tab === 'liquidacao' && filtro === 'pagas' && S.segmentBtnActivePagos]}
-            onPress={() => { if (liqId && cntPagas > 0) { setTab('liquidacao'); setFiltro('pagas'); } }}
+            onPress={() => { if (liqId && cntPagas > 0) { tabManualRef.current = true; setTab('liquidacao'); setFiltro('pagas'); } }}
             activeOpacity={0.7}
             disabled={!liqId || cntPagas === 0}
           >
@@ -1819,7 +1909,7 @@ return (
           {/* Todos */}
           <TouchableOpacity
             style={[S.segmentBtn, tab === 'todos' && S.segmentBtnActiveTodos]}
-            onPress={() => setTab('todos')}
+            onPress={() => { tabManualRef.current = true; setTab('todos'); }}
             activeOpacity={0.7}
           >
             <Ionicons name="people-outline" size={14} color={tab === 'todos' ? '#fff' : '#374151'} />
@@ -1981,11 +2071,19 @@ return (
                   <Text style={{ fontSize: 13, fontWeight: '600', color: '#92400E', flex: 1 }}>
                     {lang === 'es' ? `Mostrando todos · ${todosFilt.length} clientes` : `Mostrando todos · ${todosFilt.length} clientes`}
                   </Text>
-                  <TouchableOpacity onPress={() => setTab('liquidacao')} activeOpacity={0.7}>
-                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#D97706' }}>
-                      {lang === 'es' ? 'Volver' : 'Voltar'}
-                    </Text>
-                  </TouchableOpacity>
+                  {/* Só faz sentido oferecer "Voltar" se existir uma liquidação
+                      selecionada para onde voltar. Sem seleção, a aba Liquidação
+                      está desabilitada e o toque não levava a lugar nenhum. */}
+                  {temSelecaoLiq && (
+                    <TouchableOpacity
+                      onPress={() => { tabManualRef.current = true; setTab('liquidacao'); }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: '#D97706' }}>
+                        {lang === 'es' ? 'Volver' : 'Voltar'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               }
               ListFooterComponent={<View style={{ height: 90 }} />}

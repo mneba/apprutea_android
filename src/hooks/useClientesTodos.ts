@@ -40,15 +40,20 @@ const buscarCreditoMap = async (empIds: string[]): Promise<Map<string, number>> 
 
 interface UseClientesTodosParams {
   rotaId: string | null | undefined;
-  tab: 'liquidacao' | 'todos';
+  /** @deprecated Não é lido. A carga é feita na montagem, não pela aba ativa. */
+  tab?: 'liquidacao' | 'todos';
   setOrdemRotaMap: (m: Map<string, number>) => void;
   setRefreshing: (v: boolean) => void;
 }
 
-export default function useClientesTodos({ rotaId, tab, setOrdemRotaMap, setRefreshing }: UseClientesTodosParams) {
+export default function useClientesTodos({ rotaId, setOrdemRotaMap, setRefreshing }: UseClientesTodosParams) {
   const [todosList, setTodosList] = useState<ClienteTodos[]>([]);
   const [loadTodos, setLoadTodos] = useState(false);
   const [todosCount, setTodosCount] = useState<number | null>(null);
+  // Timestamp da última carga bem-sucedida. A ClientesScreen usa isto para
+  // decidir staleness DESTA aba — antes ela usava o clientesUpdatedAt da
+  // liquidação, que não tem nada a ver com o ciclo de vida de "Todos".
+  const [todosUpdatedAt, setTodosUpdatedAt] = useState(0);
 
   // ⭐ Ref espelhando o tamanho da lista — lemos sem criar dependência no useCallback
   const todosListLenRef = useRef(0);
@@ -68,7 +73,7 @@ export default function useClientesTodos({ rotaId, tab, setOrdemRotaMap, setRefr
         .eq('rota_id', rotaId)
         .in('status', ['ATIVO', 'VENCIDO', 'QUITADO', 'RENEGOCIADO']);
 
-      if (!emps || emps.length === 0) { setTodosList([]); return; }
+      if (!emps || emps.length === 0) { setTodosList([]); setTodosUpdatedAt(Date.now()); return; }
 
       // Query 2: Todas as parcelas dos empréstimos de uma vez
       const empIds = (emps as any[]).map(e => e.id);
@@ -140,6 +145,7 @@ export default function useClientesTodos({ rotaId, tab, setOrdemRotaMap, setRefr
         });
       }
       setTodosList(Array.from(cliMap.values()));
+      setTodosUpdatedAt(Date.now());
 
       // Carregar ordem da rota
       if (rotaId) {
@@ -209,6 +215,7 @@ export default function useClientesTodos({ rotaId, tab, setOrdemRotaMap, setRefr
     setTodosList,
     loadTodos,
     todosCount,
+    todosUpdatedAt,
     loadTodosClientes,
     atualizarSaldoLocalTodos,
   };
