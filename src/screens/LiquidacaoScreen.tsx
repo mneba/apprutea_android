@@ -284,6 +284,42 @@ export default function LiquidacaoScreen({ navigation }: any) {
     liqCtx.setDataVisualizacao(d ? d.toISOString().split('T')[0] : null);
   }, [liqCtx]);
 
+  const [carregandoSaldo, setCarregandoSaldo] = useState(false);
+
+  // ⭐ Saldo da conta da rota — origem única.
+  //    Antes esta consulta existia SÓ dentro de carregarLiquidacoes, que roda
+  //    apenas quando a tela ganha foco. Se o admin corrigisse o saldo no web
+  //    enquanto o vendedor já estava nesta tela, o modal de abertura seguia
+  //    exibindo (e enviando) o valor antigo até um recarregamento completo.
+  //    Agora é reconsultada a cada clique num dia para abrir.
+  const buscarSaldoContaRota = useCallback(async (): Promise<number | null> => {
+    if (!vendedor?.rota_id) return null;
+    setCarregandoSaldo(true);
+    try {
+      const { data: contaData, error } = await supabase
+        .from('contas')
+        .select('id, saldo_atual')
+        .eq('rota_id', vendedor.rota_id)
+        .eq('tipo_conta', 'ROTA')
+        .eq('status', 'ATIVA')
+        .maybeSingle();
+
+      if (error) {
+        console.error('Erro ao buscar saldo da conta da rota:', error);
+        return null;
+      }
+      if (!contaData) {
+        console.warn('Nenhuma conta ATIVA encontrada para a rota', vendedor.rota_id);
+        setContaRota(null);
+        return null;
+      }
+      setContaRota(contaData);
+      return contaData.saldo_atual ?? 0;
+    } finally {
+      setCarregandoSaldo(false);
+    }
+  }, [vendedor?.rota_id]);
+
   // Sincroniza liquidacaoId no contexto quando liquidação muda
   useEffect(() => {
     liqCtx.setLiquidacaoIdVisualizacao(liquidacao?.id || null);
@@ -479,18 +515,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
         setLiquidacao(null);
       }
 
-      // Buscar saldo da conta da rota (será usado como caixa inicial automático)
-      const { data: contaData } = await supabase
-        .from('contas')
-        .select('id, saldo_atual')
-        .eq('rota_id', vendedor.rota_id)
-        .eq('tipo_conta', 'ROTA')
-        .eq('status', 'ATIVA')
-        .maybeSingle();
-      
-      if (contaData) {
-        setContaRota(contaData);
-      }
+      // Saldo da conta da rota (caixa inicial automático) — origem única
+      await buscarSaldoContaRota();
     } catch (error) {
       console.error('Erro ao carregar liquidações:', error);
     } finally {
@@ -617,6 +643,9 @@ export default function LiquidacaoScreen({ navigation }: any) {
         carregarDatasOcupadas();
         setSalvando(false);
         setModalIniciarVisible(true);
+        // ⭐ Reconsulta o saldo a cada abertura do modal — o admin pode ter
+        //    ajustado a conta no web depois que esta tela foi carregada.
+        buscarSaldoContaRota();
       }
       // Se não pode abrir, a função validarAbertura já mostrou o modal/alert apropriado
     }
@@ -1226,7 +1255,9 @@ export default function LiquidacaoScreen({ navigation }: any) {
               </View>
               <View style={styles.caixaInicialReadOnly}>
                 <Text style={styles.caixaInicialLabel}>{t.caixaInicialAutomatico}</Text>
-                <Text style={styles.caixaInicialValor}>{formatarMoeda(contaRota?.saldo_atual || 0)}</Text>
+                {carregandoSaldo
+                ? <ActivityIndicator size="small" color="#2563EB" />
+                : <Text style={styles.caixaInicialValor}>{formatarMoeda(contaRota?.saldo_atual || 0)}</Text>}
               </View>
 
               <View style={styles.modalButtons}>
@@ -1674,7 +1705,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
           <View style={styles.semLiquidacao}>
             <Text style={styles.semLiquidacaoIcon}>📅</Text>
             <Text style={styles.semLiquidacaoText}>{t.nenhumaLiquidacao}</Text>
-            <TouchableOpacity style={styles.iniciarButton} onPress={() => { setSalvando(false); setModalIniciarVisible(true); }}>
+            <TouchableOpacity style={styles.iniciarButton} onPress={() => { setSalvando(false); setModalIniciarVisible(true); buscarSaldoContaRota(); }}>
               <Text style={styles.iniciarText}>{t.iniciarDia}</Text>
             </TouchableOpacity>
           </View>
@@ -1702,7 +1733,9 @@ export default function LiquidacaoScreen({ navigation }: any) {
             </View>
             <View style={styles.caixaInicialReadOnly}>
               <Text style={styles.caixaInicialLabel}>{t.caixaInicialAutomatico}</Text>
-              <Text style={styles.caixaInicialValor}>{formatarMoeda(contaRota?.saldo_atual || 0)}</Text>
+              {carregandoSaldo
+                ? <ActivityIndicator size="small" color="#2563EB" />
+                : <Text style={styles.caixaInicialValor}>{formatarMoeda(contaRota?.saldo_atual || 0)}</Text>}
             </View>
 
             {/* Seletor de data retroativa — removido conforme solicitado */}

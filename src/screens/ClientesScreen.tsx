@@ -475,6 +475,7 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   // DEBUG TEMPORÁRIO - REMOVER DEPOIS
   console.log('🔍 DEBUG ClientesScreen:', JSON.stringify({
+    build: 'v3-voltar-condicional',
     liqId: liqId || 'NULL',
     dataLiq,
     isViz,
