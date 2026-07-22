@@ -120,11 +120,18 @@ export function useNovaVendaSubmit(ctx: SubmitContext) {
       } catch (gpsErr) { console.log('GPS indisponível:', gpsErr); }
 
       // ETAPA 4 - Liquidação aberta
+      // Status válidos = os mesmos de temLiquidacaoAberta no contexto.
+      // Uma liquidação REABERTA (reaberta pelo web) é uma liquidação de
+      // trabalho como qualquer outra — antes ela era barrada aqui porque
+      // este filtro omitia 'REABERTO', bloqueando a venda com "Liquidação
+      // não encontrada" mesmo havendo liquidação válida.
+      const STATUS_LIQ_ABERTA = ['ABERTO', 'ABERTA', 'REABERTO'];
+
       const { data: liqData, error: liqError } = await supabase
         .from('liquidacoes_diarias')
         .select('id')
         .eq('rota_id', rotaId)
-        .in('status', ['ABERTO', 'ABERTA'])
+        .in('status', STATUS_LIQ_ABERTA)
         .order('data_abertura', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -135,13 +142,11 @@ export function useNovaVendaSubmit(ctx: SubmitContext) {
         return;
       }
 
-      let liqId = ctx.liqCtx.liquidacaoAtual?.id || null;
-      if (!liqId) {
-        const { data: ld } = await supabase
-          .from('liquidacoes_diarias').select('id')
-          .eq('rota_id', rotaId).in('status', ['ABERTO', 'REABERTO']).limit(1).single();
-        liqId = ld?.id || null;
-      }
+      // Reaproveita a liquidação já encontrada acima; o contexto tem
+      // precedência quando presente. Antes havia uma segunda query aqui,
+      // com lista de status ainda diferente ('ABERTO','REABERTO', sem
+      // 'ABERTA') — agora eliminada.
+      const liqId = ctx.liqCtx.liquidacaoAtual?.id || liqData.id;
 
       // ETAPA 5 - Montar e enviar
       let data: any, error: any;
