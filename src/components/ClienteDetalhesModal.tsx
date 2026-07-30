@@ -1002,27 +1002,31 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                   const temCredito = (p.valor_credito_gerado ?? 0) > 0;
 
                   // ⭐ Pontualidade do pagamento (PAGO ou PARCIAL)
-                  // Usar dias_atraso direto do banco (já calculado em emprestimo_parcelas)
+                  //
+                  // NÃO usar p.dias_atraso do banco aqui: essa coluna é
+                  // persistida como (hoje − vencimento) e NÃO reflete a data
+                  // real do pagamento. Numa parcela PAGA ela devolve lixo —
+                  // marcava "18 dias de atraso" para quem pagou ADIANTADO,
+                  // porque só media a distância entre hoje e o vencimento.
+                  //
+                  // Para parcela paga/parcial, a pontualidade correta é a
+                  // comparação data_pagamento × data_vencimento (ambas em
+                  // string YYYY-MM-DD, comparadas por componentes para não
+                  // sofrer shift de fuso).
+                  //   diasDiferenca > 0  → pagou com atraso
+                  //   diasDiferenca = 0  → pagou no dia
+                  //   diasDiferenca < 0  → pagou adiantado (quitouAntecipado)
                   let diasDiferenca: number | null = null;
                   let quitouAntecipado = false;
-                  if (isPago || isParcial) {
-                    if (typeof p.dias_atraso === 'number') {
-                      diasDiferenca = p.dias_atraso;
-                    }
-                    // Quitação antecipada: pago antes do vencimento (dias_atraso < 0 ou negativo)
-                    // O campo dias_atraso pode ser 0 quando pago no dia
-                    // Tentar detectar quitação antecipada comparando data real do pagamento com vencimento
-                    if (p.data_pagamento && p.data_vencimento) {
-                      const dataRefStr = p.data_pagamento.substring(0, 10);
-                      const [vy, vm, vd] = p.data_vencimento.split('-').map(Number);
-                      const [py, pm, pd] = dataRefStr.split('-').map(Number);
-                      if (vy && vm && vd && py && pm && pd) {
-                        const dtVenc = new Date(vy, vm - 1, vd);
-                        const dtPag = new Date(py, pm - 1, pd);
-                        if (dtPag.getTime() < dtVenc.getTime()) {
-                          quitouAntecipado = true;
-                        }
-                      }
+                  if ((isPago || isParcial) && p.data_pagamento && p.data_vencimento) {
+                    const dataRefStr = p.data_pagamento.substring(0, 10);
+                    const [vy, vm, vd] = p.data_vencimento.split('-').map(Number);
+                    const [py, pm, pd] = dataRefStr.split('-').map(Number);
+                    if (vy && vm && vd && py && pm && pd) {
+                      const dtVenc = new Date(vy, vm - 1, vd);
+                      const dtPag = new Date(py, pm - 1, pd);
+                      diasDiferenca = Math.round((dtPag.getTime() - dtVenc.getTime()) / (1000 * 60 * 60 * 24));
+                      if (diasDiferenca < 0) quitouAntecipado = true;
                     }
                   }
                   
@@ -1100,16 +1104,21 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                               </Text>
                             </View>
                           ) : diasDiferenca > 0 ? (
+                            // Atraso REAL: pagou depois do vencimento
                             <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                               <Ionicons name="alert-circle" size={10} color="#991B1B" /> <Text style={{ fontSize: 10, fontWeight: '600', color: '#991B1B' }}>
                                 {diasDiferenca} {lang === 'es' ? (diasDiferenca === 1 ? 'día de atraso' : 'días de atraso') : (diasDiferenca === 1 ? 'dia de atraso' : 'dias de atraso')}
                               </Text>
                             </View>
-                          ) : null}
-                          {quitouAntecipado && (
-                            <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                              <Ionicons name="flash" size={10} color="#92400E" /> <Text style={{ fontSize: 10, fontWeight: '600', color: '#92400E' }}>
-                                {lang === 'es' ? 'Pago anticipado' : 'Quitação antecipada'}
+                          ) : (
+                            // diasDiferenca < 0 → pagou adiantado. Badge VERDE,
+                            // nunca vermelho. Antes esta parcela exibia
+                            // "N dias de atraso" indevidamente.
+                            <View style={{ backgroundColor: '#D1FAE5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                              <Ionicons name="flash" size={10} color="#065F46" /> <Text style={{ fontSize: 10, fontWeight: '600', color: '#065F46' }}>
+                                {Math.abs(diasDiferenca)} {lang === 'es'
+                                  ? (Math.abs(diasDiferenca) === 1 ? 'día antes' : 'días antes')
+                                  : (Math.abs(diasDiferenca) === 1 ? 'dia antes' : 'dias antes')}
                               </Text>
                             </View>
                           )}
@@ -1148,7 +1157,16 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                           )}
                           {p.forma_pagamento && (
                             <Text style={{ fontSize: 11, color: '#6B7280' }}>
-                              {p.forma_pagamento === 'DINHEIRO' ? (lang === 'es' ? 'Efectivo' : 'Dinheiro') : (lang === 'es' ? 'Transferencia' : 'Transferência')}
+                              {/* Mapeamento explícito das formas reais. Antes era
+                                  um ternário binário (DINHEIRO senão "Transferência"),
+                                  que rotulava pagamento por CREDITO como
+                                  "Transferência" — foi o caso da parcela paga por
+                                  auto-quitação com crédito. */}
+                              {p.forma_pagamento === 'DINHEIRO'
+                                ? (lang === 'es' ? 'Efectivo' : 'Dinheiro')
+                                : p.forma_pagamento === 'CREDITO'
+                                ? (lang === 'es' ? 'Pagado con crédito' : 'Pago com crédito')
+                                : (lang === 'es' ? 'Transferencia' : 'Transferência')}
                             </Text>
                           )}
                           {temCredito && (
