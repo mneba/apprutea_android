@@ -60,6 +60,7 @@ interface Parcela {
   liquidacao_data?: string;
   valor_pago_total?: number;
   valor_credito_gerado?: number;
+  estornos?: { valor: number; data: string; motivo: string | null; por: string | null }[];
 }
 
 type Aba = 'pessoais' | 'emprestimo' | 'historico';
@@ -490,21 +491,51 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           data_vencimento, status, dias_atraso,
           pagamentos_parcelas(
             valor_pago_total, valor_credito_gerado, forma_pagamento, created_at, estornado,
+            motivo_estorno, data_estorno, estornado_por,
             liquidacoes_diarias(data_liquidacao, data_abertura)
           )
         `)
         .eq('emprestimo_id', empId)
         .order('numero_parcela', { ascending: true });
 
-      // Enriquecer com dados do pagamento mais recente não estornado
+      // Resolver nomes de quem estornou (lote) — estornado_por = user_id.
+      const estIds = [...new Set(
+        (data || []).flatMap((p: any) =>
+          (p.pagamentos_parcelas || [])
+            .filter((pp: any) => pp.estornado && pp.estornado_por)
+            .map((pp: any) => pp.estornado_por)
+        )
+      )].filter(Boolean);
+      const nomeEstMap = new Map<string, string>();
+      if (estIds.length > 0) {
+        const { data: perfis } = await supabase
+          .from('user_profiles')
+          .select('user_id, nome')
+          .in('user_id', estIds);
+        (perfis || []).forEach((u: any) => nomeEstMap.set(u.user_id, u.nome));
+      }
+
+      // Enriquecer: pagamento mais recente NÃO estornado (para o resumo da linha)
+      // + lista de estornos (para exibição inline abaixo da parcela).
       const enriched = (data || []).map((p: any) => {
-        const pags = (p.pagamentos_parcelas || []).filter((pp: any) => !pp.estornado);
+        const todos = p.pagamentos_parcelas || [];
+        const pags = todos.filter((pp: any) => !pp.estornado);
         const ultimo = pags.sort((a: any, b: any) =>
           new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
         )[0];
         const dataLiq = ultimo?.liquidacoes_diarias?.data_liquidacao
           || ultimo?.liquidacoes_diarias?.data_abertura?.substring(0, 10)
           || null;
+        // Estornos desta parcela, mais recente primeiro
+        const estornos = todos
+          .filter((pp: any) => pp.estornado)
+          .map((pp: any) => ({
+            valor: parseFloat(pp.valor_pago_total || 0),
+            data: pp.data_estorno || pp.created_at,
+            motivo: pp.motivo_estorno || null,
+            por: pp.estornado_por ? (nomeEstMap.get(pp.estornado_por) || null) : null,
+          }))
+          .sort((a: any, b: any) => new Date(b.data).getTime() - new Date(a.data).getTime());
         return {
           ...p,
           data_pagamento: ultimo?.created_at || null,
@@ -512,6 +543,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           liquidacao_data: dataLiq,
           valor_pago_total: ultimo ? parseFloat(ultimo.valor_pago_total || 0) : null,
           valor_credito_gerado: ultimo ? parseFloat(ultimo.valor_credito_gerado || 0) : null,
+          estornos,
         };
       });
       setParcelas(prev => new Map(prev).set(empId, enriched as Parcela[]));
@@ -1099,14 +1131,14 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
                           {diasDiferenca === 0 ? (
                             <View style={{ backgroundColor: '#D1FAE5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                              <Ionicons name="checkmark-circle" size={10} color="#065F46" /> <Text style={{ fontSize: 10, fontWeight: '600', color: '#065F46' }}>
+                              <Ionicons name="checkmark-circle" size={10} color="#065F46" /><Text style={{ fontSize: 10, fontWeight: '600', color: '#065F46' }}>
                                 {lang === 'es' ? 'En el día' : 'No dia'}
                               </Text>
                             </View>
                           ) : diasDiferenca > 0 ? (
                             // Atraso REAL: pagou depois do vencimento
                             <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                              <Ionicons name="alert-circle" size={10} color="#991B1B" /> <Text style={{ fontSize: 10, fontWeight: '600', color: '#991B1B' }}>
+                              <Ionicons name="alert-circle" size={10} color="#991B1B" /><Text style={{ fontSize: 10, fontWeight: '600', color: '#991B1B' }}>
                                 {diasDiferenca} {lang === 'es' ? (diasDiferenca === 1 ? 'día de atraso' : 'días de atraso') : (diasDiferenca === 1 ? 'dia de atraso' : 'dias de atraso')}
                               </Text>
                             </View>
@@ -1115,7 +1147,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                             // nunca vermelho. Antes esta parcela exibia
                             // "N dias de atraso" indevidamente.
                             <View style={{ backgroundColor: '#D1FAE5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                              <Ionicons name="flash" size={10} color="#065F46" /> <Text style={{ fontSize: 10, fontWeight: '600', color: '#065F46' }}>
+                              <Ionicons name="flash" size={10} color="#065F46" /><Text style={{ fontSize: 10, fontWeight: '600', color: '#065F46' }}>
                                 {Math.abs(diasDiferenca)} {lang === 'es'
                                   ? (Math.abs(diasDiferenca) === 1 ? 'día antes' : 'días antes')
                                   : (Math.abs(diasDiferenca) === 1 ? 'dia antes' : 'dias antes')}
@@ -1129,7 +1161,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                       {atrasoAoVivo !== null && (
                         <View style={{ marginTop: 6 }}>
                           <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, alignSelf: 'flex-start' }}>
-                              <Ionicons name="alert-circle" size={10} color="#991B1B" /> <Text style={{ fontSize: 10, fontWeight: '600', color: '#991B1B' }}>
+                              <Ionicons name="alert-circle" size={10} color="#991B1B" /><Text style={{ fontSize: 10, fontWeight: '600', color: '#991B1B' }}>
                               {atrasoAoVivo} {lang === 'es' ? (atrasoAoVivo === 1 ? 'día atrasada' : 'días atrasada') : (atrasoAoVivo === 1 ? 'dia atrasada' : 'dias atrasada')}
                             </Text>
                           </View>
@@ -1187,6 +1219,37 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                         <Text style={{ fontSize: 11, color: '#EF4444', marginTop: 4, fontWeight: '600' }}>
                           ⚠ {p.dias_atraso} {lang === 'es' ? (p.dias_atraso === 1 ? 'día de atraso' : 'días de atraso') : (p.dias_atraso === 1 ? 'dia de atraso' : 'dias de atraso')}
                         </Text>
+                      )}
+
+                      {/* ⭐ Estornos desta parcela — inline, sempre visível.
+                          Mostra a história: pagou → estornou → (repagou).
+                          Motivo e responsável para o operador entender. */}
+                      {Array.isArray(p.estornos) && p.estornos.length > 0 && (
+                        <View style={{ marginTop: 6, gap: 4 }}>
+                          {p.estornos.map((est, ei) => (
+                            <View key={ei} style={{ backgroundColor: '#FEF2F2', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <Ionicons name="arrow-undo-outline" size={11} color="#B91C1C" />
+                                <Text style={{ fontSize: 11, fontWeight: '600', color: '#B91C1C' }}>
+                                  {lang === 'es' ? 'Estornado' : 'Estornado'} {fmt(est.valor)}
+                                </Text>
+                                <Text style={{ fontSize: 10, color: '#9CA3AF' }}>
+                                  {fmtTs(est.data)}
+                                </Text>
+                              </View>
+                              {est.motivo ? (
+                                <Text style={{ fontSize: 10, color: '#6B7280', fontStyle: 'italic', marginTop: 1 }}>
+                                  "{est.motivo}"
+                                </Text>
+                              ) : null}
+                              {est.por ? (
+                                <Text style={{ fontSize: 10, color: '#9CA3AF', marginTop: 1 }}>
+                                  {lang === 'es' ? 'Por:' : 'Por:'} {est.por}
+                                </Text>
+                              ) : null}
+                            </View>
+                          ))}
+                        </View>
                       )}
                     </View>
                   );

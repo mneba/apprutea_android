@@ -14,6 +14,7 @@ import { Language } from '../contexts/LiquidacaoContext';
 
 export interface EmprestimoData {
   emprestimo_id: string; saldo_emprestimo: number; valor_principal: number;
+  valor_total?: number;
   numero_parcelas: number; status_emprestimo: string; frequencia_pagamento: string;
   parcela_id: string; numero_parcela: number; valor_parcela: number;
   valor_pago_parcela: number; saldo_parcela: number; status_parcela: string;
@@ -128,7 +129,7 @@ export default function ClienteCardLiquidacao({
   onNaoPago,
 }: ClienteCardLiquidacaoProps) {
   const swipeableRef = useRef<Swipeable>(null);
-  
+
   // ⭐ Se isClientePago é true, forçar pg = true para desabilitar pagamento
   const pg = isClientePago || isPagaFn(e.parcela_id, e.status_dia, pagasSet);
   const np = naoPagosSet?.has(e.parcela_id) || false;
@@ -236,6 +237,22 @@ export default function ClienteCardLiquidacao({
             <Text style={S.pValBig}>{fmt(valorAPagar)}</Text>
           )}
           <Text style={S.sLbl}>{t.saldoEmprestimo} {fmt(e.saldo_emprestimo)}</Text>
+          {/* ⭐ Composição do empréstimo: emprestado + juros + total.
+              Antes só o total era exibido; agora o usuário vê quanto foi
+              de fato emprestado sem calcular. Juros = total − principal. */}
+          {typeof e.valor_total === 'number' && e.valor_total > 0 && (
+            <View style={S.compEmp}>
+              <Text style={S.compEmpLine}>
+                {lang === 'es' ? 'Préstamo' : 'Empréstimo'}: <Text style={S.compEmpStrong}>{fmt(e.valor_principal)}</Text>
+              </Text>
+              <Text style={S.compEmpLine}>
+                {lang === 'es' ? 'Intereses' : 'Juros'}: <Text style={S.compEmpStrong}>{fmt(e.valor_total - e.valor_principal)}</Text>
+              </Text>
+              <Text style={S.compEmpLine}>
+                {lang === 'es' ? 'Total' : 'Total'}: <Text style={S.compEmpStrong}>{fmt(e.valor_total)}</Text>
+              </Text>
+            </View>
+          )}
         </View>
       </View>
 
@@ -335,6 +352,9 @@ const S = StyleSheet.create({
   btSecBadgeT: { fontSize: 9, fontWeight: '700', color: '#FFF' },
   linkDetalhes: { alignItems: 'center', paddingVertical: 4 },
   linkDetalhesTx: { fontSize: 12, color: '#9CA3AF' },
+  compEmp: { marginTop: 4, alignItems: 'flex-end', gap: 1 },
+  compEmpLine: { fontSize: 11, color: '#6B7280' },
+  compEmpStrong: { color: '#374151', fontWeight: '700' },
   // Swipe action
   swipeAction: { 
     justifyContent: 'center', 

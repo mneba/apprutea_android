@@ -9,7 +9,7 @@ export interface ClienteRotaDia {
   telefone_celular: string | null; endereco: string | null;
   foto_url: string | null;
   latitude: number | null; longitude: number | null;
-  emprestimo_id: string; saldo_emprestimo: number; valor_principal: number;
+  emprestimo_id: string; saldo_emprestimo: number; valor_principal: number; valor_total?: number;
   numero_parcelas: number; status_emprestimo: string; rota_id: string;
   frequencia_pagamento: string; parcela_id: string; numero_parcela: number;
   valor_parcela: number; valor_pago_parcela: number; saldo_parcela: number;
@@ -111,6 +111,7 @@ export async function getClientesDia(
       emprestimo_id: r.emprestimo_id,
       saldo_emprestimo: r.saldo_emprestimo,
       valor_principal: r.valor_principal,
+      valor_total: r.valor_total,
       numero_parcelas: r.numero_parcelas,
       status_emprestimo: r.status_emprestimo,
       rota_id: r.rota_id,

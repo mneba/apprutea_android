@@ -47,7 +47,7 @@ interface ClienteRotaDia {
   telefone_celular: string | null; endereco: string | null;
   foto_url: string | null;
   latitude: number | null; longitude: number | null;
-  emprestimo_id: string; saldo_emprestimo: number; valor_principal: number;
+  emprestimo_id: string; saldo_emprestimo: number; valor_principal: number; valor_total?: number;
   numero_parcelas: number; status_emprestimo: string; rota_id: string;
   frequencia_pagamento: string; parcela_id: string; numero_parcela: number;
   valor_parcela: number; valor_pago_parcela: number; saldo_parcela: number;
@@ -60,7 +60,7 @@ interface ClienteRotaDia {
 }
 
 interface EmprestimoData {
-  emprestimo_id: string; saldo_emprestimo: number; valor_principal: number;
+  emprestimo_id: string; saldo_emprestimo: number; valor_principal: number; valor_total?: number;
   numero_parcelas: number; status_emprestimo: string; frequencia_pagamento: string;
   parcela_id: string; numero_parcela: number; valor_parcela: number;
   valor_pago_parcela: number; saldo_parcela: number; status_parcela: string;
@@ -927,7 +927,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       // Busca TODOS os pagamentos (incluindo estornados) para pMap + popup de detalhes
       const { data: pagamentos } = await supabase
         .from('pagamentos_parcelas')
-        .select('parcela_id, valor_pago_atual, valor_credito_usado, valor_credito_gerado, liquidacao_id, forma_pagamento, estornado, created_at')
+        .select('parcela_id, valor_pago_atual, valor_credito_usado, valor_credito_gerado, liquidacao_id, forma_pagamento, estornado, created_at, motivo_estorno, estornado_por, data_estorno')
         .in('parcela_id', ids)
         .order('created_at', { ascending: true });
       
@@ -961,6 +961,22 @@ export default function ClientesScreen({ navigation, route }: any) {
         });
       }
       
+      // Resolver nomes de quem estornou (lote). estornado_por = user_id.
+      // Mesma fonte que a fn_estornar_pagamento usa: user_profiles.
+      const estornadoPorIds = [...new Set(
+        (pagamentos || [])
+          .filter((p: any) => p.estornado && p.estornado_por)
+          .map((p: any) => p.estornado_por)
+      )].filter(Boolean);
+      const nomeEstornoMap = new Map<string, string>();
+      if (estornadoPorIds.length > 0) {
+        const { data: perfis } = await supabase
+          .from('user_profiles')
+          .select('user_id, nome')
+          .in('user_id', estornadoPorIds);
+        (perfis || []).forEach((u: any) => nomeEstornoMap.set(u.user_id, u.nome));
+      }
+
       // detMap: todos os pagamentos agrupados por parcela_id (para popup de detalhes)
       // Construído APÓS liqDataMap para poder resolver a data_liquidacao de cada pagamento
       const detMap = new Map<string, PagamentoDetalhe[]>();
@@ -974,6 +990,10 @@ export default function ClientesScreen({ navigation, route }: any) {
           created_at: p.created_at,
           estornado: p.estornado || false,
           data_liquidacao: dataLiqPag,
+          // Detalhes do estorno (só relevantes quando estornado = true)
+          motivo_estorno: p.motivo_estorno || undefined,
+          data_estorno: p.data_estorno || undefined,
+          estornado_por_nome: p.estornado_por ? (nomeEstornoMap.get(p.estornado_por) || undefined) : undefined,
         };
         const arr = detMap.get(p.parcela_id) || [];
         arr.push(entry);
@@ -1623,7 +1643,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       } else {
         // Novo empréstimo para este cliente
         const pi = pagMap.get(r.parcela_id);
-        g.emprestimos.push({ emprestimo_id: r.emprestimo_id, saldo_emprestimo: r.saldo_emprestimo, valor_principal: r.valor_principal, numero_parcelas: r.numero_parcelas, status_emprestimo: r.status_emprestimo, frequencia_pagamento: r.frequencia_pagamento, parcela_id: r.parcela_id, numero_parcela: r.numero_parcela, valor_parcela: r.valor_parcela, valor_pago_parcela: r.valor_pago_parcela, saldo_parcela: r.saldo_parcela, status_parcela: r.status_parcela, data_vencimento: r.data_vencimento, ordem_visita_dia: r.ordem_visita_dia, tem_parcelas_vencidas: r.tem_parcelas_vencidas, total_parcelas_vencidas: r.total_parcelas_vencidas, valor_total_vencido: r.valor_total_vencido, status_dia: r.status_dia, is_parcela_atrasada: r.is_parcela_atrasada, pagamento_info: pi ? { valorPago: pi.valor_pago_atual, creditoGerado: pi.valor_credito_gerado, valorParcela: pi.valor_parcela } : undefined, data_emprestimo: (r as any).data_emprestimo || null });
+        g.emprestimos.push({ emprestimo_id: r.emprestimo_id, saldo_emprestimo: r.saldo_emprestimo, valor_principal: r.valor_principal, valor_total: (r as any).valor_total, numero_parcelas: r.numero_parcelas, status_emprestimo: r.status_emprestimo, frequencia_pagamento: r.frequencia_pagamento, parcela_id: r.parcela_id, numero_parcela: r.numero_parcela, valor_parcela: r.valor_parcela, valor_pago_parcela: r.valor_pago_parcela, saldo_parcela: r.saldo_parcela, status_parcela: r.status_parcela, data_vencimento: r.data_vencimento, ordem_visita_dia: r.ordem_visita_dia, tem_parcelas_vencidas: r.tem_parcelas_vencidas, total_parcelas_vencidas: r.total_parcelas_vencidas, valor_total_vencido: r.valor_total_vencido, status_dia: r.status_dia, is_parcela_atrasada: r.is_parcela_atrasada, pagamento_info: pi ? { valorPago: pi.valor_pago_atual, creditoGerado: pi.valor_credito_gerado, valorParcela: pi.valor_parcela } : undefined, data_emprestimo: (r as any).data_emprestimo || null });
       }
     });
     m.forEach(g => { g.qtd_emprestimos = g.emprestimos.length; g.tem_multiplos_vencimentos = g.emprestimos.length > 1; });

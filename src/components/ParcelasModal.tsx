@@ -42,6 +42,10 @@ export interface PagamentoDetalhe {
   data_liquidacao?: string | null;   // vem de liquidacoes_diarias.data_liquidacao
   data_abertura?: string | null;     // vem de liquidacoes_diarias.data_abertura
   importado?: boolean;               // true = registro da importação SmartPay
+  // Detalhes do estorno (preenchidos quando estornado = true)
+  motivo_estorno?: string;
+  data_estorno?: string;
+  estornado_por_nome?: string;
 }
 
 interface ClienteModalInfo {
@@ -304,12 +308,14 @@ function DetalhesPopup({ visible, onClose, parcela, pagamentos, t }: DetalhesPop
                             ) : pp.forma_pagamento ? (
                               <View style={D.formaBadge}>
                                 <Ionicons
-                                  name={pp.forma_pagamento === 'DINHEIRO' ? 'cash-outline' : 'swap-horizontal-outline'}
+                                  name={pp.forma_pagamento === 'DINHEIRO' ? 'cash-outline' : pp.forma_pagamento === 'CREDITO' ? 'card-outline' : 'swap-horizontal-outline'}
                                   size={10}
                                   color="#6B7280"
                                 />
                                 <Text style={D.formaText}>
-                                  {pp.forma_pagamento === 'DINHEIRO' ? t.dinheiro : 'Transferência'}
+                                  {pp.forma_pagamento === 'DINHEIRO' ? t.dinheiro
+                                    : pp.forma_pagamento === 'CREDITO' ? 'Pago com crédito'
+                                    : 'Transferência'}
                                 </Text>
                               </View>
                             ) : null}
@@ -375,23 +381,43 @@ function DetalhesPopup({ visible, onClose, parcela, pagamentos, t }: DetalhesPop
                 <Text style={[D.sectionTitle, { color: '#9CA3AF' }]}>
                   Estornados ({pagsEstornados.length})
                 </Text>
-                {pagsEstornados.map((pp, idx) => (
-                  <View key={idx} style={[D.pagCard, { opacity: 0.5 }]}>
-                    <View style={D.pagRow}>
-                      <View style={[D.pagIconBox, { backgroundColor: '#FEE2E2' }]}>
-                        <Ionicons name="arrow-undo-outline" size={14} color="#EF4444" />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[D.pagValor, { color: '#9CA3AF', textDecorationLine: 'line-through' }]}>
-                          {fmt(parseFloat(String(pp.valor_pago_total || 0)))}
-                        </Text>
-                        {pp.created_at && (
-                          <Text style={D.pagInfoText}>{fmtTs(pp.created_at)}</Text>
-                        )}
+                {pagsEstornados.map((pp, idx) => {
+                  const dataEst = pp.data_estorno || pp.created_at;
+                  return (
+                    <View key={idx} style={[D.pagCard, { opacity: 0.6 }]}>
+                      <View style={D.pagRow}>
+                        <View style={[D.pagIconBox, { backgroundColor: '#FEE2E2' }]}>
+                          <Ionicons name="arrow-undo-outline" size={14} color="#EF4444" />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={[D.pagValor, { color: '#9CA3AF', textDecorationLine: 'line-through' }]}>
+                            {fmt(parseFloat(String(pp.valor_pago_total || 0)))}
+                          </Text>
+                          {dataEst && (
+                            <View style={D.pagInfoRow}>
+                              <Ionicons name="time-outline" size={11} color="#9CA3AF" />
+                              <Text style={D.pagInfoText}>{fmtTs(dataEst)}</Text>
+                            </View>
+                          )}
+                          {pp.motivo_estorno && (
+                            <View style={D.pagInfoRow}>
+                              <Ionicons name="chatbox-ellipses-outline" size={11} color="#9CA3AF" />
+                              <Text style={[D.pagInfoText, { fontStyle: 'italic' }]}>
+                                {pp.motivo_estorno}
+                              </Text>
+                            </View>
+                          )}
+                          {pp.estornado_por_nome && (
+                            <View style={D.pagInfoRow}>
+                              <Ionicons name="person-outline" size={11} color="#9CA3AF" />
+                              <Text style={D.pagInfoText}>{pp.estornado_por_nome}</Text>
+                            </View>
+                          )}
+                        </View>
                       </View>
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
 

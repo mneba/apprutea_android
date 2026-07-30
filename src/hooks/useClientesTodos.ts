@@ -4,7 +4,7 @@ import { supabase } from '../services/supabase';
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface EmprestimoTodos {
-  id: string; valor_principal: number; saldo_emprestimo: number;
+  id: string; valor_principal: number; valor_total?: number; saldo_emprestimo: number;
   valor_parcela: number; numero_parcelas: number; numero_parcela_atual: number;
   status: string; frequencia_pagamento: string; tipo_emprestimo: string;
   total_parcelas_vencidas: number; valor_total_vencido: number;
@@ -69,7 +69,7 @@ export default function useClientesTodos({ rotaId, setOrdemRotaMap, setRefreshin
       // Query 1: Todos os empréstimos da rota com dados do cliente
       const { data: emps } = await supabase
         .from('emprestimos')
-        .select(`id, valor_principal, valor_saldo, valor_parcela, numero_parcelas, status, frequencia_pagamento, tipo_emprestimo, data_emprestimo, clientes!inner(id, nome, telefone_celular, status, codigo_cliente, permite_renegociacao, permite_emprestimo_adicional, created_at)`)
+        .select(`id, valor_principal, valor_total, valor_saldo, valor_parcela, numero_parcelas, status, frequencia_pagamento, tipo_emprestimo, data_emprestimo, clientes!inner(id, nome, telefone_celular, status, codigo_cliente, permite_renegociacao, permite_emprestimo_adicional, created_at)`)
         .eq('rota_id', rotaId)
         .in('status', ['ATIVO', 'VENCIDO', 'QUITADO', 'RENEGOCIADO']);
 
@@ -120,6 +120,7 @@ export default function useClientesTodos({ rotaId, setOrdemRotaMap, setRefreshin
         cli.emprestimos.push({
           id: e.id,
           valor_principal: e.valor_principal,
+          valor_total: e.valor_total,
           saldo_emprestimo: e.valor_saldo,
           valor_parcela: e.valor_parcela,
           numero_parcelas: e.numero_parcelas,
