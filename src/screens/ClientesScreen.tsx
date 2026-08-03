@@ -68,7 +68,7 @@ interface EmprestimoData {
   tem_parcelas_vencidas: boolean; total_parcelas_vencidas: number;
   valor_total_vencido: number; status_dia: 'PAGO' | 'PARCIAL' | 'EM_ATRASO' | 'PENDENTE';
   is_parcela_atrasada?: boolean;
-  pagamento_info?: { valorPago: number; creditoGerado: number; valorParcela: number };
+  pagamento_info?: { valorPago: number; creditoGerado: number; valorParcela: number; dataPagamento?: string | null };
   data_emprestimo?: string;
 }
 
@@ -355,18 +355,20 @@ const fmtTel = (t: string) => t.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
 // Laranja: 4-7 parcelas de atraso (moderado)
 // Vermelho: 8+ parcelas de atraso (crítico)
 const corAtraso = (vencidas: number): string => {
-  if (vencidas <= 0) return '#10B981'; // verde
-  if (vencidas <= 3) return '#F59E0B'; // amarelo
-  if (vencidas <= 7) return '#F97316'; // laranja
-  return '#EF4444'; // vermelho
+  if (vencidas <= 0) return '#10B981'; // verde — em dia
+  if (vencidas <= 3) return '#F59E0B'; // amarelo — atraso leve
+  if (vencidas <= 7) return '#9333EA'; // roxo — atraso médio (era laranja #F97316, pedido #39)
+  return '#EF4444'; // vermelho — atraso crítico
 };
 
 const borderOf = (e: EmprestimoData, paga: boolean) => {
+  // Regra simplificada (decisão do cliente): sem parcela vencida = EM DIA
+  // (verde); com parcela vencida = ATRASO. Estado "pendente" (cinza) eliminado.
   if (paga) return '#10B981';
   const vencidas = e.total_parcelas_vencidas || 0;
   if (vencidas > 0) return corAtraso(vencidas);
-  if (e.is_parcela_atrasada) return '#F59E0B';
-  return ({ PAGO: '#10B981', EM_ATRASO: '#F59E0B', PARCIAL: '#F59E0B', PENDENTE: '#D1D5DB' } as any)[e.status_dia] || '#D1D5DB';
+  if (e.is_parcela_atrasada) return corAtraso(1);
+  return '#10B981';
 };
 const bgOf = (_e: EmprestimoData, paga: boolean) => paga ? 'rgba(16,185,129,0.05)' : '#fff';
 const isPaga = (pid: string, sd: string, set: Set<string>) => set.has(pid) || sd === 'PAGO';
@@ -899,10 +901,26 @@ export default function ClientesScreen({ navigation, route }: any) {
     carregarSolicitacoesRenovacao();
   }, [carregarSolicitacoesRenovacao]);
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    if (tab === 'liquidacao') loadLiq(true);
-    else loadTodosClientes(true);
+    // Rede de segurança: garante que o spinner SEMPRE desligue, mesmo que
+    // loadLiq/loadTodosClientes não resolvam (corrida no contexto, promise
+    // pendente, early-return sem desligar). Antes, um desses caminhos deixava
+    // o refreshing preso em true — o "carregando infinito" que só saía ao
+    // sair e voltar da tela.
+    const timeout = setTimeout(() => setRefreshing(false), 8000);
+    try {
+      if (tab === 'liquidacao') {
+        await loadLiq(true);
+      } else {
+        await loadTodosClientes(true);
+      }
+    } catch (e) {
+      console.error('Erro no refresh:', e);
+    } finally {
+      clearTimeout(timeout);
+      setRefreshing(false);
+    }
   }, [tab, loadLiq, loadTodosClientes]);
 
   const abrirParcelas = useCallback(async (clienteId: string, clienteNome: string, emprestimoId: string, empStatus?: string) => {
@@ -1440,6 +1458,10 @@ export default function ClientesScreen({ navigation, route }: any) {
       console.log('[ESTORNO] Permitido, abrindo modal direto');
       setParcelaEstorno(parcela);
       setMotivoEstorno('');
+      // Fecha o ParcelasModal antes de abrir o de confirmação. Sem isso, no
+      // Android o modal de estorno renderiza ATRÁS do ParcelasModal e o
+      // usuário não vê a confirmação ("nada acontece").
+      setModalParcelasVisible(false);
       setModalEstornoVisible(true);
       return;
     }
@@ -1471,6 +1493,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         console.log('[ESTORNO] Autorizado, abrindo modal de estorno');
         setParcelaEstorno(parcela);
         setMotivoEstorno('');
+        setModalParcelasVisible(false);   // fecha ParcelasModal (ver nota acima)
         setModalEstornoVisible(true);
         return;
       }
@@ -1494,6 +1517,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         console.log('[ESTORNO] Abrindo modal de solicitação de autorização...');
         setParcelaAguardandoAutorizacao(parcela);
         setMotivoSolicitacaoEstorno('');
+        setModalParcelasVisible(false);   // fecha ParcelasModal (ver nota acima)
         setModalAutorizacaoEstornoVisible(true);
         console.log('[ESTORNO] Modal deveria estar visível agora');
         return;
@@ -1631,7 +1655,7 @@ export default function ClientesScreen({ navigation, route }: any) {
             valor_total_vencido: r.valor_total_vencido,
             status_dia: r.status_dia, is_parcela_atrasada: r.is_parcela_atrasada,
             saldo_emprestimo: r.saldo_emprestimo,
-            pagamento_info: pi ? { valorPago: pi.valor_pago_atual, creditoGerado: pi.valor_credito_gerado, valorParcela: pi.valor_parcela } : undefined,
+            pagamento_info: pi ? { valorPago: pi.valor_pago_atual, creditoGerado: pi.valor_credito_gerado, valorParcela: pi.valor_parcela, dataPagamento: pi.data_pagamento || null } : undefined,
           });
         }
         // Acumula atrasadas
@@ -1643,7 +1667,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       } else {
         // Novo empréstimo para este cliente
         const pi = pagMap.get(r.parcela_id);
-        g.emprestimos.push({ emprestimo_id: r.emprestimo_id, saldo_emprestimo: r.saldo_emprestimo, valor_principal: r.valor_principal, valor_total: (r as any).valor_total, numero_parcelas: r.numero_parcelas, status_emprestimo: r.status_emprestimo, frequencia_pagamento: r.frequencia_pagamento, parcela_id: r.parcela_id, numero_parcela: r.numero_parcela, valor_parcela: r.valor_parcela, valor_pago_parcela: r.valor_pago_parcela, saldo_parcela: r.saldo_parcela, status_parcela: r.status_parcela, data_vencimento: r.data_vencimento, ordem_visita_dia: r.ordem_visita_dia, tem_parcelas_vencidas: r.tem_parcelas_vencidas, total_parcelas_vencidas: r.total_parcelas_vencidas, valor_total_vencido: r.valor_total_vencido, status_dia: r.status_dia, is_parcela_atrasada: r.is_parcela_atrasada, pagamento_info: pi ? { valorPago: pi.valor_pago_atual, creditoGerado: pi.valor_credito_gerado, valorParcela: pi.valor_parcela } : undefined, data_emprestimo: (r as any).data_emprestimo || null });
+        g.emprestimos.push({ emprestimo_id: r.emprestimo_id, saldo_emprestimo: r.saldo_emprestimo, valor_principal: r.valor_principal, valor_total: (r as any).valor_total, numero_parcelas: r.numero_parcelas, status_emprestimo: r.status_emprestimo, frequencia_pagamento: r.frequencia_pagamento, parcela_id: r.parcela_id, numero_parcela: r.numero_parcela, valor_parcela: r.valor_parcela, valor_pago_parcela: r.valor_pago_parcela, saldo_parcela: r.saldo_parcela, status_parcela: r.status_parcela, data_vencimento: r.data_vencimento, ordem_visita_dia: r.ordem_visita_dia, tem_parcelas_vencidas: r.tem_parcelas_vencidas, total_parcelas_vencidas: r.total_parcelas_vencidas, valor_total_vencido: r.valor_total_vencido, status_dia: r.status_dia, is_parcela_atrasada: r.is_parcela_atrasada, pagamento_info: pi ? { valorPago: pi.valor_pago_atual, creditoGerado: pi.valor_credito_gerado, valorParcela: pi.valor_parcela, dataPagamento: pi.data_pagamento || null } : undefined, data_emprestimo: (r as any).data_emprestimo || null });
       }
     });
     m.forEach(g => { g.qtd_emprestimos = g.emprestimos.length; g.tem_multiplos_vencimentos = g.emprestimos.length > 1; });
@@ -1661,16 +1685,44 @@ export default function ClientesScreen({ navigation, route }: any) {
     if (filtro === 'atrasados') r = r.filter(c => !isCliPago(c) && c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas));
     else if (filtro === 'pagas') r = r.filter(c => isCliPago(c));
     else r = r.filter(c => !isCliPago(c)); // 'todos' mostra apenas pendentes (não pagos)
-    r.sort(ord === 'rota'
-      ? (a, b) => {
-          const oa = ordemRotaMap.get(a.cliente_id) ?? 9999;
-          const ob = ordemRotaMap.get(b.cliente_id) ?? 9999;
-          if (oa !== ob) return oa - ob;
-          return a.nome.localeCompare(b.nome);
-        }
-      : (a, b) => a.nome.localeCompare(b.nome));
+    if (filtro === 'pagas') {
+      // #40: a aba Pagos ordena pela ORDEM EM QUE OS PAGAMENTOS FORAM
+      // REGISTRADOS. Usa a MESMA fonte que o cabeçalho de hora exibe
+      // (pagMap.created_at, com fallback data_pagamento) — senão a ordem da
+      // lista não bate com as horas mostradas em cada card.
+      const dtPag = (c: ClienteAgrupado): number => {
+        // Varre o pagMap por cliente_id (mesma lógica do cabeçalho de hora):
+        // pega o data_pagamento (MAX created_at) mais recente entre as
+        // parcelas pagas do cliente. Independe de qual parcela_id o
+        // empréstimo agrupado carrega.
+        let ms = -Infinity;
+        pagMap.forEach((p) => {
+          if (p.cliente_id === c.cliente_id && p.data_pagamento) {
+            const t = new Date(p.data_pagamento).getTime();
+            if (!isNaN(t) && t > ms) ms = t;
+          }
+        });
+        return ms;
+      };
+      r.sort((a, b) => {
+        const da = dtPag(a), db = dtPag(b);
+        // Decrescente: o pagamento MAIS RECENTE fica no topo (o vendedor vê
+        // logo o que acabou de registrar, sem rolar até o fim).
+        if (da !== db) return db - da;
+        return a.nome.localeCompare(b.nome);    // desempate estável
+      });
+    } else {
+      r.sort(ord === 'rota'
+        ? (a, b) => {
+            const oa = ordemRotaMap.get(a.cliente_id) ?? 9999;
+            const ob = ordemRotaMap.get(b.cliente_id) ?? 9999;
+            if (oa !== ob) return oa - ob;
+            return a.nome.localeCompare(b.nome);
+          }
+        : (a, b) => a.nome.localeCompare(b.nome));
+    }
     return r;
-  }, [grouped, busca, filtro, filtroFrequencia, ord, isCliPago, ordemRotaMap]);
+  }, [grouped, busca, filtro, filtroFrequencia, ord, isCliPago, ordemRotaMap, pagMap]);
 
   const cntTotal = grouped.filter(c => !isCliPago(c)).length;
   const cntAtraso = grouped.filter(c => !isCliPago(c) && c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas)).length;
@@ -2006,8 +2058,20 @@ return (
               renderItem={({ item }) => {
                 if (filtro === 'pagas') {
                   const e = eAtual(item);
-                  const pag = pagMap.get(e.parcela_id);
-                  const dtSrc = pag?.created_at || pag?.data_pagamento;
+                  // Busca a data de pagamento varrendo o pagMap por CLIENTE_ID,
+                  // não pela parcela_id do empréstimo. Motivo: quando o cliente
+                  // tem parcela paga (braço B) + pendente (braço A), o
+                  // emp.parcela_id pode acabar sendo o da PENDENTE, e o pagMap
+                  // (chaveado por parcela) não acharia a data. Varrendo por
+                  // cliente, pegamos a parcela paga com sua hora.
+                  let dtSrc: string | null = null;
+                  let dtSrcMs = -Infinity;
+                  pagMap.forEach((p) => {
+                    if (p.cliente_id === item.cliente_id && p.data_pagamento) {
+                      const ms = new Date(p.data_pagamento).getTime();
+                      if (!isNaN(ms) && ms > dtSrcMs) { dtSrcMs = ms; dtSrc = p.data_pagamento; }
+                    }
+                  });
                   const fmtDtPag = dtSrc ? (() => {
                     if (dtSrc.includes('T') || dtSrc.includes('+') || dtSrc.length > 10) {
                       const d = new Date(dtSrc);
@@ -2020,7 +2084,7 @@ return (
                     <View>
                       {fmtDtPag && (
                         <View style={S.pagDateHeader}>
-                          <Ionicons name="time-outline" size={12} color="#10B981" />
+                          <Ionicons name="time-outline" size={12} color="#374151" />
                           <Text style={S.pagDateText}>{lang === 'es' ? 'Pagado' : 'Pago'}: {fmtDtPag}</Text>
                         </View>
                       )}
@@ -2495,7 +2559,7 @@ const S = StyleSheet.create({
 
   // Data/hora pagamento (visão Pagos)
   pagDateHeader: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingTop: 8, paddingBottom: 2 },
-  pagDateText: { fontSize: 11, fontWeight: '600', color: '#10B981' },
+  pagDateText: { fontSize: 11, fontWeight: '600', color: '#374151' },
 
   // ⭐ Modal Não Pago
   naoPagoOverlay: {

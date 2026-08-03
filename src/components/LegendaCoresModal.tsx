@@ -1,10 +1,10 @@
 import React from 'react';
 import {
-    Modal,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Modal,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 interface LegendaCoresModalProps {
@@ -32,9 +32,8 @@ export default function LegendaCoresModal({ visible, onClose, t }: LegendaCoresM
 
           {[
             { color: '#10B981', label: t.legPagoLabel, desc: t.legPagoDesc },
-            { color: '#D1D5DB', label: t.legPendenteLabel, desc: t.legPendenteDesc },
             { color: '#F59E0B', label: t.legLeveLabel, desc: t.legLeveDesc },
-            { color: '#F97316', label: t.legModeradoLabel, desc: t.legModeradoDesc },
+            { color: '#9333EA', label: t.legModeradoLabel, desc: t.legModeradoDesc },
             { color: '#EF4444', label: t.legCriticoLabel, desc: t.legCriticoDesc },
           ].map((item) => (
             <View key={item.color} style={S.row}>

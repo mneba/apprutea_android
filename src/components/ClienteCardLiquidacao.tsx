@@ -56,18 +56,31 @@ const fmtData = (d: string | null | undefined) => {
 };
 
 const corAtraso = (vencidas: number): string => {
-  if (vencidas <= 0) return '#10B981';
-  if (vencidas <= 3) return '#F59E0B';
-  if (vencidas <= 7) return '#F97316';
-  return '#EF4444';
+  // Níveis de atraso (pedido #39 do cliente): substituído o laranja (#F97316)
+  // por ROXO (#9333EA) no nível médio, porque laranja e amarelo eram quase
+  // indistinguíveis. Escala: verde (em dia) → amarelo (leve) → roxo (médio)
+  // → vermelho (crítico).
+  if (vencidas <= 0) return '#10B981';  // verde — em dia
+  if (vencidas <= 3) return '#F59E0B';  // amarelo — atraso leve
+  if (vencidas <= 7) return '#9333EA';  // roxo — atraso médio
+  return '#EF4444';                     // vermelho — atraso crítico
 };
 
 const borderOf = (e: EmprestimoData, paga: boolean) => {
+  // Regra simplificada (decisão do cliente): só existem dois mundos —
+  //   sem parcela vencida não paga  → EM DIA (verde)
+  //   com parcela vencida não paga  → ATRASO (amarelo/roxo/vermelho)
+  // O antigo estado "pendente" (cinza) foi eliminado: um cliente cuja próxima
+  // parcela ainda não venceu está EM DIA, não "pendente".
   if (paga) return '#10B981';
   const vencidas = e.total_parcelas_vencidas || 0;
   if (vencidas > 0) return corAtraso(vencidas);
-  if (e.is_parcela_atrasada) return '#F59E0B';
-  return ({ PAGO: '#10B981', EM_ATRASO: '#F59E0B', PARCIAL: '#F59E0B', PENDENTE: '#D1D5DB' } as any)[e.status_dia] || '#D1D5DB';
+  // is_parcela_atrasada cobre o caso em que a parcela venceu (data < hoje, não
+  // paga) mas o status ainda não virou 'VENCIDO' — também é atraso. Como só há
+  // 1 parcela nessa condição, cor de atraso leve.
+  if (e.is_parcela_atrasada) return corAtraso(1);
+  // Sem nenhuma parcela vencida → em dia (verde), inclusive cliente novo.
+  return '#10B981';
 };
 
 const bgOf = (_e: EmprestimoData, paga: boolean) => paga ? 'rgba(16,185,129,0.05)' : '#fff';
@@ -197,7 +210,7 @@ export default function ClienteCardLiquidacao({
         </View>
       )}
 
-      {/* === LINHA 1: Avatar + Nome + Badges === */}
+      {/* === LINHA 1: Avatar + Nome === */}
       <View style={S.cardRow}>
         {c.foto_url ? (
           <Image source={{ uri: c.foto_url }} style={[S.av, { backgroundColor: '#E5E7EB' }]} />
@@ -209,9 +222,6 @@ export default function ClienteCardLiquidacao({
         <View style={S.cardInfo}>
           <View style={S.nameRow}>
             <Text style={[S.nome, np && { color: '#6B7280' }]} numberOfLines={1}>{c.nome}</Text>
-            {e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 && (
-              <View style={S.bWarnNew}><Text style={S.bWarnNewI}>⚠</Text><Text style={S.bWarnNewT}>{e.total_parcelas_vencidas}</Text></View>
-            )}
           </View>
           <Text style={S.sub} numberOfLines={1}>
             {c.telefone_celular ? `📞 ${fmtTel(c.telefone_celular)}` : ''}{c.telefone_celular && c.endereco ? '  ◦  ' : ''}{c.endereco ? `📍 ${c.endereco}` : ''}
@@ -219,12 +229,24 @@ export default function ClienteCardLiquidacao({
         </View>
       </View>
 
-      {/* === LINHA 2: Parcela + Frequência + Valor === */}
+      {/* === LINHA 2: [breadcrumb tipo·status] + Parcela + Valores === */}
       <View style={S.pRow}>
         <View>
+          {/* ⭐ Breadcrumb: tipo do empréstimo · status. Só texto, na cor da
+              legenda. "ok" quando em dia; nº de parcelas vencidas se atrasado. */}
+          {(() => {
+            const venc = e.total_parcelas_vencidas || 0;
+            const emDia = venc === 0 && !e.is_parcela_atrasada;
+            const cor = emDia ? '#10B981' : corAtraso(venc > 0 ? venc : 1);
+            const tipo = FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento;
+            return (
+              <Text style={[S.breadTipo, { color: cor }]} numberOfLines={1}>
+                {tipo} · {emDia ? 'ok' : (venc > 0 ? venc : 1)}
+              </Text>
+            );
+          })()}
           <View style={S.pLblR}>
             <Text style={S.pLbl}>{t.parcela} {e.numero_parcela}/{e.numero_parcelas}</Text>
-            <View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento}</Text></View>
           </View>
           {e.data_emprestimo ? <Text style={S.dataEmpLbl}>{lang === 'es' ? 'Préstamo:' : 'Empréstimo:'} {fmtData(e.data_emprestimo)}</Text> : null}
         </View>
@@ -320,6 +342,7 @@ const S = StyleSheet.create({
   cardRow: { flexDirection: 'row' },
   av: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
   avTx: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  breadTipo: { fontSize: 11, fontWeight: '700', marginBottom: 1 },
   cardInfo: { flex: 1 },
   nameRow: { flexDirection: 'row', alignItems: 'center' },
   nome: { flex: 1, fontSize: 14, fontWeight: '600', color: '#1F2937' },
