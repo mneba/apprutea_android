@@ -1041,17 +1041,20 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                   // marcava "18 dias de atraso" para quem pagou ADIANTADO,
                   // porque só media a distância entre hoje e o vencimento.
                   //
-                  // Para parcela paga/parcial, a pontualidade correta é a
-                  // comparação data_pagamento × data_vencimento (ambas em
-                  // string YYYY-MM-DD, comparadas por componentes para não
-                  // sofrer shift de fuso).
+                  // Para parcela paga/parcial, a pontualidade correta compara a
+                  // DATA DA LIQUIDAÇÃO (data de negócio onde foi paga) com o
+                  // vencimento — NÃO a data_pagamento (quando o registro foi
+                  // criado). Ex.: liquidação 04/08, venc 04/08, registro 05/08
+                  // → EM DIA. Fallback para data_pagamento se não houver data
+                  // de liquidação.
                   //   diasDiferenca > 0  → pagou com atraso
                   //   diasDiferenca = 0  → pagou no dia
                   //   diasDiferenca < 0  → pagou adiantado (quitouAntecipado)
                   let diasDiferenca: number | null = null;
                   let quitouAntecipado = false;
-                  if ((isPago || isParcial) && p.data_pagamento && p.data_vencimento) {
-                    const dataRefStr = p.data_pagamento.substring(0, 10);
+                  const refPontualidade = (p as any).liquidacao_data || p.data_pagamento;
+                  if ((isPago || isParcial) && refPontualidade && p.data_vencimento) {
+                    const dataRefStr = refPontualidade.substring(0, 10);
                     const [vy, vm, vd] = p.data_vencimento.split('-').map(Number);
                     const [py, pm, pd] = dataRefStr.split('-').map(Number);
                     if (vy && vm && vd && py && pm && pd) {

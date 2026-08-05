@@ -593,7 +593,22 @@ export default function ParcelasModal({
     const isAutoQuitacao = (p.observacoes || '').includes('[AUTO-QUITAÇÃO]');
     const isQuitacaoOrigem = isPago && (p.credito_gerado || 0) > 0 && clienteModal?.emprestimo_status === 'QUITADO';
 
-    const diasAtraso = isPago ? calcularDiasAtraso(p.data_vencimento, p.data_pagamento) : 0;
+    // ehUltimaPaga: esta é a parcela de MAIOR numero_parcela entre as pagas
+    // (a que efetivamente quitou o empréstimo). Usada para exibir o aviso de
+    // quitação só nela, não em todas as pagas.
+    const maxParcelaPaga = parcelasModal
+      .filter(x => (x.valor_pago || 0) > 0 && x.status !== 'CANCELADO')
+      .reduce((max, x) => Math.max(max, x.numero_parcela), 0);
+    const ehUltimaPaga = isPago && p.numero_parcela === maxParcelaPaga;
+
+    // Atraso de parcela PAGA: compara a DATA DA LIQUIDAÇÃO (data de negócio do
+    // dia de trabalho onde foi paga) com o vencimento — NÃO a data_pagamento
+    // (que é quando o registro foi criado no sistema, podendo ser no dia
+    // seguinte/madrugada). Ex.: liquidação 04/08, vencimento 04/08, registro
+    // 05/08 → EM DIA, não "1 dia de atraso". Fallback para data_pagamento se a
+    // liquidação não tiver data (segurança).
+    const dataRefAtraso = p.data_liquidacao || p.data_pagamento;
+    const diasAtraso = isPago ? calcularDiasAtraso(p.data_vencimento, dataRefAtraso) : 0;
     const pagoComAtraso = isPago && diasAtraso > 0;
     const pagoAdiantado = isPago && diasAtraso < 0;
 
@@ -831,6 +846,20 @@ export default function ParcelasModal({
             )}
           </View>
         </View>
+        {/* Aviso de quitação — LINHA PRÓPRIA, largura total do card (fora das
+            colunas, senão espreme o valor "Pago" e quebra o layout).
+            Só na parcela que quitou (última paga) com status QUITADO.
+            Com destaque: fundo âmbar, borda e ícone visíveis. */}
+        {!selectionMode && (isPago || valorPago > 0) && p.parcela_id && liqId && !isViz && p.liquidacao_id === liqId && clienteModal?.emprestimo_status === 'QUITADO' && ehUltimaPaga && (
+          <View style={S.mQuitadoAviso}>
+            <Ionicons name="checkmark-done-circle" size={18} color="#B45309" />
+            <Text style={S.mQuitadoAvisoTx}>
+              {lang === 'es'
+                ? 'Préstamo liquidado por esta cuota. Para revertir, vaya al botón Caja y resetee la operación.'
+                : 'Empréstimo quitado por esta parcela. Para reverter, vá ao botão Caixa e resete a operação.'}
+            </Text>
+          </View>
+        )}
       </TouchableOpacity>
     );
   };
@@ -1009,6 +1038,8 @@ const S = StyleSheet.create({
   mBtnPagarTx: { color: '#fff', fontSize: 12, fontWeight: '600' },
   mBtnEstornar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#EF4444', gap: 5 },
   mBtnEstornarTx: { color: '#EF4444', fontSize: 12, fontWeight: '600' },
+  mQuitadoAviso: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF3C7', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, gap: 8, borderWidth: 1, borderColor: '#F59E0B', marginTop: 8, marginHorizontal: 2 },
+  mQuitadoAvisoTx: { flex: 1, color: '#92400E', fontSize: 12, fontWeight: '600', lineHeight: 16 },
 
   // Fechar
   mBtnFecharWrap: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 20, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
