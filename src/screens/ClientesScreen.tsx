@@ -496,6 +496,18 @@ export default function ClientesScreen({ navigation, route }: any) {
   }));
 
   const lang = liqCtx.language || 'pt-BR';
+
+  // ⭐ Notas: a liquidação-alvo é a que está selecionada na tela; sem seleção
+  //    (aba "Todos") cai na aberta do contexto.
+  const notasLiqId = liqId || liqCtx.liquidacaoAtual?.id || null;
+  // `liquidacaoAtual` do contexto é, por construção, sempre ABERTO/REABERTO.
+  // Logo, só há status "aberto" quando a liquidação da tela é exatamente ela e
+  // não estamos em modo visualização — ao consultar um dia passado o vendedor
+  // pode ler as notas, mas não criar/editar nenhuma.
+  const notasLiqStatus = (!isViz && notasLiqId && notasLiqId === liqCtx.liquidacaoAtual?.id)
+    ? (liqCtx.liquidacaoAtual?.status || null)
+    : 'FECHADO';
+
   // Se não há liquidação aberta, força tab "todos"
   const [tab, setTab] = useState<TabAtiva>(!liqId ? 'todos' : 'liquidacao');
 
@@ -2275,8 +2287,8 @@ return (
         vendedorId={vendedor?.id || ''}
         autorNome={vendedor?.nome || ''}
         autorTipo="VENDEDOR"
-        liquidacaoId={liqId || liqCtx.liquidacaoAtual?.id || undefined}
-        liquidacaoStatus={liqCtx.liquidacaoAtual?.status || null}
+        liquidacaoId={notasLiqId || undefined}
+        liquidacaoStatus={notasLiqStatus}
         clienteId={notaClienteId}
         clienteNome={notaClienteNome}
         emprestimoId={notaEmprestimoId}
@@ -2299,14 +2311,13 @@ return (
         vendedorId={vendedor?.id || ''}
         autorNome={vendedor?.nome || ''}
         autorTipo="VENDEDOR"
-        liquidacaoId={liqId || liqCtx.liquidacaoAtual?.id || undefined}
-        liquidacaoStatus={liqCtx.liquidacaoAtual?.status || null}
+        liquidacaoId={notasLiqId || undefined}
+        liquidacaoStatus={notasLiqStatus}
         clienteId={notasClienteId}
         clienteNome={notasClienteNome}
         lang={lang}
         coords={coords}
-        permitirCriar={!!(liqId && ['ABERTO', 'ABERTA', 'REABERTO', 'REABERTA'].includes(liqCtx.liquidacaoAtual?.status || ''))}
-        mensagemSemLiq={lang === 'es' ? 'Abra una liquidación para crear notas' : 'Abra uma liquidação para criar notas'}
+        permitirCriar
         obsLocalPadrao="Cliente"
       />
 
