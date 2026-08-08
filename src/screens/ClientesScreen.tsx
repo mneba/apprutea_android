@@ -496,18 +496,6 @@ export default function ClientesScreen({ navigation, route }: any) {
   }));
 
   const lang = liqCtx.language || 'pt-BR';
-
-  // ⭐ Notas: a liquidação-alvo é a que está selecionada na tela; sem seleção
-  //    (aba "Todos") cai na aberta do contexto.
-  const notasLiqId = liqId || liqCtx.liquidacaoAtual?.id || null;
-  // `liquidacaoAtual` do contexto é, por construção, sempre ABERTO/REABERTO.
-  // Logo, só há status "aberto" quando a liquidação da tela é exatamente ela e
-  // não estamos em modo visualização — ao consultar um dia passado o vendedor
-  // pode ler as notas, mas não criar/editar nenhuma.
-  const notasLiqStatus = (!isViz && notasLiqId && notasLiqId === liqCtx.liquidacaoAtual?.id)
-    ? (liqCtx.liquidacaoAtual?.status || null)
-    : 'FECHADO';
-
   // Se não há liquidação aberta, força tab "todos"
   const [tab, setTab] = useState<TabAtiva>(!liqId ? 'todos' : 'liquidacao');
 
@@ -1224,6 +1212,13 @@ export default function ClientesScreen({ navigation, route }: any) {
     const saldoEmp = clienteModal?.saldo_emprestimo ?? 0;
     const totalPagando = valorNum + valorCredito;
     const vaiQuitar = saldoEmp > 0 && totalPagando >= saldoEmp;
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.log('🔎 VAI_QUITAR?', {
+        saldoEmp, valorNum, valorCredito, totalPagando, vaiQuitar,
+        parcela: parcelaPagamento?.numero_parcela,
+        emprestimo_id: clienteModal?.emprestimo_id,
+      });
+    }
     
     const executarPagamento = async () => {
       setProcessando(true);
@@ -2287,8 +2282,8 @@ return (
         vendedorId={vendedor?.id || ''}
         autorNome={vendedor?.nome || ''}
         autorTipo="VENDEDOR"
-        liquidacaoId={notasLiqId || undefined}
-        liquidacaoStatus={notasLiqStatus}
+        liquidacaoId={liqId || liqCtx.liquidacaoAtual?.id || undefined}
+        liquidacaoStatus={liqCtx.liquidacaoAtual?.status || null}
         clienteId={notaClienteId}
         clienteNome={notaClienteNome}
         emprestimoId={notaEmprestimoId}
@@ -2311,13 +2306,14 @@ return (
         vendedorId={vendedor?.id || ''}
         autorNome={vendedor?.nome || ''}
         autorTipo="VENDEDOR"
-        liquidacaoId={notasLiqId || undefined}
-        liquidacaoStatus={notasLiqStatus}
+        liquidacaoId={liqId || liqCtx.liquidacaoAtual?.id || undefined}
+        liquidacaoStatus={liqCtx.liquidacaoAtual?.status || null}
         clienteId={notasClienteId}
         clienteNome={notasClienteNome}
         lang={lang}
         coords={coords}
-        permitirCriar
+        permitirCriar={!!(liqId && ['ABERTO', 'ABERTA', 'REABERTO', 'REABERTA'].includes(liqCtx.liquidacaoAtual?.status || ''))}
+        mensagemSemLiq={lang === 'es' ? 'Abra una liquidación para crear notas' : 'Abra uma liquidação para criar notas'}
         obsLocalPadrao="Cliente"
       />
 
