@@ -230,6 +230,13 @@ const sharedHeaderStyles = StyleSheet.create({
 // Tab Navigator principal com modal
 function MainTabsContent({ navigation }: any) {
   const [modalVisible, setModalVisible] = useState(false);
+  // ⭐ Safe area inferior: no Android, o modo "3 botões" reserva ~48px embaixo
+  // (a barra de navegação do sistema); o modo "gestos" reserva pouco/nada.
+  // Somamos insets.bottom ao padding base para que a tab bar nunca fique
+  // atrás dos botões do sistema, adaptando-se sozinha aos dois modos.
+  const insets = useSafeAreaInsets();
+  const BASE_PAD = 12;   // respiro visual acima da borda
+  const BASE_H = 60;     // altura do conteúdo da tab bar (ícones + label)
 
   return (
     <>
@@ -241,9 +248,9 @@ function MainTabsContent({ navigation }: any) {
             backgroundColor: '#fff',
             borderTopWidth: 1,
             borderTopColor: '#E5E7EB',
-            paddingBottom: 20,
+            paddingBottom: BASE_PAD + insets.bottom,
             paddingTop: 10,
-            height: 80,
+            height: BASE_H + BASE_PAD + insets.bottom,
           },
           tabBarActiveTintColor: '#2563EB',
           tabBarInactiveTintColor: '#9CA3AF',

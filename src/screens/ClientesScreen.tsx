@@ -98,7 +98,7 @@ interface EmprestimoTodos {
 
 interface PagamentoParcela {
   parcela_id: string; cliente_id: string; valor_pago_atual: number;
-  valor_credito_gerado: number; valor_parcela: number; data_pagamento: string;
+  valor_credito_gerado: number; valor_credito_usado?: number; valor_pago_nesta_liq?: number; valor_credito_usado_nesta_liq?: number; valor_parcela: number; data_pagamento: string;
   created_at?: string; liquidacao_id?: string;
 }
 
@@ -812,6 +812,33 @@ export default function ClientesScreen({ navigation, route }: any) {
     }
   }, [liqCtx.resetFiltroSinal]);
 
+  // ⭐ Limpar TODOS os filtros quando a data operacional muda (virada de dia).
+  // Filtros podem ficar ativos durante o mesmo dia, mas não devem persistir no
+  // dia seguinte — senão escondem clientes e geram confusão (ex.: "7 na
+  // liquidação, 0 na lista"). Vale para qualquer mudança de dia: nova
+  // liquidação, troca de dia na visualização, ou o dia real virar.
+  const dataOperacionalRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.log('🔎 DATA_OP_EFFECT', { anterior: dataOperacionalRef.current, atual: dataLiq });
+    }
+    if (dataOperacionalRef.current === null) {
+      // primeira montagem: só registra, não limpa (respeita filtro recém-aplicado)
+      dataOperacionalRef.current = dataLiq;
+      return;
+    }
+    if (dataOperacionalRef.current !== dataLiq) {
+      // a data mudou → limpa todos os filtros
+      if (typeof __DEV__ !== 'undefined' && __DEV__) console.log('🔎 LIMPANDO FILTROS (dia mudou)');
+      setFiltro('todos');
+      setBusca('');
+      setFiltroTipo('todos');
+      setFiltroStatus('todos');
+      setFiltroFrequencia('todos');
+      dataOperacionalRef.current = dataLiq;
+    }
+  }, [dataLiq]);
+
   // ⭐ Recarregar lista ao voltar para a tela (após criar novo empréstimo, renovar, etc)
   const isFirstMount = useRef(true);
 
@@ -1212,13 +1239,6 @@ export default function ClientesScreen({ navigation, route }: any) {
     const saldoEmp = clienteModal?.saldo_emprestimo ?? 0;
     const totalPagando = valorNum + valorCredito;
     const vaiQuitar = saldoEmp > 0 && totalPagando >= saldoEmp;
-    if (typeof __DEV__ !== 'undefined' && __DEV__) {
-      console.log('🔎 VAI_QUITAR?', {
-        saldoEmp, valorNum, valorCredito, totalPagando, vaiQuitar,
-        parcela: parcelaPagamento?.numero_parcela,
-        emprestimo_id: clienteModal?.emprestimo_id,
-      });
-    }
     
     const executarPagamento = async () => {
       setProcessando(true);
@@ -1656,7 +1676,7 @@ export default function ClientesScreen({ navigation, route }: any) {
             parcela_id: r.parcela_id, numero_parcela: r.numero_parcela,
             valor_parcela: r.valor_parcela, valor_pago_parcela: r.valor_pago_parcela,
             saldo_parcela: r.saldo_parcela, status_parcela: r.status_parcela,
-            data_vencimento: r.data_vencimento, ordem_visita_dia: r.ordem_visita_dia,
+            data_vencimento: r.data_vencimento, dia_referencia: (r as any).dia_referencia, ordem_visita_dia: r.ordem_visita_dia,
             tem_parcelas_vencidas: r.tem_parcelas_vencidas,
             total_parcelas_vencidas: r.total_parcelas_vencidas,
             valor_total_vencido: r.valor_total_vencido,
@@ -1674,7 +1694,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       } else {
         // Novo empréstimo para este cliente
         const pi = pagMap.get(r.parcela_id);
-        g.emprestimos.push({ emprestimo_id: r.emprestimo_id, saldo_emprestimo: r.saldo_emprestimo, valor_principal: r.valor_principal, valor_total: (r as any).valor_total, numero_parcelas: r.numero_parcelas, status_emprestimo: r.status_emprestimo, frequencia_pagamento: r.frequencia_pagamento, parcela_id: r.parcela_id, numero_parcela: r.numero_parcela, valor_parcela: r.valor_parcela, valor_pago_parcela: r.valor_pago_parcela, saldo_parcela: r.saldo_parcela, status_parcela: r.status_parcela, data_vencimento: r.data_vencimento, ordem_visita_dia: r.ordem_visita_dia, tem_parcelas_vencidas: r.tem_parcelas_vencidas, total_parcelas_vencidas: r.total_parcelas_vencidas, valor_total_vencido: r.valor_total_vencido, status_dia: r.status_dia, is_parcela_atrasada: r.is_parcela_atrasada, pagamento_info: pi ? { valorPago: pi.valor_pago_atual, creditoGerado: pi.valor_credito_gerado, valorParcela: pi.valor_parcela, dataPagamento: pi.data_pagamento || null } : undefined, data_emprestimo: (r as any).data_emprestimo || null });
+        g.emprestimos.push({ emprestimo_id: r.emprestimo_id, saldo_emprestimo: r.saldo_emprestimo, valor_principal: r.valor_principal, valor_total: (r as any).valor_total, numero_parcelas: r.numero_parcelas, status_emprestimo: r.status_emprestimo, frequencia_pagamento: r.frequencia_pagamento, parcela_id: r.parcela_id, numero_parcela: r.numero_parcela, valor_parcela: r.valor_parcela, valor_pago_parcela: r.valor_pago_parcela, saldo_parcela: r.saldo_parcela, status_parcela: r.status_parcela, data_vencimento: r.data_vencimento, dia_referencia: (r as any).dia_referencia, ordem_visita_dia: r.ordem_visita_dia, tem_parcelas_vencidas: r.tem_parcelas_vencidas, total_parcelas_vencidas: r.total_parcelas_vencidas, valor_total_vencido: r.valor_total_vencido, status_dia: r.status_dia, is_parcela_atrasada: r.is_parcela_atrasada, pagamento_info: pi ? { valorPago: pi.valor_pago_atual, creditoGerado: pi.valor_credito_gerado, valorParcela: pi.valor_parcela, dataPagamento: pi.data_pagamento || null } : undefined, data_emprestimo: (r as any).data_emprestimo || null });
       }
     });
     m.forEach(g => { g.qtd_emprestimos = g.emprestimos.length; g.tem_multiplos_vencimentos = g.emprestimos.length > 1; });
@@ -1743,6 +1763,43 @@ export default function ClientesScreen({ navigation, route }: any) {
  const renderCard = (c: ClienteAgrupado) => {
     const e = eAtual(c);
     const clienteEstaPago = isCliPago(c);
+    // Resumo de pagamento na aba Pagos: soma o DINHEIRO REAL e o CRÉDITO de
+    // TODAS as parcelas pagas do cliente (um card por cliente, pode ter várias
+    // parcelas). Dinheiro real = valor_pago_atual - valor_credito_usado.
+    let dinheiroReal = 0, creditoUsado = 0, qtdParcelas = 0, somaParcelas = 0;
+    let valorUnitario: number | null = null;
+    let valoresIguais = true;
+    if (filtro === 'pagas') {
+      pagMap.forEach((p) => {
+        if (p.cliente_id === c.cliente_id) {
+          // ⭐ Valor DA LIQUIDAÇÃO exibida (não o acumulado da parcela). Uma
+          // parcela paga em vários dias (13,14,15,16) mostra em cada dia só o
+          // que foi recebido NAQUELE dia. Fallback para o acumulado se o campo
+          // por-liquidação não vier (RPC antiga).
+          const pnl = (p as any).valor_pago_nesta_liq;
+          const cnl = (p as any).valor_credito_usado_nesta_liq;
+          const pagoLiq = pnl != null ? Number(pnl) : (Number(p.valor_pago_atual) || 0);
+          const credLiq = cnl != null ? Number(cnl) : (Number((p as any).valor_credito_usado) || 0);
+          const vParc = Number(p.valor_parcela) || 0;
+          dinheiroReal += pagoLiq - credLiq;
+          creditoUsado += credLiq;
+          somaParcelas += vParc;
+          qtdParcelas += 1;
+          const vParcR = Math.round(vParc * 100);
+          if (valorUnitario === null) valorUnitario = vParc;
+          else if (Math.round((valorUnitario as number) * 100) !== vParcR) valoresIguais = false;
+        }
+      });
+    }
+    const resumoPago = filtro === 'pagas'
+      ? { dinheiroReal, creditoUsado, qtdParcelas, somaParcelas,
+          valorUnitario: valoresIguais ? valorUnitario : null }
+      : undefined;
+    if (typeof __DEV__ !== 'undefined' && __DEV__ && filtro === 'pagas' && qtdParcelas > 0) {
+      const entradas: any[] = [];
+      pagMap.forEach((p) => { if (p.cliente_id === c.cliente_id) entradas.push({ parcela_id: p.parcela_id, vParc: p.valor_parcela, pagoAtual: p.valor_pago_atual, credUsado: (p as any).valor_credito_usado, liq: p.liquidacao_id }); });
+      console.log('🔎 RESUMO_PAGO', c.nome, { qtdParcelas, dinheiroReal, somaParcelas, entradas });
+    }
     return (
       <ClienteCardLiquidacao
         key={c.cliente_id}
@@ -1754,6 +1811,8 @@ export default function ClientesScreen({ navigation, route }: any) {
         liqId={liqId}
         isViz={isViz}
         isClientePago={clienteEstaPago}
+        resumoPago={resumoPago}
+        dataReferencia={dataLiq}
         lang={lang}
         notasCount={notasCountMap.get(c.cliente_id) || 0}
         t={t}

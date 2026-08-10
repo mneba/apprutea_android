@@ -9,11 +9,11 @@ export interface ClienteRotaDia {
   telefone_celular: string | null; endereco: string | null;
   foto_url: string | null;
   latitude: number | null; longitude: number | null;
-  emprestimo_id: string; saldo_emprestimo: number; valor_principal: number; valor_total?: number;
+  emprestimo_id: string; saldo_emprestimo: number; valor_principal: number;
   numero_parcelas: number; status_emprestimo: string; rota_id: string;
   frequencia_pagamento: string; parcela_id: string; numero_parcela: number;
   valor_parcela: number; valor_pago_parcela: number; saldo_parcela: number;
-  status_parcela: string; data_vencimento: string; ordem_visita_dia: number | null;
+  status_parcela: string; data_vencimento: string; dia_referencia?: string | null; ordem_visita_dia: number | null;
   liquidacao_id: string | null; tem_parcelas_vencidas: boolean;
   total_parcelas_vencidas: number; valor_total_vencido: number;
   status_dia: 'PAGO' | 'PARCIAL' | 'EM_ATRASO' | 'PENDENTE';
@@ -23,7 +23,7 @@ export interface ClienteRotaDia {
 
 export interface PagamentoParcela {
   parcela_id: string; cliente_id: string; valor_pago_atual: number;
-  valor_credito_gerado: number; valor_parcela: number; data_pagamento: string;
+  valor_credito_gerado: number; valor_credito_usado: number; valor_pago_nesta_liq: number; valor_credito_usado_nesta_liq: number; valor_parcela: number; data_pagamento: string;
 }
 
 export interface ClientesDiaParams {
@@ -111,7 +111,6 @@ export async function getClientesDia(
       emprestimo_id: r.emprestimo_id,
       saldo_emprestimo: r.saldo_emprestimo,
       valor_principal: r.valor_principal,
-      valor_total: r.valor_total,
       numero_parcelas: r.numero_parcelas,
       status_emprestimo: r.status_emprestimo,
       rota_id: r.rota_id,
@@ -123,6 +122,7 @@ export async function getClientesDia(
       saldo_parcela: r.saldo_parcela,
       status_parcela: r.status_parcela,
       data_vencimento: r.data_vencimento,
+      dia_referencia: r.dia_referencia ?? null,
       ordem_visita_dia: r.ordem_visita_dia ?? null,
       liquidacao_id: r.liquidacao_id ?? null,
       tem_parcelas_vencidas: r.tem_parcelas_vencidas,
@@ -144,6 +144,9 @@ export async function getClientesDia(
         cliente_id: r.cliente_id,
         valor_pago_atual: r.valor_pago_atual,
         valor_credito_gerado: r.valor_credito_gerado ?? 0,
+        valor_credito_usado: r.valor_credito_usado ?? 0,
+        valor_pago_nesta_liq: r.valor_pago_nesta_liq ?? 0,
+        valor_credito_usado_nesta_liq: r.valor_credito_usado_nesta_liq ?? 0,
         valor_parcela: r.valor_parcela,
         data_pagamento: r.data_pagamento,
       });

@@ -170,8 +170,12 @@ function DetalhesPopup({ visible, onClose, parcela, pagamentos, t }: DetalhesPop
   // Calcula dinheiro e crédito usado a partir dos registros individuais (mais preciso)
   // Evita o problema de credito_usado = 0 no dado agregado da parcela
   const pagsNaoEstornados = pagamentos.filter(pp => !pp.estornado);
-  const dinheiroReal = pagsNaoEstornados.reduce((s, pp) => s + parseFloat(String(pp.valor_pago_total || 0)), 0);
   const creditoUsado = pagsNaoEstornados.reduce((s, pp) => s + parseFloat(String(pp.valor_credito_usado || 0)), 0);
+  // dinheiroReal = total entregue MENOS o crédito usado. O valor_pago_total
+  // inclui a parte paga em crédito; sem subtrair, o crédito era exibido como
+  // se fosse dinheiro (ex.: $20 dinheiro + $20 crédito aparecia "Dinheiro $40").
+  const totalPagoReal = pagsNaoEstornados.reduce((s, pp) => s + parseFloat(String(pp.valor_pago_total || 0)), 0);
+  const dinheiroReal = totalPagoReal - creditoUsado;
   // Se não temos registros individuais (importado), cai de volta para o dado da parcela
   const valorDinheiro = pagsNaoEstornados.length > 0 ? dinheiroReal : (valorPago - (parcela.credito_usado || 0));
   const creditoUsadoFinal = pagsNaoEstornados.length > 0 ? creditoUsado : (parcela.credito_usado || 0);
@@ -591,15 +595,28 @@ export default function ParcelasModal({
     const isVencida = p.status === 'VENCIDO' || p.status === 'VENCIDA';
     const isCancelado = p.status === 'CANCELADO';
     const isAutoQuitacao = (p.observacoes || '').includes('[AUTO-QUITAÇÃO]');
-    const isQuitacaoOrigem = isPago && (p.credito_gerado || 0) > 0 && clienteModal?.emprestimo_status === 'QUITADO';
 
-    // ehUltimaPaga: esta é a parcela de MAIOR numero_parcela entre as pagas
-    // (a que efetivamente quitou o empréstimo). Usada para exibir o aviso de
-    // quitação só nela, não em todas as pagas.
+    // ehUltimaPaga: parcela de MAIOR numero_parcela entre as pagas.
     const maxParcelaPaga = parcelasModal
       .filter(x => (x.valor_pago || 0) > 0 && x.status !== 'CANCELADO')
       .reduce((max, x) => Math.max(max, x.numero_parcela), 0);
     const ehUltimaPaga = isPago && p.numero_parcela === maxParcelaPaga;
+
+    // ⭐ Quitação antecipada (opção B): marca a parcela que EFETIVAMENTE quitou
+    // o empréstimo ANTES do prazo — não qualquer parcela que gerou crédito.
+    // Sinal correto: o empréstimo está QUITADO, esta parcela recebeu pagamento
+    // real (não é auto-quitada), e EXISTEM parcelas auto-quitadas de número
+    // MAIOR (as seguintes foram fechadas por este pagamento = antecipação).
+    // A condição antiga (credito_gerado>0 && QUITADO) marcava errado toda
+    // parcela que gerou crédito (ex.: Juancho parcelas 1 e 2).
+    const temAutoQuitDepois = parcelasModal.some(
+      x => x.numero_parcela > p.numero_parcela && (x.observacoes || '').includes('[AUTO-QUITAÇÃO]')
+    );
+    const isQuitacaoOrigem =
+      isPago &&
+      !isAutoQuitacao &&
+      clienteModal?.emprestimo_status === 'QUITADO' &&
+      temAutoQuitDepois;
 
     // Atraso de parcela PAGA: compara a DATA DA LIQUIDAÇÃO (data de negócio do
     // dia de trabalho onde foi paga) com o vencimento — NÃO a data_pagamento
@@ -765,56 +782,39 @@ export default function ParcelasModal({
               </View>
             )}
 
-            {/* PAGO: valores resumidos */}
+            {/* PAGO: "Pago" = DINHEIRO REAL recebido (não o valor liquidado da
+                parcela). Assim, somar os "Pago" de todas as parcelas bate com
+                o dinheiro que o vendedor efetivamente recebeu. O crédito
+                (usado ou gerado) é demonstrado à parte, sem entrar na soma do
+                dinheiro. Ex.: parcela paga com $61 dinheiro + $11 crédito
+                mostra "Pago: $61" + "Crédito usado: $11" (não "$72"). */}
             {isPago && (
               <View style={S.valoresBlock}>
-                {creditoUsado > 0 ? (
-                  <>
-                    <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
-                    <View style={S.breakdownRow}>
-                      <Ionicons name="cash-outline" size={11} color="#6B7280" />
-                      <Text style={S.breakdownText}> {t.dinheiro}: {fmt(valorDinheiro)}</Text>
-                    </View>
-                    <View style={S.breakdownRow}>
-                      <Ionicons name="card-outline" size={11} color="#2563EB" />
-                      <Text style={S.breakdownTextCredito}> {t.creditoUsado}: {fmt(creditoUsado)}</Text>
-                    </View>
-                    {valorPago !== p.valor_parcela && (
-                      <Text style={S.mParcelaOriginal}>{t.original} {fmt(p.valor_parcela)}</Text>
-                    )}
-                  </>
-                ) : valorPago !== p.valor_parcela ? (
-                  <>
-                    <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
-                    <Text style={S.mParcelaOriginal}>{t.original} {fmt(p.valor_parcela)}</Text>
-                  </>
-                ) : (
-                  <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
+                <Text style={S.mParcelaPago}>{t.pago} {fmt(valorDinheiro)}</Text>
+                {creditoUsado > 0 && (
+                  <View style={S.breakdownRow}>
+                    <Ionicons name="card-outline" size={11} color="#2563EB" />
+                    <Text style={S.breakdownTextCredito}> {t.creditoUsado}: {fmt(creditoUsado)}</Text>
+                  </View>
                 )}
                 {(p.credito_gerado || 0) > 0 && !isAutoQuitacao && (
-                  <Text style={S.mParcelaCredito}>{t.credito} {fmt(p.credito_gerado || 0)}</Text>
+                  <Text style={S.mParcelaCredito}>{lang === 'es' ? 'Generó crédito:' : 'Gerou crédito:'} {fmt(p.credito_gerado || 0)}</Text>
                 )}
                 {(p.saldo_excedente || 0) > 0 && (p.credito_gerado || 0) === 0 && !isAutoQuitacao && (
-                  <Text style={S.mParcelaCredito}>{t.credito} {fmt(p.saldo_excedente || 0)}</Text>
+                  <Text style={S.mParcelaCredito}>{lang === 'es' ? 'Generó crédito:' : 'Gerou crédito:'} {fmt(p.saldo_excedente || 0)}</Text>
                 )}
               </View>
             )}
 
-            {/* PARCIAL / VENCIDA com pagamento parcial */}
+            {/* PARCIAL / VENCIDA com pagamento parcial: "Pago" = dinheiro real */}
             {temPagamentoParcial && (
               <View style={S.valoresBlock}>
-                <Text style={S.mParcelaPago}>{t.pago} {fmt(valorPago)}</Text>
+                <Text style={S.mParcelaPago}>{t.pago} {fmt(valorDinheiro)}</Text>
                 {creditoUsado > 0 && (
-                  <>
-                    <View style={S.breakdownRow}>
-                      <Ionicons name="cash-outline" size={11} color="#6B7280" />
-                      <Text style={S.breakdownText}> {t.dinheiro}: {fmt(valorDinheiro)}</Text>
-                    </View>
-                    <View style={S.breakdownRow}>
-                      <Ionicons name="card-outline" size={11} color="#2563EB" />
-                      <Text style={S.breakdownTextCredito}> {t.creditoUsado}: {fmt(creditoUsado)}</Text>
-                    </View>
-                  </>
+                  <View style={S.breakdownRow}>
+                    <Ionicons name="card-outline" size={11} color="#2563EB" />
+                    <Text style={S.breakdownTextCredito}> {t.creditoUsado}: {fmt(creditoUsado)}</Text>
+                  </View>
                 )}
                 <Text style={S.mParcelaRestante}>{t.restante} {fmt(valorSaldo)}</Text>
               </View>

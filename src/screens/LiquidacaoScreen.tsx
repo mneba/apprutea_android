@@ -257,26 +257,13 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const [mesAtual, setMesAtual] = useState(new Date().getMonth());
   const [anoAtual, setAnoAtual] = useState(new Date().getFullYear());
   
-  // ⭐ Espelhos em ref, atualizados no corpo do render (portanto antes de
-  //    qualquer efeito). `carregarLiquidacoes` é capturada pelo useFocusEffect
-  //    com deps [] e NUNCA se atualiza — lendo o state direto, ela enxergava
-  //    para sempre os valores do primeiro render (modoVisualizacao = false).
-  //    Era por isso que voltar para esta tela sempre caía no calendário.
-  // 🔬 INSTRUMENTAÇÃO TEMPORÁRIA — detectar remontagem da tela
-  useEffect(() => {
-    console.log('🟩 [LiqScreen] MONTOU');
-    return () => console.log('🟥 [LiqScreen] DESMONTOU');
-  }, []);
-
-  const modoVisualizacaoRef = useRef(false);
-  modoVisualizacaoRef.current = modoVisualizacao;
-  const liquidacaoRef = useRef<LiquidacaoDiaria | null>(null);
-  liquidacaoRef.current = liquidacao;
-
   // Wrappers que sincronizam estado local → contexto compartilhado
   const setModoVisualizacao = useCallback((v: boolean) => {
     setModoVisualizacaoLocal(v);
     liqCtx.setModoVisualizacao(v);
+    // Ao SAIR da visualização, limpar o id de visualização (evita resíduo que
+    // faria a próxima entrada em Clientes/Home ler um dia antigo).
+    if (!v) liqCtx.setLiquidacaoIdVisualizacao(null);
   }, [liqCtx]);
 
   const setDataVisualizacao = useCallback((d: Date | null) => {
@@ -284,46 +271,12 @@ export default function LiquidacaoScreen({ navigation }: any) {
     liqCtx.setDataVisualizacao(d ? d.toISOString().split('T')[0] : null);
   }, [liqCtx]);
 
-  const [carregandoSaldo, setCarregandoSaldo] = useState(false);
-
-  // ⭐ Saldo da conta da rota — origem única.
-  //    Antes esta consulta existia SÓ dentro de carregarLiquidacoes, que roda
-  //    apenas quando a tela ganha foco. Se o admin corrigisse o saldo no web
-  //    enquanto o vendedor já estava nesta tela, o modal de abertura seguia
-  //    exibindo (e enviando) o valor antigo até um recarregamento completo.
-  //    Agora é reconsultada a cada clique num dia para abrir.
-  const buscarSaldoContaRota = useCallback(async (): Promise<number | null> => {
-    if (!vendedor?.rota_id) return null;
-    setCarregandoSaldo(true);
-    try {
-      const { data: contaData, error } = await supabase
-        .from('contas')
-        .select('id, saldo_atual')
-        .eq('rota_id', vendedor.rota_id)
-        .eq('tipo_conta', 'ROTA')
-        .eq('status', 'ATIVA')
-        .maybeSingle();
-
-      if (error) {
-        console.error('Erro ao buscar saldo da conta da rota:', error);
-        return null;
-      }
-      if (!contaData) {
-        console.warn('Nenhuma conta ATIVA encontrada para a rota', vendedor.rota_id);
-        setContaRota(null);
-        return null;
-      }
-      setContaRota(contaData);
-      return contaData.saldo_atual ?? 0;
-    } finally {
-      setCarregandoSaldo(false);
-    }
-  }, [vendedor?.rota_id]);
-
-  // Sincroniza liquidacaoId no contexto quando liquidação muda
+  // Sincroniza a liquidação ABERTA no contexto quando a liquidação muda.
+  // ⭐ NÃO mexemos em liquidacaoIdVisualizacao aqui — esse id é gerenciado
+  // exclusivamente pelos pontos de entrada em visualização (seleção de data)
+  // e pela saída (voltar para hoje). Setá-lo aqui com liquidacao.id corrompia
+  // o Context (a aberta sobrescrevia o dia visualizado).
   useEffect(() => {
-    liqCtx.setLiquidacaoIdVisualizacao(liquidacao?.id || null);
-    // Sincronizar liquidação aberta no contexto compartilhado
     if (liquidacao && (liquidacao.status === 'ABERTO' || liquidacao.status === 'ABERTA' || liquidacao.status === 'REABERTO')) {
       liqCtx.setLiquidacaoAtual(liquidacao);
     } else if (!modoVisualizacao) {
@@ -418,21 +371,6 @@ export default function LiquidacaoScreen({ navigation }: any) {
   } | null>(null);
   const [loadingVisualizacao, setLoadingVisualizacao] = useState(false);
 
-  // ⭐ Limpeza ATÔMICA da seleção de visualização.
-  //    A seleção vive em três campos do contexto. Antes, estas funções
-  //    limpavam apenas dois (modo + data) e deixavam
-  //    `liquidacaoIdVisualizacao` pendurado, porque esse campo só é escrito
-  //    pelo efeito que observa `liquidacao` — e elas não tocavam em
-  //    `liquidacao`. A ClientesScreen então via "há seleção" com uma data que
-  //    já não existia mais, e carregava um dia inexistente.
-  const limparVisualizacao = useCallback(() => {
-    setModoVisualizacao(false);
-    setDataVisualizacao(null);
-    setDadosVisualizacao(null);
-    liqCtx.setLiquidacaoIdVisualizacao(null);
-  }, [setModoVisualizacao, setDataVisualizacao, liqCtx]);
-
-
   // Estado de conectividade
   const [isConnected, setIsConnected] = useState(true);
 
@@ -449,9 +387,24 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const ehMuitoAntigo = anoAtual < limiteAnterior.getFullYear() ||
     (anoAtual === limiteAnterior.getFullYear() && mesAtual < limiteAnterior.getMonth());
 
+  // ⭐ Ref sempre com os valores ATUAIS de visualização do Context. O
+  // carregarLiquidacoes (capturado em closures de focus/callbacks) lia valores
+  // congelados do primeiro render (modoViz=false, idViz=null) mesmo com o
+  // Context já em visualização. A ref é atualizada a cada render, então
+  // qualquer closure lê o valor fresco.
+  const vizRef = useRef({ modo: false, id: null as string | null, data: null as string | null });
+  vizRef.current = {
+    modo: liqCtx.modoVisualizacao,
+    id: liqCtx.liquidacaoIdVisualizacao,
+    data: liqCtx.dataVisualizacao,
+  };
+
   useFocusEffect(useCallback(() => {
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.log('🔎 [LiqScreen] FOCUS → vai carregar. ctxViz=', vizRef.current.modo, vizRef.current.id);
+    }
     carregarLiquidacoes();
-  }, []));
+  }, [liqCtx.modoVisualizacao, liqCtx.liquidacaoIdVisualizacao]));
 
   // Listener de conectividade
   useEffect(() => {
@@ -478,45 +431,69 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
       if (!error && data) {
         setTodasLiquidacoes(data);
+        // ⭐ FIX: se está em MODO VISUALIZAÇÃO (fonte da verdade = Context, que
+        // sobrevive à remontagem da tela), NÃO sobrescrever com a liquidação
+        // aberta. Ao voltar para Home visualizando o dia 15, carregar a
+        // liquidação do dia 15 — não a aberta (28). Sem isso, o banner diz
+        // "visualizando 15" mas o card mostra a aberta (bizarrice).
+        const vizAtivo = vizRef.current.modo;
+        const vizLiqId = vizRef.current.id;
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          console.log('🔎 [LiqScreen] carregar:', { vizAtivo, vizLiqId, naLista: !!data.find(l => l.id === vizLiqId) });
+        }
+        if (vizAtivo && vizLiqId) {
+          let liqViz = data.find(l => l.id === vizLiqId);
+          // A lista traz só ~60 dias por data_abertura; a liquidação visualizada
+          // pode estar fora desse range. Se não achou na lista, busca direto
+          // por id — NUNCA cair na aberta enquanto em modo visualização.
+          if (!liqViz) {
+            const { data: vizData } = await supabase
+              .from('liquidacoes_diarias')
+              .select('*')
+              .eq('id', vizLiqId)
+              .maybeSingle();
+            if (vizData) liqViz = vizData;
+          }
+          if (liqViz) {
+            if (typeof __DEV__ !== 'undefined' && __DEV__) {
+              console.log('🔎 [LiqScreen] USA_VIZ → setLiquidacao', liqViz.id, liqViz.data_liquidacao);
+            }
+            setLiquidacao(liqViz);
+            if (!modoVisualizacao) setModoVisualizacaoLocal(true);
+            if (vizRef.current.data && !dataVisualizacao) {
+              const [y, m, d] = vizRef.current.data.split('-').map(Number);
+              setDataVisualizacaoLocal(new Date(y, m - 1, d));
+            }
+            return; // não cai no fluxo da aberta
+          }
+        }
         // Encontrar liquidação ativa: ABERTO, ABERTA ou REABERTO
         const aberta = data.find(l => {
           const s = l.status?.toUpperCase();
           return s === 'ABERTO' || s === 'ABERTA' || s === 'REABERTO' || s === 'REABERTA';
         });
-        // ⭐ PERSISTÊNCIA DA VISUALIZAÇÃO
-        // Antes: `setLiquidacao(aberta || null)` zerava a liquidação em
-        // visualização a cada foco. O efeito de sincronia então propagava
-        // `setLiquidacaoIdVisualizacao(null)` para o contexto, deixando
-        // `dataVisualizacao` órfã — e a ClientesScreen seguia buscando
-        // aquele dia pela data, sem liquidação nenhuma selecionada.
-        const emViz = modoVisualizacaoRef.current;
-        const liqViz = liquidacaoRef.current;
-
-        // 🔬 INSTRUMENTAÇÃO TEMPORÁRIA
-        console.log('🔎 [LiqScreen] carregarLiquidacoes:', JSON.stringify({
-          aberta: aberta?.id || 'NULL',
-          emViz,
-          liqVizId: liqViz?.id || 'NULL',
-          decisao: aberta ? 'USA_ABERTA' : (emViz && liqViz ? 'MANTEM_VIZ' : 'CALENDARIO'),
-        }));
-
-        if (aberta) {
-          setLiquidacao(aberta);
-        } else if (emViz && liqViz) {
-          // Mantém a liquidação em visualização até o usuário escolher outra
-          // data. Reaproveita a versão recém-buscada (status pode ter mudado).
-          const atualizada = data.find(l => l.id === liqViz.id);
-          setLiquidacao(atualizada || liqViz);
-        } else {
-          setLiquidacao(null);
+        setLiquidacao(aberta || null);
+        
+        // Se não tem liquidação ativa, mostrar calendário para escolher data
+        if (!aberta && !modoVisualizacao) {
           setMostrarCalendario(true);
         }
       } else {
         setLiquidacao(null);
       }
 
-      // Saldo da conta da rota (caixa inicial automático) — origem única
-      await buscarSaldoContaRota();
+      // Buscar saldo da conta da rota (será usado como caixa inicial automático)
+      const { data: contaData } = await supabase
+        .from('contas')
+        .select('id, saldo_atual')
+        .eq('rota_id', vendedor.rota_id)
+        .eq('tipo_conta', 'ROTA')
+        .eq('status', 'ATIVA')
+        .maybeSingle();
+      
+      if (contaData) {
+        setContaRota(contaData);
+      }
     } catch (error) {
       console.error('Erro ao carregar liquidações:', error);
     } finally {
@@ -604,6 +581,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
         setLiquidacao(dia.liquidacao);
         setModoVisualizacao(true);
         setDataVisualizacao(dia.data);
+        liqCtx.setLiquidacaoIdVisualizacao(dia.liquidacao.id); // id da viz, explícito
         setDadosVisualizacao(null);
         setMostrarCalendario(false);
         Alert.alert('Dia Reaberto', 'Esta liquidação foi reaberta pelo administrador. Visualização apenas.');
@@ -624,6 +602,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
       setLiquidacao(dia.liquidacao);
       setModoVisualizacao(true);
       setDataVisualizacao(dia.data);
+      liqCtx.setLiquidacaoIdVisualizacao(dia.liquidacao.id); // id da viz, explícito
       setDadosVisualizacao(null);
       setMostrarCalendario(false);
     } else {
@@ -643,9 +622,6 @@ export default function LiquidacaoScreen({ navigation }: any) {
         carregarDatasOcupadas();
         setSalvando(false);
         setModalIniciarVisible(true);
-        // ⭐ Reconsulta o saldo a cada abertura do modal — o admin pode ter
-        //    ajustado a conta no web depois que esta tela foi carregada.
-        buscarSaldoContaRota();
       }
       // Se não pode abrir, a função validarAbertura já mostrou o modal/alert apropriado
     }
@@ -663,7 +639,9 @@ export default function LiquidacaoScreen({ navigation }: any) {
     });
     if (aberta) {
       setLiquidacao(aberta);
-      limparVisualizacao();
+      setModoVisualizacao(false);
+      setDataVisualizacao(null);
+      setDadosVisualizacao(null);
       setMostrarCalendario(false);
     }
   };
@@ -706,13 +684,16 @@ export default function LiquidacaoScreen({ navigation }: any) {
   };
 
   const exitFutureView = () => {
-    limparVisualizacao();
-    setLiquidacao(null);          // mantém o estado local coerente com o contexto
-    setMostrarCalendario(true);   // Volta ao calendário, NÃO para hoje
+    setModoVisualizacao(false);
+    setDataVisualizacao(null);
+    setDadosVisualizacao(null);
+    setMostrarCalendario(true); // Volta ao calendário, NÃO para hoje
   };
 
   const handleVoltarHoje = () => {
-    limparVisualizacao();
+    setModoVisualizacao(false);
+    setDataVisualizacao(null);
+    setDadosVisualizacao(null);
     const aberta = todasLiquidacoes.find(l => l.status === 'ABERTO' || l.status === 'ABERTA');
     setLiquidacao(aberta || null);
     if (!aberta) setMostrarCalendario(true);
@@ -1255,9 +1236,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
               </View>
               <View style={styles.caixaInicialReadOnly}>
                 <Text style={styles.caixaInicialLabel}>{t.caixaInicialAutomatico}</Text>
-                {carregandoSaldo
-                ? <ActivityIndicator size="small" color="#2563EB" />
-                : <Text style={styles.caixaInicialValor}>{formatarMoeda(contaRota?.saldo_atual || 0)}</Text>}
+                <Text style={styles.caixaInicialValor}>{formatarMoeda(contaRota?.saldo_atual || 0)}</Text>
               </View>
 
               <View style={styles.modalButtons}>
@@ -1705,7 +1684,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
           <View style={styles.semLiquidacao}>
             <Text style={styles.semLiquidacaoIcon}>📅</Text>
             <Text style={styles.semLiquidacaoText}>{t.nenhumaLiquidacao}</Text>
-            <TouchableOpacity style={styles.iniciarButton} onPress={() => { setSalvando(false); setModalIniciarVisible(true); buscarSaldoContaRota(); }}>
+            <TouchableOpacity style={styles.iniciarButton} onPress={() => { setSalvando(false); setModalIniciarVisible(true); }}>
               <Text style={styles.iniciarText}>{t.iniciarDia}</Text>
             </TouchableOpacity>
           </View>
@@ -1733,9 +1712,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
             </View>
             <View style={styles.caixaInicialReadOnly}>
               <Text style={styles.caixaInicialLabel}>{t.caixaInicialAutomatico}</Text>
-              {carregandoSaldo
-                ? <ActivityIndicator size="small" color="#2563EB" />
-                : <Text style={styles.caixaInicialValor}>{formatarMoeda(contaRota?.saldo_atual || 0)}</Text>}
+              <Text style={styles.caixaInicialValor}>{formatarMoeda(contaRota?.saldo_atual || 0)}</Text>
             </View>
 
             {/* Seletor de data retroativa — removido conforme solicitado */}

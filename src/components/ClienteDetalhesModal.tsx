@@ -490,7 +490,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           id, numero_parcela, valor_parcela, valor_pago, valor_saldo,
           data_vencimento, status, dias_atraso,
           pagamentos_parcelas(
-            valor_pago_total, valor_credito_gerado, forma_pagamento, created_at, estornado,
+            valor_pago_total, valor_credito_gerado, valor_credito_usado, forma_pagamento, created_at, estornado,
             motivo_estorno, data_estorno, estornado_por,
             liquidacoes_diarias(data_liquidacao, data_abertura)
           )
@@ -536,6 +536,10 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
             por: pp.estornado_por ? (nomeEstMap.get(pp.estornado_por) || null) : null,
           }))
           .sort((a: any, b: any) => new Date(b.data).getTime() - new Date(a.data).getTime());
+        // Crédito usado somado de TODOS os pagamentos não estornados da parcela
+        const creditoUsadoTotal = pags.reduce(
+          (s: number, pp: any) => s + parseFloat(pp.valor_credito_usado || 0), 0
+        );
         return {
           ...p,
           data_pagamento: ultimo?.created_at || null,
@@ -543,6 +547,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           liquidacao_data: dataLiq,
           valor_pago_total: ultimo ? parseFloat(ultimo.valor_pago_total || 0) : null,
           valor_credito_gerado: ultimo ? parseFloat(ultimo.valor_credito_gerado || 0) : null,
+          valor_credito_usado_total: creditoUsadoTotal,
           estornos,
         };
       });
@@ -811,6 +816,12 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
     const cor = corStatus[emp.status] || corStatus.PENDENTE;
     const pct = emp.numero_parcelas > 0 ? Math.round((emp.parcelas_pagas / emp.numero_parcelas) * 100) : 0;
     const parcs = parcelas.get(emp.id) || [];
+    // ⭐ Dinheiro real recebido no empréstimo = soma do (valor_pago − crédito
+    // usado) de cada parcela. O emp.valor_pago (total_pago) infla com crédito;
+    // este reflete o dinheiro que o vendedor efetivamente recebeu.
+    const dinheiroRealEmp = parcs.reduce(
+      (s: number, p: any) => s + ((p.valor_pago ?? 0) - ((p as any).valor_credito_usado_total ?? 0)), 0
+    );
 
     return (
       <View key={emp.id} style={S.empCard}>
@@ -994,7 +1005,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
             <View style={S.empGrid}>
               <View style={S.empGridItem}>
                 <Text style={S.empGridLabel}>{t.valorPago}</Text>
-                <Text style={[S.empGridValue, { color: '#10B981' }]}>{fmt(emp.valor_pago)}</Text>
+                <Text style={[S.empGridValue, { color: '#10B981' }]}>{fmt(parcs.length > 0 ? dinheiroRealEmp : emp.valor_pago)}</Text>
               </View>
               <View style={S.empGridItem}>
                 <Text style={S.empGridLabel}>{t.saldo}</Text>
@@ -1028,9 +1039,12 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                   const isParcial = p.status === 'PARCIAL';
                   const isPendente = !isPago && !isVencida && !isParcial;
                   const corP = corStatus[isPago ? 'PAGO' : isVencida ? 'VENCIDO' : isParcial ? 'PARCIAL' : 'PENDENTE'];
-                  // valor_pago da parcela = total acumulado (correto)
-                  // valor_pago_total do pagamento = valor individual (NÃO usar pra exibir total)
-                  const valorPagoReal = p.valor_pago;
+                  // ⭐ Dinheiro real recebido = valor_pago da parcela MENOS o
+                  // crédito usado. Assim, somar os "Pago" das parcelas bate com
+                  // o dinheiro que o vendedor efetivamente recebeu (mesma regra
+                  // do ParcelasModal). O crédito é mostrado à parte, não somado.
+                  const creditoUsadoP = (p as any).valor_credito_usado_total ?? 0;
+                  const valorPagoReal = (p.valor_pago ?? 0) - creditoUsadoP;
                   const temCredito = (p.valor_credito_gerado ?? 0) > 0;
 
                   // ⭐ Pontualidade do pagamento (PAGO ou PARCIAL)
@@ -1206,7 +1220,12 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                           )}
                           {temCredito && (
                             <Text style={{ fontSize: 11, color: '#2563EB', fontWeight: '600' }}>
-                              +{fmt(p.valor_credito_gerado!)} {lang === 'es' ? 'crédito' : 'crédito'}
+                              +{fmt(p.valor_credito_gerado!)} {lang === 'es' ? 'crédito generado' : 'crédito gerado'}
+                            </Text>
+                          )}
+                          {((p as any).valor_credito_usado_total ?? 0) > 0 && (
+                            <Text style={{ fontSize: 11, color: '#2563EB', fontWeight: '600' }}>
+                              {lang === 'es' ? 'Crédito usado:' : 'Crédito usado:'} {fmt((p as any).valor_credito_usado_total)}
                             </Text>
                           )}
                           {p.liquidacao_data && (

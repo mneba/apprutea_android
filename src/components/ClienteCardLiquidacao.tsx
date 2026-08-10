@@ -97,6 +97,8 @@ interface ClienteCardLiquidacaoProps {
   liqId: string | null;
   isViz: boolean;
   isClientePago?: boolean; // ⭐ Cliente está no filtro "Pagas" - desabilita pagamento
+  resumoPago?: { dinheiroReal: number; creditoUsado: number; qtdParcelas: number; somaParcelas: number; valorUnitario?: number | null };
+  dataReferencia?: string | null; // dia da liquidação sendo vista (YYYY-MM-DD) — base dos dias de atraso
   lang: Language;
   notasCount: number;
   t: {
@@ -131,6 +133,8 @@ export default function ClienteCardLiquidacao({
   liqId,
   isViz,
   isClientePago = false,
+  resumoPago,
+  dataReferencia,
   lang,
   notasCount,
   t,
@@ -232,16 +236,36 @@ export default function ClienteCardLiquidacao({
       {/* === LINHA 2: [breadcrumb tipo·status] + Parcela + Valores === */}
       <View style={S.pRow}>
         <View>
-          {/* ⭐ Breadcrumb: tipo do empréstimo · status. Só texto, na cor da
-              legenda. "ok" quando em dia; nº de parcelas vencidas se atrasado. */}
+          {/* ⭐ Breadcrumb: tipo do empréstimo · dias de atraso. "ok" quando em
+              dia; "N dias" a partir do 1º dia de atraso (para TODOS os clientes
+              com parcela vencida, sem depender do status VENCIDO formal).
+              Dias = dia da liquidação vista (dataReferencia) − vencimento da
+              parcela exibida. Datas parseadas como string (sem timezone). */}
           {(() => {
-            const venc = e.total_parcelas_vencidas || 0;
-            const emDia = venc === 0 && !e.is_parcela_atrasada;
-            const cor = emDia ? '#10B981' : corAtraso(venc > 0 ? venc : 1);
+            // Diferença em dias entre duas datas YYYY-MM-DD (sem timezone).
+            const diasEntre = (ref?: string | null, venc?: string | null): number => {
+              if (!ref || !venc) return 0;
+              const r = ref.substring(0, 10).split('-').map(Number);
+              const v = venc.substring(0, 10).split('-').map(Number);
+              if (r.length !== 3 || v.length !== 3) return 0;
+              const dR = Date.UTC(r[0], r[1] - 1, r[2]);
+              const dV = Date.UTC(v[0], v[1] - 1, v[2]);
+              return Math.round((dR - dV) / 86400000);
+            };
+            const refAtraso = (e as any).dia_referencia || dataReferencia;
+            const diasAtraso = Math.max(0, diasEntre(refAtraso, e.data_vencimento));
+            if (typeof __DEV__ !== 'undefined' && __DEV__) {
+              console.log('🔎 ATRASO', c.nome, { refAtraso, venc: e.data_vencimento, parcela: e.numero_parcela, diasAtraso });
+            }
+            const emDia = diasAtraso <= 0;
+            const cor = emDia ? '#10B981' : corAtraso(e.total_parcelas_vencidas || 1);
             const tipo = FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento;
+            const txtDias = diasAtraso === 1
+              ? (lang === 'es' ? '1 día' : '1 dia')
+              : `${diasAtraso} ${lang === 'es' ? 'días' : 'dias'}`;
             return (
               <Text style={[S.breadTipo, { color: cor }]} numberOfLines={1}>
-                {tipo} · {emDia ? 'ok' : (venc > 0 ? venc : 1)}
+                {tipo} · {emDia ? 'ok' : txtDias}
               </Text>
             );
           })()}
@@ -251,7 +275,24 @@ export default function ClienteCardLiquidacao({
           {e.data_emprestimo ? <Text style={S.dataEmpLbl}>{lang === 'es' ? 'Préstamo:' : 'Empréstimo:'} {fmtData(e.data_emprestimo)}</Text> : null}
         </View>
         <View style={S.sCol}>
-          {pg && pi ? (
+          {pg && resumoPago ? (
+            // Aba Pagos: DINHEIRO EFETIVO recebido em destaque; crédito à parte;
+            // valor/qtd de parcela discreto. Soma todas as parcelas do cliente.
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={[S.pValBig, { color: '#059669' }]}>{fmt(resumoPago.dinheiroReal)}</Text>
+              <Text style={S.pRecebidoLbl}>{lang === 'es' ? 'recibido' : 'recebido'}</Text>
+              {resumoPago.creditoUsado > 0 ? (
+                <Text style={S.pCreditoLbl}>+ {fmt(resumoPago.creditoUsado)} {lang === 'es' ? 'crédito' : 'crédito'}</Text>
+              ) : null}
+              <Text style={S.pParcelaDiscreta}>
+                {resumoPago.qtdParcelas > 1
+                  ? (resumoPago.valorUnitario != null
+                      ? `${resumoPago.qtdParcelas} ${lang === 'es' ? 'cuotas de' : 'parcelas de'} ${fmt(resumoPago.valorUnitario)}`
+                      : `${resumoPago.qtdParcelas} ${lang === 'es' ? 'cuotas' : 'parcelas'} · ${lang === 'es' ? 'total' : 'total'} ${fmt(resumoPago.somaParcelas)}`)
+                  : `${t.parcela} ${e.numero_parcela}/${e.numero_parcelas} · ${fmt(resumoPago.somaParcelas)}`}
+              </Text>
+            </View>
+          ) : pg && pi ? (
             <Text style={[S.pValBig, { color: '#10B981' }]}>{fmt(pi.valorPago)}</Text>
           ) : np ? (
             <Text style={[S.pValBig, { color: '#6B7280', textDecorationLine: 'line-through' }]}>{fmt(valorAPagar)}</Text>
@@ -357,6 +398,9 @@ const S = StyleSheet.create({
   fBdgT: { fontSize: 9, fontWeight: '600', color: '#7C3AED' },
   dataEmpLbl: { fontSize: 10, color: '#9CA3AF', marginTop: 2 },
   pValBig: { fontSize: 18, fontWeight: '800', color: '#1F2937', textAlign: 'right' },
+  pRecebidoLbl: { fontSize: 10, color: '#9CA3AF', textAlign: 'right', marginTop: -2 },
+  pCreditoLbl: { fontSize: 11, color: '#7C3AED', textAlign: 'right', marginTop: 2, fontWeight: '600' },
+  pParcelaDiscreta: { fontSize: 11, color: '#6B7280', textAlign: 'right', marginTop: 2 },
   sCol: { alignItems: 'flex-end' },
   sLbl: { fontSize: 11, color: '#6B7280', marginBottom: 2 },
   exp: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
