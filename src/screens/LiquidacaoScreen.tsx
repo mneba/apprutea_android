@@ -576,20 +576,12 @@ export default function LiquidacaoScreen({ navigation }: any) {
       const status = dia.liquidacao.status?.toUpperCase();
       console.log('Dia tem liquidação, status:', status);
       
-      // REABERTO: apenas visualização, sem movimentos (reabertura só via webapp)
-      if (status === 'REABERTO' || status === 'REABERTA') {
-        setLiquidacao(dia.liquidacao);
-        setModoVisualizacao(true);
-        setDataVisualizacao(dia.data);
-        liqCtx.setLiquidacaoIdVisualizacao(dia.liquidacao.id); // id da viz, explícito
-        setDadosVisualizacao(null);
-        setMostrarCalendario(false);
-        Alert.alert('Dia Reaberto', 'Esta liquidação foi reaberta pelo administrador. Visualização apenas.');
-        return;
-      }
-      
-      // ABERTO/ABERTA: pode editar
-      if (status === 'ABERTO' || status === 'ABERTA') {
+      // ABERTO/ABERTA/REABERTO: pode editar.
+      // REABERTO é dia de trabalho como qualquer outro — o vendedor lança
+      // movimentos e fecha normalmente (o fechamento usa a RPC própria de
+      // reabertura). Antes esta tela forçava "visualização apenas", enquanto
+      // o contexto, a nova venda e a tela de Clientes já aceitavam REABERTO.
+      if (status === 'ABERTO' || status === 'ABERTA' || status === 'REABERTO' || status === 'REABERTA') {
         setLiquidacao(dia.liquidacao);
         setModoVisualizacao(false);
         setDataVisualizacao(null);
@@ -1039,11 +1031,19 @@ export default function LiquidacaoScreen({ navigation }: any) {
     setFechando(true);
     setFechandoEtapa('processando');
     try {
-      const { data, error } = await supabase.rpc('fn_fechar_liquidacao_diaria', {
-        p_liquidacao_id: liquidacao.id,
-        p_user_id: vendedor.user_id,
-        p_observacoes: 'Fechamento via App Mobile'
-      });
+      // Dia reaberto fecha pela RPC própria — mesma regra do webapp
+      // (liquidacao/page.tsx: status === 'REABERTO' ? reaberta : diaria).
+      const statusLiq = liquidacao.status?.toUpperCase();
+      const ehReaberta = statusLiq === 'REABERTO' || statusLiq === 'REABERTA';
+
+      const { data, error } = await supabase.rpc(
+        ehReaberta ? 'fn_fechar_liquidacao_reaberta' : 'fn_fechar_liquidacao_diaria',
+        {
+          p_liquidacao_id: liquidacao.id,
+          p_user_id: vendedor.user_id,
+          p_observacoes: 'Fechamento via App Mobile'
+        }
+      );
 
       if (error) throw error;
 
@@ -1083,13 +1083,13 @@ export default function LiquidacaoScreen({ navigation }: any) {
     carregarLiquidacoes();
   };
 
-  // REABERTO NÃO é considerado "aberto" para movimentos no mobile
-  // Reaberturas são apenas para correções via webapp
+  // isAberto/isReaberto seguem separados só para a identidade visual
+  // (cor do card, ícone e badge distinguem um dia reaberto).
   const isAberto = liquidacao?.status?.toUpperCase() === 'ABERTO' || liquidacao?.status?.toUpperCase() === 'ABERTA';
   const isReaberto = liquidacao?.status?.toUpperCase() === 'REABERTO' || liquidacao?.status?.toUpperCase() === 'REABERTA';
-  
-  // Pode editar: apenas ABERTO (não REABERTO) e não está em modo visualização
-  const podeEditar = isAberto && !modoVisualizacao && !isReaberto;
+
+  // Pode editar e encerrar: ABERTO ou REABERTO, fora do modo visualização
+  const podeEditar = (isAberto || isReaberto) && !modoVisualizacao;
 
   // ==================== LOADING ====================
   if (loading) {
