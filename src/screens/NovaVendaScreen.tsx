@@ -317,6 +317,9 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
             {form.emprestimoExpanded && (
               <View style={styles.sectionBody}>
+                {/* Renovação NÃO trava os campos do empréstimo: o teto é imposto
+                    pela fn_renovar_emprestimo, que só aceita a aprovação até o
+                    valor autorizado. Acima disso ela devolve [AUTORIZAÇÃO]. */}
                 <FormularioEmprestimo
                   valorEmprestimo={form.valorEmprestimo} setValorEmprestimo={form.setValorEmprestimo}
                   numeroParcelas={form.numeroParcelas} setNumeroParcelas={form.setNumeroParcelas}
@@ -332,7 +335,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                   valorPrincipal={form.valorPrincipal} taxaNum={form.taxaNum} parcelasNum={form.parcelasNum}
                   valorTotal={form.valorTotal} valorParcela={form.valorParcela} totalJuros={form.totalJuros}
                   taxasPermitidas={config.taxasPermitidas} taxasLivre={config.taxasLivre}
-                  isRenegociacao={isRenegociacao} isVendaAprovadaTravada={buscaDoc.isVendaAprovadaTravada || form.isRenovacaoTravada || buscaDoc.renovacaoAprovadaTravada}
+                  isRenegociacao={isRenegociacao} isVendaAprovadaTravada={buscaDoc.isVendaAprovadaTravada}
                   camposComErro={form.camposComErro} lang={lang}
                   handleValorEmprestimoChange={form.handleValorEmprestimoChange}
                   limparErroCampo={form.limparErroCampo}
