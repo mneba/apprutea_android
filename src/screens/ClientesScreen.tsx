@@ -643,8 +643,14 @@ export default function ClientesScreen({ navigation, route }: any) {
         console.log('[CONFIG] Resposta:', { data, error });
         
         if (!error && data) {
-          console.log('[CONFIG] permitir_exclusao_parcelas =', data.permitir_exclusao_parcelas);
-          setConfigVendedor({ permitir_exclusao_parcelas: data.permitir_exclusao_parcelas ?? true });
+          const raw = data.permitir_exclusao_parcelas;
+          // Normaliza para boolean: aceita true, "true", 1, "1".
+          // Só é false se explicitamente false/"false"/0. Ausente (null) → true.
+          const permite = raw == null
+            ? true
+            : (raw === true || String(raw).toLowerCase() === 'true' || String(raw) === '1');
+          console.log('[CONFIG] permitir_exclusao_parcelas raw =', raw, '→', permite);
+          setConfigVendedor({ permitir_exclusao_parcelas: permite });
         } else {
           // Se não existir configuração, permitir por padrão
           console.log('[CONFIG] Sem config, usando default true');
@@ -1479,9 +1485,17 @@ export default function ClientesScreen({ navigation, route }: any) {
     // VERIFICAÇÃO DE PERMISSÃO
     // ============================================================
     
-    // Se permitir_exclusao_parcelas = true, abre direto
-    console.log('[ESTORNO] permitir_exclusao_parcelas =', configVendedor?.permitir_exclusao_parcelas);
-    if (configVendedor?.permitir_exclusao_parcelas === true) {
+    // Se permitir_exclusao_parcelas = true, abre direto.
+    // Comparação robusta: o valor pode vir como boolean true, string "true"
+    // ou número 1 dependendo de como o Postgres/PostgREST serializa. Uma
+    // comparação estrita (=== true) falharia para "true"/1 e mandaria o
+    // vendedor pelo caminho de autorização mesmo com o parâmetro habilitado.
+    const permiteEstorno =
+      configVendedor?.permitir_exclusao_parcelas === true ||
+      String(configVendedor?.permitir_exclusao_parcelas).toLowerCase() === 'true' ||
+      String(configVendedor?.permitir_exclusao_parcelas) === '1';
+    console.log('[ESTORNO] permitir_exclusao_parcelas =', configVendedor?.permitir_exclusao_parcelas, '→ permite:', permiteEstorno);
+    if (permiteEstorno) {
       console.log('[ESTORNO] Permitido, abrindo modal direto');
       setParcelaEstorno(parcela);
       setMotivoEstorno('');
