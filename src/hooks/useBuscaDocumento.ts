@@ -92,6 +92,12 @@ export function useBuscaDocumento({
   const [solicitacaoRenovacaoDetectada, setSolicitacaoRenovacaoDetectada] = useState<SolicitacaoRenovacaoParam | null>(
     solicitacaoRenovacaoParam || null
   );
+  // ⭐ Só é TRUE quando a solicitação encontrada está APROVADA: o admin
+  // autorizou um valor específico, então os campos do empréstimo têm de
+  // ficar travados. No caso PENDENTE + "Alterar" o vendedor precisa editar,
+  // por isso não dá para usar `solicitacaoRenovacaoDetectada` (que cobre os
+  // dois casos) para decidir o travamento.
+  const [renovacaoAprovadaTravada, setRenovacaoAprovadaTravada] = useState(false);
   const vendaPendenteId = vendaPendenteParam?.id || vendaPendenteIdDetectada || null;
   const vendaPendenteModo = vendaPendenteParam?.modo || (vendaPendenteIdDetectada ? 'aprovada' : null);
   const isVendaAprovadaTravada = vendaPendenteModo === 'aprovada';
@@ -264,6 +270,7 @@ export function useBuscaDocumento({
               // Aprovada — pré-preencher form e travar
               preencherCliente();
               setSolicitacaoRenovacaoDetectada(solicParam);
+              setRenovacaoAprovadaTravada(true);
               s.setValorEmprestimo(String(solicParam.valor_principal));
               s.setNumeroParcelas(String(solicParam.numero_parcelas));
               s.setTaxaJuros(String(solicParam.taxa_juros));
@@ -621,6 +628,7 @@ export function useBuscaDocumento({
 
     // Solicitação de renovação detectada
     solicitacaoRenovacaoDetectada,
+    renovacaoAprovadaTravada,
 
     // Actions
     buscarClientePorDocumento,

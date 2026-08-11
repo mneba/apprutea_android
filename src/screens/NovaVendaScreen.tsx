@@ -332,7 +332,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                   valorPrincipal={form.valorPrincipal} taxaNum={form.taxaNum} parcelasNum={form.parcelasNum}
                   valorTotal={form.valorTotal} valorParcela={form.valorParcela} totalJuros={form.totalJuros}
                   taxasPermitidas={config.taxasPermitidas} taxasLivre={config.taxasLivre}
-                  isRenegociacao={isRenegociacao} isVendaAprovadaTravada={buscaDoc.isVendaAprovadaTravada || form.isRenovacaoTravada}
+                  isRenegociacao={isRenegociacao} isVendaAprovadaTravada={buscaDoc.isVendaAprovadaTravada || form.isRenovacaoTravada || buscaDoc.renovacaoAprovadaTravada}
                   camposComErro={form.camposComErro} lang={lang}
                   handleValorEmprestimoChange={form.handleValorEmprestimoChange}
                   limparErroCampo={form.limparErroCampo}
