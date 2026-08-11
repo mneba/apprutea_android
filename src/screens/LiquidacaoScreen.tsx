@@ -1035,17 +1035,24 @@ export default function LiquidacaoScreen({ navigation }: any) {
       // (liquidacao/page.tsx: status === 'REABERTO' ? reaberta : diaria).
       const statusLiq = liquidacao.status?.toUpperCase();
       const ehReaberta = statusLiq === 'REABERTO' || statusLiq === 'REABERTA';
+      const nomeRpc = ehReaberta ? 'fn_fechar_liquidacao_reaberta' : 'fn_fechar_liquidacao_diaria';
 
-      const { data, error } = await supabase.rpc(
-        ehReaberta ? 'fn_fechar_liquidacao_reaberta' : 'fn_fechar_liquidacao_diaria',
-        {
-          p_liquidacao_id: liquidacao.id,
-          p_user_id: vendedor.user_id,
-          p_observacoes: 'Fechamento via App Mobile'
-        }
-      );
+      if (!vendedor.user_id) {
+        throw new Error('Vendedor sem user_id vinculado — não é possível fechar. Refaça o login.');
+      }
 
-      if (error) throw error;
+      console.log('🔒 Fechando liquidação:', { rpc: nomeRpc, liquidacao_id: liquidacao.id, status: statusLiq });
+
+      const { data, error } = await supabase.rpc(nomeRpc, {
+        p_liquidacao_id: liquidacao.id,
+        p_user_id: vendedor.user_id,
+        p_observacoes: 'Fechamento via App Mobile'
+      });
+
+      if (error) {
+        console.error('❌ Erro na RPC', nomeRpc, error);
+        throw new Error(`${nomeRpc}: ${error.message || 'falha desconhecida'}`);
+      }
 
       const resultado = Array.isArray(data) ? data[0] : data;
       
@@ -1072,7 +1079,10 @@ export default function LiquidacaoScreen({ navigation }: any) {
     } catch (error: any) {
       setFechando(false);
       setFechandoEtapa('confirmar');
-      Alert.alert('Erro', error.message || 'Não foi possível encerrar o dia');
+      // showAlert e não Alert.alert: no alvo web o Alert do react-native-web
+      // é no-op e o erro sumia sem nenhuma mensagem na tela.
+      console.error('❌ Falha ao encerrar o dia:', error);
+      showAlert('Erro', error.message || 'Não foi possível encerrar o dia');
     }
   };
 
