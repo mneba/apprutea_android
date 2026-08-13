@@ -570,6 +570,9 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [parcelaPagamento, setParcelaPagamento] = useState<ParcelaModal | null>(null);
   const [dadosPagamento, setDadosPagamento] = useState<any>(null);
   const [loadingDadosPagamento, setLoadingDadosPagamento] = useState(false);
+  // ⭐ Dados extras para o fluxo de 2 passos do PagamentoModal (cenário + faixa de parcial)
+  const [emprestimoInfoPag, setEmprestimoInfoPag] = useState<{ valor_total: number; total_pago: number } | null>(null);
+  const [pagamentosParciaisPag, setPagamentosParciaisPag] = useState<{ valor: number; dataLiq: string | null }[]>([]);
   const [valorPagamento, setValorPagamento] = useState('');
   const [usarCredito, setUsarCredito] = useState(false);
   const [formaPagamento, setFormaPagamento] = useState('DINHEIRO');
@@ -1116,6 +1119,8 @@ export default function ClientesScreen({ navigation, route }: any) {
     setLoadingDadosPagamento(true);
     setUsarCredito(false);
     setFormaPagamento('DINHEIRO');
+    setEmprestimoInfoPag(null);
+    setPagamentosParciaisPag([]);
     setModalPagamentoVisible(true);
     // GPS já roda em background via watchPosition, mas força refresh rápido
     if (gpsStatus !== 'ok') carregarGPS();
@@ -1127,16 +1132,46 @@ export default function ClientesScreen({ navigation, route }: any) {
       const dados = Array.isArray(data) ? data[0] : data;
       if (dados) {
         setDadosPagamento(dados);
-        // Última parcela: valor calculado (saldos anteriores, créditos, pagamentos parciais)
-        // Demais parcelas: sempre o valor fixo da parcela
-        const isUltimaParcela = dados.numero_parcela === dados.total_parcelas;
-        if (isUltimaParcela) {
-          setValorPagamento((dados.valor_saldo_parcela || parcela.valor_parcela).toFixed(2).replace('.', ','));
-        } else {
-          setValorPagamento(parcela.valor_parcela.toFixed(2).replace('.', ','));
-        }
+        // Fluxo de 2 passos: campo sempre pré-preenchido com o VALOR CHEIO da parcela
+        setValorPagamento(parcela.valor_parcela.toFixed(2).replace('.', ','));
       } else {
         setValorPagamento(parcela.valor_parcela.toFixed(2).replace('.', ','));
+      }
+
+      // ⭐ Dados extras (cenário do passo 2 + faixa de "parcialmente paga")
+      const empId = clienteInfo?.emprestimo_id || (dados && dados.emprestimo_id);
+      const [empRes, pagsRes] = await Promise.all([
+        empId
+          ? supabase.from('emprestimos').select('valor_total, total_pago').eq('id', empId).single()
+          : Promise.resolve({ data: null } as any),
+        supabase.from('pagamentos_parcelas')
+          .select('valor_pago_atual, liquidacao_id, created_at')
+          .eq('parcela_id', parcela.parcela_id)
+          .eq('estornado', false)
+          .order('created_at', { ascending: true }),
+      ]);
+      if (empRes?.data) {
+        setEmprestimoInfoPag({
+          valor_total: Number(empRes.data.valor_total || 0),
+          total_pago: Number(empRes.data.total_pago || 0),
+        });
+      }
+      const pags = (pagsRes?.data || []).filter((p: any) => Number(p.valor_pago_atual) > 0);
+      if (pags.length > 0) {
+        // Datas das liquidações dos pagamentos parciais
+        const liqIds = [...new Set(pags.map((p: any) => p.liquidacao_id).filter(Boolean))];
+        let liqDatas = new Map<string, string>();
+        if (liqIds.length > 0) {
+          const { data: liqs } = await supabase.from('liquidacoes_diarias').select('id, data_liquidacao').in('id', liqIds);
+          (liqs || []).forEach((l: any) => liqDatas.set(l.id, l.data_liquidacao));
+        }
+        setPagamentosParciaisPag(pags.map((p: any) => ({
+          valor: Number(p.valor_pago_atual),
+          dataLiq: p.liquidacao_id ? (liqDatas.get(p.liquidacao_id) || null) : (p.created_at ? String(p.created_at).slice(0, 10) : null),
+        })));
+      } else if (dados && Number(dados.valor_pago) > 0) {
+        // Parcela tem valor pago mas sem registros individuais (ex.: parcial da migração)
+        setPagamentosParciaisPag([{ valor: Number(dados.valor_pago), dataLiq: null }]);
       }
     } catch (e) {
       console.error('Erro ao consultar parcela:', e);
@@ -1634,7 +1669,12 @@ export default function ClientesScreen({ navigation, route }: any) {
       const { data, error } = await supabase.rpc('fn_estornar_pagamento', { 
         p_parcela_id: parcelaEstorno.parcela_id, 
         p_motivo: motivoEstorno.trim(),
-        p_vendedor_id: vendedor?.id  // Passa o ID do vendedor logado
+        p_vendedor_id: vendedor?.id,  // Passa o ID do vendedor logado
+        // ⭐ GPS do estorno: registra ONDE o vendedor estava ao estornar
+        // (auditoria). Mesmo coords usado no pagamento (useGPSTracking).
+        p_latitude_estorno: coords?.lat || null,
+        p_longitude_estorno: coords?.lng || null,
+        p_precisao_gps_estorno: coords?.acc || null
       });
       
       if (error) throw error;
@@ -2309,6 +2349,8 @@ return (
         processando={processando}
         onIrProximaParcela={irParaProximaParcela}
         onRegistrarPagamento={registrarPagamento}
+        emprestimoInfo={emprestimoInfoPag}
+        pagamentosParciais={pagamentosParciaisPag}
         t={t}
       />
 
