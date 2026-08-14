@@ -25,6 +25,10 @@ import FiltrosDrawer from '../components/FiltrosDrawer';
 import LegendaCoresModal from '../components/LegendaCoresModal';
 import { ModalCriarNota, ModalNotasLista, buscarNotasCountPorClientes } from '../components/NotasComponent';
 import PagamentoModal from '../components/PagamentoModal';
+import MenuPagamento from '../components/MenuPagamento';
+import ConfirmModal from '../components/ConfirmModal';
+import PagarMultiplasModal from '../components/PagarMultiplasModal';
+import ValorLivreModal from '../components/ValorLivreModal';
 import ParcelasModal, { PagamentoDetalhe } from '../components/ParcelasModal';
 import ProximosDiasModal from '../components/ProximosDiasModal';
 import ReordenarModal from '../components/ReordenarModal';
@@ -556,6 +560,20 @@ export default function ClientesScreen({ navigation, route }: any) {
   // Estados dos Modais
   const [modalParcelasVisible, setModalParcelasVisible] = useState(false);
   const [modalPagamentoVisible, setModalPagamentoVisible] = useState(false);
+  // ⭐ Menu de pagamento (5 opções) — aparece ao tocar "Pagar"
+  const [menuPagamentoVisible, setMenuPagamentoVisible] = useState(false);
+  // Modo do modal de pagamento: 'livre' (campo editável) ou 'quitar' (valor = saldo)
+  const [modoPagamento, setModoPagamento] = useState<'parcela' | 'livre' | 'quitar'>('parcela');
+  // ⭐ Modal de confirmação próprio (Alert nativo não aparece sobre Modal no Android)
+  const [confirmModal, setConfirmModal] = useState<{
+    visible: boolean; titulo: string; mensagem: string; corConfirmar?: string; onConfirmar: () => void;
+  }>({ visible: false, titulo: '', mensagem: '', onConfirmar: () => {} });
+  // ⭐ Tela nova "Pagar mais de 1 parcela" (com cascata de crédito)
+  const [multiplasVisible, setMultiplasVisible] = useState(false);
+  const [multiplasParcelas, setMultiplasParcelas] = useState<ParcelaModal[]>([]);
+  const [loadingMultiplas, setLoadingMultiplas] = useState(false);
+  // ⭐ Popup "Valor livre" (mínimo, 2 passos: campo + cenário)
+  const [valorLivreVisible, setValorLivreVisible] = useState(false);
   const [modalEstornoVisible, setModalEstornoVisible] = useState(false);
   const [parcelasModal, setParcelasModal] = useState<ParcelaModal[]>([]);
   const [loadingParcelas, setLoadingParcelas] = useState(false);
@@ -1121,7 +1139,8 @@ export default function ClientesScreen({ navigation, route }: any) {
     setFormaPagamento('DINHEIRO');
     setEmprestimoInfoPag(null);
     setPagamentosParciaisPag([]);
-    setModalPagamentoVisible(true);
+    setModoPagamento('parcela');
+    setMenuPagamentoVisible(true);   // ⭐ abre o MENU (5 opções), não o modal direto
     // GPS já roda em background via watchPosition, mas força refresh rápido
     if (gpsStatus !== 'ok') carregarGPS();
     
@@ -1181,6 +1200,221 @@ export default function ClientesScreen({ navigation, route }: any) {
     }
   }, [liqId, isViz, t, carregarGPS]);
 
+  // ═══════════════════════════════════════════════════════════════════
+  // AÇÕES DO MENU DE PAGAMENTO (5 opções)
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Registra pagamento com valores EXPLÍCITOS (usado pelos popups do menu,
+  // sem depender do state do input). valorEspecie = dinheiro, valorCredito = crédito.
+  const registrarPagamentoDireto = useCallback(async (valorEspecie: number, valorCredito: number) => {
+    if (!parcelaPagamento || processando) return;
+    setProcessando(true);
+    try {
+      const { data, error } = await supabase.rpc('fn_registrar_pagamento', {
+        p_parcela_id: parcelaPagamento.parcela_id,
+        p_valor_pagamento: valorEspecie,
+        p_valor_credito: valorCredito,
+        p_forma_pagamento: 'DINHEIRO',
+        p_observacoes: null,
+        p_latitude: coords?.lat || null,
+        p_longitude: coords?.lng || null,
+        p_precisao_gps: coords?.acc || null,
+        p_liquidacao_id: liqId || null,
+        p_user_id: vendedor?.user_id || null,
+      });
+      if (error) throw error;
+      const res = Array.isArray(data) ? data[0] : data;
+      if (res?.sucesso) {
+        setModalPagamentoVisible(false);
+        setMenuPagamentoVisible(false);
+        setParcelaPagamento(null);
+        setDadosPagamento(null);
+        setUsarCredito(false);
+        if (clienteModal?.emprestimo_id) { atualizarSaldoLocalLiq(clienteModal.emprestimo_id); atualizarSaldoLocalTodos(clienteModal.emprestimo_id); }
+        loadLiq();
+      } else {
+        Alert.alert(t.erroGenerico, res?.mensagem || 'Erro no pagamento');
+        setMenuPagamentoVisible(true);
+      }
+    } catch (e: any) {
+      Alert.alert(t.erroGenerico, e.message || 'Erro no pagamento');
+    } finally {
+      setProcessando(false);
+    }
+  }, [parcelaPagamento, processando, coords, liqId, clienteModal, t]);
+
+  // Chama a RPC de crédito em cascata (declarada antes das ações que a usam)
+  const usarCreditoCascata = useCallback(async () => {
+    if (!parcelaPagamento || processando) return;
+    setProcessando(true);
+    try {
+      const { data, error } = await supabase.rpc('fn_usar_credito_cascata', {
+        p_parcela_id: parcelaPagamento.parcela_id,
+        p_liquidacao_id: liqId || null,
+        p_user_id: vendedor?.user_id || null,
+      });
+      if (error) throw error;
+      const res = Array.isArray(data) ? data[0] : data;
+      if (res?.sucesso) {
+        setModalPagamentoVisible(false);
+        setMenuPagamentoVisible(false);
+        setParcelaPagamento(null);
+        setDadosPagamento(null);
+        if (clienteModal?.emprestimo_id) { atualizarSaldoLocalLiq(clienteModal.emprestimo_id); atualizarSaldoLocalTodos(clienteModal.emprestimo_id); }
+        Alert.alert(t.sucesso || 'Sucesso', res.mensagem || 'Crédito aplicado');
+        loadLiq();
+      } else {
+        Alert.alert(t.erroGenerico, res?.mensagem || 'Erro ao usar crédito');
+      }
+    } catch (e: any) {
+      Alert.alert(t.erroGenerico, e.message || 'Erro ao usar crédito');
+    } finally {
+      setProcessando(false);
+    }
+  }, [parcelaPagamento, processando, liqId, clienteModal, t]);
+
+  // 1) Pagar 1 parcela — valor cheio, popup de confirmação
+  const acaoPagar1Parcela = useCallback(() => {
+    if (!parcelaPagamento) return;
+    const valorCheio = Number(parcelaPagamento.valor_parcela || 0);
+    const saldoEmp = Number(clienteModal?.saldo_emprestimo || 0);
+    // Valor cheio, EXCETO quando excederia o saldo do empréstimo (ex.: última
+    // parcela parcialmente paga — cobrar o cheio não é possível, pois não há
+    // excedente/crédito adiante). Nesse caso cobra o saldo (o que falta).
+    const valorCobrar = (saldoEmp > 0 && valorCheio > saldoEmp) ? saldoEmp : valorCheio;
+    const numParc = parcelaPagamento.numero_parcela;
+    setMenuPagamentoVisible(false);
+    setConfirmModal({
+      visible: true,
+      titulo: t.confirmarPagamento || 'Confirmar pagamento',
+      mensagem: `${t.parcela} ${numParc} · ${fmt(valorCobrar)} · ${t.dinheiro}`,
+      corConfirmar: '#10B981',
+      onConfirmar: () => { setConfirmModal(c => ({ ...c, visible: false })); registrarPagamentoDireto(valorCobrar, 0); },
+    });
+  }, [parcelaPagamento, clienteModal, t, registrarPagamentoDireto]);
+
+  // 2) Valor livre — abre o modal com campo editável
+  const acaoValorLivre = useCallback(() => {
+    if (!parcelaPagamento) return;
+    setMenuPagamentoVisible(false);
+    setValorLivreVisible(true);
+  }, [parcelaPagamento]);
+
+  // Confirma o valor livre (espécie na parcela atual)
+  const handleValorLivreConfirmar = useCallback((valorEspecie: number) => {
+    setValorLivreVisible(false);
+    registrarPagamentoDireto(valorEspecie, 0);
+  }, [registrarPagamentoDireto]);
+
+  // 3) Usar crédito — cascata (fn_usar_credito_cascata), popup de confirmação
+  const acaoUsarCredito = useCallback(() => {
+    if (!parcelaPagamento) return;
+    const credito = Number(dadosPagamento?.credito_disponivel || 0);
+    if (credito <= 0) { Alert.alert(t.atencao, t.semCredito || 'Não há crédito disponível'); return; }
+    setMenuPagamentoVisible(false);
+    setConfirmModal({
+      visible: true,
+      titulo: t.usarCredito || 'Usar crédito',
+      mensagem: `${fmt(credito)} ${t.seraAplicadoCascata || 'será aplicado nas próximas parcelas (quita as que cobrir).'}`,
+      corConfirmar: '#4F46E5',
+      onConfirmar: () => { setConfirmModal(cc => ({ ...cc, visible: false })); usarCreditoCascata(); },
+    });
+  }, [parcelaPagamento, dadosPagamento, t, usarCreditoCascata]);
+
+  // 4) Pagar mais de 1 — abre a lista de parcelas (seleção múltipla)
+  const acaoPagarMultiplas = useCallback(async () => {
+    if (!clienteModal) return;
+    setMenuPagamentoVisible(false);
+    setLoadingMultiplas(true);
+    setMultiplasVisible(true);
+    try {
+      // Buscar todas as parcelas do empréstimo (para calcular a cascata do crédito)
+      const { data, error } = await supabase
+        .from('emprestimo_parcelas')
+        .select('id, numero_parcela, data_vencimento, valor_parcela, valor_saldo, status')
+        .eq('emprestimo_id', clienteModal.emprestimo_id)
+        .order('numero_parcela', { ascending: true });
+      if (error) throw error;
+      setMultiplasParcelas((data || []).map((p: any) => ({
+        parcela_id: p.id,
+        numero_parcela: p.numero_parcela,
+        data_vencimento: p.data_vencimento,
+        valor_parcela: Number(p.valor_parcela || 0),
+        valor_saldo: Number(p.valor_saldo ?? p.valor_parcela),
+        status: p.status,
+        valor_multa: 0,
+      })));
+    } catch (e: any) {
+      Alert.alert(t.erroGenerico, e.message || 'Erro ao carregar parcelas');
+      setMultiplasVisible(false);
+    } finally {
+      setLoadingMultiplas(false);
+    }
+  }, [clienteModal, t]);
+
+  // Confirma o pagamento de múltiplas parcelas (loop fn_registrar_pagamento nas selecionadas)
+  const handleMultiplasConfirmar = useCallback(async (parcelasSel: any[], totalEspecie: number) => {
+    if (processando || parcelasSel.length === 0) return;
+    setProcessando(true);
+    try {
+      // Ordena por numero_parcela (frente pra trás) e paga cada uma pelo valor mostrado
+      const ordenadas = [...parcelasSel].sort((a, b) => a.numero_parcela - b.numero_parcela);
+      let erros = 0;
+      for (let i = 0; i < ordenadas.length; i++) {
+        const p = ordenadas[i];
+        const { data, error } = await supabase.rpc('fn_registrar_pagamento', {
+          p_parcela_id: p.parcela_id,
+          p_valor_pagamento: p.valorMostrado,
+          p_valor_credito: 0,
+          p_forma_pagamento: 'DINHEIRO',
+          p_observacoes: `[LOTE ${i + 1}/${ordenadas.length}]`,
+          p_latitude: coords?.lat || null,
+          p_longitude: coords?.lng || null,
+          p_precisao_gps: coords?.acc || null,
+          p_liquidacao_id: liqId || null,
+          p_user_id: vendedor?.user_id || null,
+        });
+        const res = Array.isArray(data) ? data?.[0] : data;
+        if (error || !res?.sucesso) { erros++; console.error('Erro parcela', p.numero_parcela, error || res?.mensagem); }
+      }
+      setMultiplasVisible(false);
+      setParcelaPagamento(null);
+      setDadosPagamento(null);
+      if (clienteModal?.emprestimo_id) { atualizarSaldoLocalLiq(clienteModal.emprestimo_id); atualizarSaldoLocalTodos(clienteModal.emprestimo_id); }
+      if (erros > 0) Alert.alert(t.atencao, `${ordenadas.length - erros} de ${ordenadas.length} parcelas pagas.`);
+      loadLiq();
+    } catch (e: any) {
+      Alert.alert(t.erroGenerico, e.message || 'Erro no pagamento múltiplo');
+    } finally {
+      setProcessando(false);
+    }
+  }, [processando, coords, liqId, clienteModal, t]);
+
+  // 5) Quitar empréstimo — valor = saldo total, popup de confirmação
+  const acaoQuitarEmprestimo = useCallback(() => {
+    if (!parcelaPagamento || !clienteModal) return;
+    const saldo = Number(clienteModal.saldo_emprestimo || 0);
+    const credito = Number(dadosPagamento?.credito_disponivel || 0);
+    if (saldo <= 0) { Alert.alert(t.atencao, t.semSaldoQuitar || 'Empréstimo já está quitado'); return; }
+    const especie = Math.max(saldo - credito, 0);
+    setMenuPagamentoVisible(false);
+    const msg = credito > 0
+      ? `${t.saldoTotalLbl || 'Saldo total'}: ${fmt(saldo)}\n${t.credito}: ${fmt(credito)}\n${t.emEspecie || 'Em espécie'}: ${fmt(especie)}`
+      : `${t.saldoTotalLbl || 'Saldo total'}: ${fmt(saldo)} · ${t.dinheiro}`;
+    setConfirmModal({
+      visible: true,
+      titulo: t.quitarEmprestimo || 'Quitar empréstimo',
+      mensagem: msg,
+      corConfirmar: '#10B981',
+      onConfirmar: () => {
+        setConfirmModal(cc => ({ ...cc, visible: false }));
+        const usarCred = credito > 0;
+        registrarPagamentoDireto(especie, usarCred ? credito : 0);
+      },
+    });
+  }, [parcelaPagamento, clienteModal, dadosPagamento, t, registrarPagamentoDireto]);
+
+  // Chama a RPC de crédito em cascata
   // Função para ir para próxima parcela pendente
   const irParaProximaParcela = useCallback(async () => {
     if (!clienteModal) {
@@ -2331,6 +2565,62 @@ return (
       />
 
       {/* MODAL PAGAMENTO - COM CRÉDITO E VALIDAÇÕES */}
+      <MenuPagamento
+        visible={menuPagamentoVisible}
+        onClose={() => setMenuPagamentoVisible(false)}
+        parcela={parcelaPagamento}
+        clienteNome={dadosPagamento?.cliente_nome || clienteModal?.nome || ''}
+        totalParcelas={dadosPagamento?.total_parcelas || parcelasModal.length || 0}
+        saldoEmprestimo={Number(clienteModal?.saldo_emprestimo || 0)}
+        creditoDisponivel={Number(dadosPagamento?.credito_disponivel || 0)}
+        pagamentosParciais={pagamentosParciaisPag}
+        onPagar1Parcela={acaoPagar1Parcela}
+        onValorLivre={acaoValorLivre}
+        onUsarCredito={acaoUsarCredito}
+        onPagarMultiplas={acaoPagarMultiplas}
+        onQuitarEmprestimo={acaoQuitarEmprestimo}
+        t={t}
+      />
+
+      <ConfirmModal
+        visible={confirmModal.visible}
+        titulo={confirmModal.titulo}
+        mensagem={confirmModal.mensagem}
+        textoCancelar={t.cancelar || 'Cancelar'}
+        textoConfirmar={t.confirmar || 'Confirmar'}
+        corConfirmar={confirmModal.corConfirmar}
+        onCancelar={() => { setConfirmModal(c => ({ ...c, visible: false })); setMenuPagamentoVisible(true); }}
+        onConfirmar={confirmModal.onConfirmar}
+      />
+
+      <PagarMultiplasModal
+        visible={multiplasVisible}
+        onClose={() => setMultiplasVisible(false)}
+        clienteNome={clienteModal?.nome || ''}
+        totalParcelas={dadosPagamento?.total_parcelas || multiplasParcelas.length || 0}
+        parcelas={multiplasParcelas}
+        parcelaAtualId={parcelaPagamento?.parcela_id || ''}
+        creditoDisponivel={Number(dadosPagamento?.credito_disponivel || 0)}
+        saldoEmprestimo={Number(clienteModal?.saldo_emprestimo || 0)}
+        totalPagoEmprestimo={Number(emprestimoInfoPag?.total_pago || 0)}
+        valorTotalEmprestimo={Number(emprestimoInfoPag?.valor_total || 0)}
+        onConfirmar={handleMultiplasConfirmar}
+        t={t}
+      />
+
+      <ValorLivreModal
+        visible={valorLivreVisible}
+        onClose={() => setValorLivreVisible(false)}
+        parcelaNumero={parcelaPagamento?.numero_parcela || 0}
+        clienteNome={clienteModal?.nome || ''}
+        saldoEmprestimo={Number(clienteModal?.saldo_emprestimo || 0)}
+        totalPagoEmprestimo={Number(emprestimoInfoPag?.total_pago || 0)}
+        valorTotalEmprestimo={Number(emprestimoInfoPag?.valor_total || 0)}
+        processando={processando}
+        onConfirmar={handleValorLivreConfirmar}
+        t={t}
+      />
+
       <PagamentoModal
         visible={modalPagamentoVisible}
         onClose={() => setModalPagamentoVisible(false)}

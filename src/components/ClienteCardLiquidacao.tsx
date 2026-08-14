@@ -105,6 +105,8 @@ interface ClienteCardLiquidacaoProps {
     parcela: string;
     saldoEmprestimo: string;
     pagar: string;
+    parcialmentePaga?: string;
+    deLbl?: string;
     toqueDetalhes: string;
     naoPago?: string;
   };
@@ -254,9 +256,6 @@ export default function ClienteCardLiquidacao({
             };
             const refAtraso = (e as any).dia_referencia || dataReferencia;
             const diasAtraso = Math.max(0, diasEntre(refAtraso, e.data_vencimento));
-            if (typeof __DEV__ !== 'undefined' && __DEV__) {
-              console.log('🔎 ATRASO', c.nome, { refAtraso, venc: e.data_vencimento, parcela: e.numero_parcela, diasAtraso });
-            }
             const emDia = diasAtraso <= 0;
             const cor = emDia ? '#10B981' : corAtraso(e.total_parcelas_vencidas || 1);
             const tipo = FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento;
@@ -322,6 +321,14 @@ export default function ClienteCardLiquidacao({
       {/* === EXPANDIDO (1 clique) === */}
       {ex && (
         <View style={S.exp}>
+          {/* Faixa: parcela parcialmente paga (tem valor pago, não quitada) */}
+          {!pg && Number(e.valor_pago_parcela || 0) > 0 && (
+            <View style={S.faixaParcial}>
+              <Text style={S.faixaParcialTx}>
+                ⓘ {t.parcialmentePaga || 'Parcialmente paga'} · {fmt(Number(e.valor_pago_parcela || 0))} {t.deLbl || 'de'} {fmt(Number(e.valor_parcela || 0))}
+              </Text>
+            </View>
+          )}
           {/* Pagar (flex) + Parcelas + Notas na mesma linha */}
           <View style={S.expActRow}>
             <TouchableOpacity
@@ -336,7 +343,6 @@ export default function ClienteCardLiquidacao({
             >
               <Text style={S.btPagarIcon}>$</Text>
               <Text style={S.btPagarText}>{t.pagar}</Text>
-              {!pg && !np && <View style={S.btPagarValor}><Text style={S.btPagarValorText}>${Math.round(valorAPagar)}</Text></View>}
             </TouchableOpacity>
             <TouchableOpacity style={S.btSecVerde} onPress={() => onAbrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}>
               <View style={S.btSecIconBox}><Text style={S.btSecIconTx}>☰</Text></View>
@@ -405,6 +411,8 @@ const S = StyleSheet.create({
   sLbl: { fontSize: 11, color: '#6B7280', marginBottom: 2 },
   exp: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
   expActRow: { flexDirection: 'row', gap: 8, marginBottom: 6, alignItems: 'center' },
+  faixaParcial: { backgroundColor: '#FEF3C7', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginBottom: 8 },
+  faixaParcialTx: { fontSize: 12, color: '#B45309', lineHeight: 17 },
   btPagarGrande: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#10B981', borderRadius: 10, paddingVertical: 12, gap: 8 },
   btPagarDisabled: { backgroundColor: '#D1D5DB' },
   btPagarIcon: { fontSize: 16, fontWeight: '800', color: '#FFF' },

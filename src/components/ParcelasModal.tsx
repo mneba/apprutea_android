@@ -681,19 +681,10 @@ export default function ParcelasModal({
     const isSelected = selectionMode && selectedIds.has(p.parcela_id);
     const canSelect = isSelectable(p);
 
-    // Handler de toque: em modo seleção → toggle; senão → detalhes
+    // Handler de toque: abre detalhes (seleção múltipla foi movida para a tela dedicada)
     const handlePress = () => {
-      if (selectionMode && canSelect) {
-        toggleSelection(p);
-      } else if (temDetalhes) {
+      if (temDetalhes) {
         abrirDetalhes(p);
-      }
-    };
-
-    // Handler de long press: ativa seleção
-    const handleLongPressCard = () => {
-      if (canSelect && !selectionMode) {
-        handleLongPress(p);
       }
     };
 
@@ -707,8 +698,6 @@ export default function ParcelasModal({
         ]}
         activeOpacity={0.7}
         onPress={handlePress}
-        onLongPress={handleLongPressCard}
-        delayLongPress={400}
       >
         <View style={S.mParcelaRow}>
           {/* Ícone de status / checkbox de seleção */}
@@ -826,18 +815,8 @@ export default function ParcelasModal({
             )}
           </View>
 
-          {/* Lado direito: botões (escondidos em modo seleção) */}
+          {/* Lado direito: botões (só estorno; pagamento é feito pelo menu de pagamento) */}
           <View style={S.mParcelaBtns}>
-            {!selectionMode && !isPago && p.parcela_id && !['RENEGOCIADO', 'QUITADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '') && p.status !== 'CANCELADO' && (
-              <TouchableOpacity
-                style={[S.mBtnPagar, (!liqId || isViz || isClientePago) && S.mBtnPagarDisabled]}
-                onPress={() => onPagar(p)}
-                disabled={!liqId || isViz || isClientePago}
-              >
-                <Ionicons name="cash-outline" size={14} color="#fff" />
-                <Text style={S.mBtnPagarTx}>{t.pagar}</Text>
-              </TouchableOpacity>
-            )}
             {!selectionMode && (isPago || valorPago > 0) && p.parcela_id && liqId && !isViz && p.liquidacao_id === liqId && !['QUITADO', 'RENEGOCIADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '') && (
               <TouchableOpacity style={S.mBtnEstornar} onPress={() => onEstornar(p)}>
                 <Ionicons name="arrow-undo-outline" size={14} color="#EF4444" />
@@ -907,46 +886,6 @@ export default function ParcelasModal({
               )}
               <View style={{ height: 10 }} />
             </ScrollView>
-
-            {/* Barra de seleção múltipla */}
-            {selectionMode && selectedParcelas.length > 0 && (
-              <View style={S.selBar}>
-                <View style={S.selInfo}>
-                  <Text style={S.selCount}>
-                    {selectedParcelas.length} {selectedParcelas.length === 1
-                      ? (lang === 'es' ? 'cuota' : 'parcela')
-                      : (lang === 'es' ? 'cuotas' : 'parcelas')}
-                  </Text>
-                  {creditoAplicado > 0 && (
-                    <Text style={S.selCredito}>
-                      <Ionicons name="card-outline" size={11} color="#2563EB" /> {lang === 'es' ? 'Crédito' : 'Crédito'}: -{fmt(creditoAplicado)}
-                    </Text>
-                  )}
-                  <Text style={S.selTotal}>
-                    {lang === 'es' ? 'Total' : 'Total'}: {fmt(totalFinal)}
-                  </Text>
-                </View>
-                <View style={S.selBtns}>
-                  <TouchableOpacity style={S.selBtnCancel} onPress={cancelarSelecao} activeOpacity={0.7}>
-                    <Ionicons name="close" size={18} color="#6B7280" />
-                  </TouchableOpacity>
-                  <TouchableOpacity style={S.selBtnPagar} onPress={confirmarMultiplo} activeOpacity={0.7}>
-                    <Ionicons name="cash-outline" size={16} color="#fff" />
-                    <Text style={S.selBtnPagarTx}>{t.pagar}</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-
-            {/* Hint de seleção múltipla (apenas fora do modo seleção) */}
-            {!selectionMode && !loadingParcelas && parcelasModal.some(p => isSelectable(p)) && (
-              <View style={S.hintBar}>
-                <Ionicons name="hand-left-outline" size={13} color="#9CA3AF" />
-                <Text style={S.hintText}>
-                  {lang === 'es' ? 'Mantenga presionado para seleccionar varias cuotas' : 'Segure para selecionar várias parcelas'}
-                </Text>
-              </View>
-            )}
 
             {/* Botão Fechar */}
             <View style={S.mBtnFecharWrap}>
