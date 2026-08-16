@@ -33,7 +33,9 @@ interface PagarMultiplasModalProps {
   valorTotalEmprestimo: number;
   processando: boolean;
   // Recebe: parcelas selecionadas (ordem), total em espécie
-  onConfirmar: (parcelasSelecionadas: ParcelaMultipla[], totalEspecie: number) => void;
+  // Passa os itens calculados: cada um com a parcela, o valor a pagar em espécie
+  // (exibido) e a zona ('credito' = coberta pelo crédito, não paga em espécie).
+  onConfirmar: (itens: { parcela: ParcelaMultipla; valorEspecie: number; zona: string; credito: number }[], totalEspecie: number) => void;
   t: {
     parcela: string;
     pagarVariasTitulo?: string;
@@ -53,8 +55,6 @@ interface PagarMultiplasModalProps {
     jaPagoLbl?: string;
     estePagamento?: string;
     novoSaldoLbl?: string;
-    creditoGeradoLbl?: string;
-    parcialLbl?: string;
     creditoLinhaLbl?: string;
   };
 }
@@ -120,30 +120,38 @@ export default function PagarMultiplasModal({
   // As parcelas selecionadas são as primeiras `qtdSelecionada` em aberto
   const selecionadas = emAberto.slice(0, qtdSelecionada);
 
-  // ── Detecta a situação ──
-  // TODAS as parcelas em aberto selecionadas = QUITAR o empréstimo
-  const selecionouTodas = qtdSelecionada > 0 && qtdSelecionada === emAberto.length;
+  // ── Cálculo: cada parcela mostra o SALDO. Crédito recai na ÚLTIMA parcela ──
+  // do EMPRÉSTIMO (não da seleção), cascateando do fim pra trás. Só as parcelas
+  // SELECIONADAS entram no total em espécie e no crédito usado.
+  const calc = useMemo(() => {
+    // Monta todas as em aberto com saldo e marca quais estão selecionadas
+    const arr = emAberto.map((p, i) => ({
+      parcela: p,
+      sel: i < qtdSelecionada,
+      saldo: Number(p.valor_saldo ?? p.valor_parcela),
+      exibido: Number(p.valor_saldo ?? p.valor_parcela),
+      zona: 'normal' as 'normal' | 'fronteira' | 'credito',
+      cred: 0,
+    }));
+    // Cascata do crédito a partir da ÚLTIMA parcela do EMPRÉSTIMO (fim de arr)
+    let rest = creditoDisponivel;
+    for (let i = arr.length - 1; i >= 0 && rest > 0; i--) {
+      const saldo = arr[i].saldo;
+      if (rest >= saldo) {
+        arr[i].exibido = 0; arr[i].zona = 'credito'; arr[i].cred = saldo; rest -= saldo;
+      } else {
+        arr[i].exibido = saldo - rest; arr[i].zona = 'fronteira'; arr[i].cred = rest; rest = 0;
+      }
+    }
+    // Total e crédito usado contam SÓ as selecionadas
+    const total = arr.reduce((s, x) => s + (x.sel ? x.exibido : 0), 0);
+    const creditoUsado = arr.reduce((s, x) => s + (x.sel ? x.cred : 0), 0);
+    return { arr, total, creditoUsado };
+  }, [emAberto, qtdSelecionada, creditoDisponivel]);
 
-  // Total cheio das selecionadas
-  const totalCheio = selecionadas.reduce((s, p) => s + Number(p.valor_parcela), 0);
-  // Parciais já pagos nas selecionadas
-  const totalJaPago = selecionadas.reduce((s, p) => s + Number(p.valor_pago || 0), 0);
-  const creditoDisp = creditoDisponivel;
-
-  // ── Total em espécie (depende da situação) ──
-  let totalEspecie: number;
-  let creditoGerado = 0;
-  if (selecionouTodas) {
-    // Situação 1 — QUITAÇÃO: total = saldo real = cheio − parciais − crédito
-    totalEspecie = Math.max(totalCheio - totalJaPago - creditoDisp, 0);
-  } else {
-    // Situação 2 — LOTE: total = soma dos cheios; app distribui, resto vira crédito
-    totalEspecie = totalCheio;
-    // O que sobra ao quitar as selecionadas (parciais + crédito) vira crédito na última
-    creditoGerado = totalJaPago + creditoDisp;
-  }
-
-  const novoSaldo = Math.max(saldoEmprestimo - (selecionouTodas ? (totalEspecie + creditoDisp) : totalEspecie) , 0);
+  const totalEspecie = calc.total;
+  const creditoUsado = calc.creditoUsado;
+  const novoSaldo = Math.max(saldoEmprestimo - totalEspecie - creditoUsado, 0);
   const jaPagoDerivado = Math.max(valorTotalEmprestimo - saldoEmprestimo, 0);
 
   const handleAvancar = () => {
@@ -152,7 +160,10 @@ export default function PagarMultiplasModal({
   };
 
   const handleConfirmar = () => {
-    onConfirmar(selecionadas, totalEspecie);
+    const itens = calc.arr
+      .filter(x => x.sel)
+      .map(x => ({ parcela: x.parcela, valorEspecie: x.exibido, zona: x.zona, credito: x.cred }));
+    onConfirmar(itens, totalEspecie);
   };
 
   if (!visible) return null;
@@ -191,25 +202,28 @@ export default function PagarMultiplasModal({
                 </View>
               ))}
 
-              {/* Parcelas em aberto (valor CHEIO; última selecionada mostra líquido) */}
+              {/* Parcelas em aberto: mostram SALDO; crédito recai na última do
+                  empréstimo (só visível/abatido nas parcelas SELECIONADAS) */}
               {emAberto.map((p, i) => {
                 const sel = i < qtdSelecionada;
-                const isUltimaSel = sel && i === qtdSelecionada - 1;
-                // Valor exibido: cheio. Só na QUITAÇÃO (todas selecionadas) a última
-                // mostra o líquido. No lote parcial, todas cheias (app distribui depois).
-                let valorExibido = Number(p.valor_parcela);
-                let notaCredito = '';
-                if (isUltimaSel && selecionouTodas) {
-                  valorExibido = Math.max(Number(p.valor_parcela) - totalJaPago - creditoDisp, 0);
-                  if (totalJaPago > 0 || creditoDisp > 0) {
-                    const abatido = totalJaPago + creditoDisp;
-                    notaCredito = `− ${fmt(abatido)} ${t.creditoLinhaLbl || '(parciais/crédito)'}`;
-                  }
-                }
+                const saldo = Number(p.valor_saldo ?? p.valor_parcela);
+                const calcItem = calc.arr[i];
+                // O crédito só é mostrado se a parcela está SELECIONADA.
+                // Se não está selecionada, mostra o saldo normal (sem crédito).
+                const valorExibido = sel ? calcItem.exibido : saldo;
+                const zona = sel ? calcItem.zona : 'normal';
+                const credNota = sel ? calcItem.cred : 0;
+                const isCredito = zona === 'credito';
+                const isFronteira = zona === 'fronteira';
                 return (
                   <TouchableOpacity
                     key={p.parcela_id}
-                    style={[S.linha, sel ? S.linhaSel : S.linhaOff]}
+                    style={[
+                      S.linha,
+                      !sel && S.linhaOff,
+                      sel && !isCredito && S.linhaSel,
+                      sel && isCredito && S.linhaCredito,
+                    ]}
                     onPress={() => selecionarAte(i)}
                     activeOpacity={0.7}
                   >
@@ -218,13 +232,22 @@ export default function PagarMultiplasModal({
                         {sel && <Text style={S.checkboxIcon}>✓</Text>}
                       </View>
                       <View>
-                        <Text style={S.linhaLbl}>{t.parcela} {p.numero_parcela}</Text>
-                        {isUltimaSel && notaCredito !== '' && (
-                          <Text style={S.notaCredito}>{notaCredito}</Text>
+                        <Text style={[S.linhaLbl, isCredito && { color: '#4F46E5' }]}>
+                          {t.parcela} {p.numero_parcela}
+                          {Number(p.valor_pago || 0) > 0 && (
+                            <Text style={S.pagoParcial}> ({t.pagoLbl || 'pago'} {fmt(Number(p.valor_pago))})</Text>
+                          )}
+                        </Text>
+                        {isFronteira && credNota > 0 && (
+                          <Text style={S.notaCredito}>− {fmt(credNota)} {t.creditoLinhaLbl || 'crédito'}</Text>
                         )}
                       </View>
                     </View>
-                    <Text style={S.linhaValor}>{fmt(valorExibido)}</Text>
+                    {isCredito ? (
+                      <Text style={S.creditoTag}>{t.creditoLbl || 'crédito'}</Text>
+                    ) : (
+                      <Text style={S.linhaValor}>{fmt(valorExibido)}</Text>
+                    )}
                   </TouchableOpacity>
                 );
               })}
@@ -236,16 +259,10 @@ export default function PagarMultiplasModal({
                 <Text style={S.rodapeLbl}>{t.parcelasEspecie || 'Parcelas selecionadas'}</Text>
                 <Text style={S.rodapeVal}>{qtdSelecionada}</Text>
               </View>
-              {selecionouTodas && totalJaPago > 0 && (
-                <View style={S.rodapeRow}>
-                  <Text style={[S.rodapeLbl, { color: '#4F46E5' }]}>{t.parcialLbl || 'Já pago (parcial)'}</Text>
-                  <Text style={[S.rodapeVal, { color: '#4F46E5' }]}>− {fmt(totalJaPago)}</Text>
-                </View>
-              )}
-              {selecionouTodas && creditoDisp > 0 && (
+              {creditoUsado > 0 && (
                 <View style={S.rodapeRow}>
                   <Text style={[S.rodapeLbl, { color: '#4F46E5' }]}>{t.creditoLbl || 'Crédito aplicado'}</Text>
-                  <Text style={[S.rodapeVal, { color: '#4F46E5' }]}>− {fmt(creditoDisp)}</Text>
+                  <Text style={[S.rodapeVal, { color: '#4F46E5' }]}>− {fmt(creditoUsado)}</Text>
                 </View>
               )}
               <View style={S.rodapeTotalRow}>
@@ -284,22 +301,16 @@ export default function PagarMultiplasModal({
                 <Text style={S.confLinhaLbl}>{t.jaPagoLbl || 'Já pago'}</Text>
                 <Text style={S.confLinhaVal}>{fmt(jaPagoDerivado)}</Text>
               </View>
-              {creditoDisp > 0 && (
+              {creditoUsado > 0 && (
                 <View style={S.confLinha}>
                   <Text style={[S.confLinhaLbl, { color: '#4F46E5' }]}>{t.creditoLbl || 'Crédito usado'}</Text>
-                  <Text style={[S.confLinhaVal, { color: '#4F46E5' }]}>{fmt(creditoDisp)}</Text>
+                  <Text style={[S.confLinhaVal, { color: '#4F46E5' }]}>{fmt(creditoUsado)}</Text>
                 </View>
               )}
               <View style={S.confLinha}>
                 <Text style={S.confLinhaLbl}>{t.estePagamento || 'Este pagamento (espécie)'}</Text>
                 <Text style={[S.confLinhaVal, { fontWeight: '700' }]}>{fmt(totalEspecie)}</Text>
               </View>
-              {creditoGerado > 0 && (
-                <View style={S.confLinha}>
-                  <Text style={[S.confLinhaLbl, { color: '#4F46E5' }]}>{t.creditoGeradoLbl || 'Crédito gerado'}</Text>
-                  <Text style={[S.confLinhaVal, { color: '#4F46E5' }]}>{fmt(creditoGerado)}</Text>
-                </View>
-              )}
               <View style={S.confDivider} />
               <View style={S.confLinha}>
                 <Text style={S.confNovoLbl}>{t.novoSaldoLbl || 'Novo saldo'}</Text>
@@ -340,6 +351,8 @@ const S = StyleSheet.create({
   linhaPaga: { backgroundColor: '#F9FAFB', opacity: 0.6 },
   linhaOff: { borderWidth: 0.5, borderColor: '#E5E7EB' },
   linhaSel: { borderWidth: 1.5, borderColor: '#6366F1' },
+  linhaCredito: { borderWidth: 1.5, borderColor: '#6366F1', borderStyle: 'dashed', backgroundColor: '#EEF2FF' },
+  creditoTag: { fontSize: 13, color: '#4F46E5', fontWeight: '600' },
   linhaLbl: { fontSize: 14, color: '#1F2937' },
   linhaValor: { fontSize: 15, fontWeight: '500', color: '#1F2937' },
   checkPaga: { fontSize: 15, color: '#10B981' },
@@ -348,6 +361,7 @@ const S = StyleSheet.create({
   checkboxOn: { backgroundColor: '#6366F1', borderColor: '#6366F1' },
   checkboxIcon: { color: '#fff', fontSize: 12, fontWeight: '700' },
   notaCredito: { fontSize: 11, color: '#4F46E5', marginTop: 2 },
+  pagoParcial: { fontSize: 12, color: '#9CA3AF', fontWeight: '400' },
   rodape: { borderTopWidth: 1, borderTopColor: '#E5E7EB', padding: 16 },
   rodapeRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
   rodapeLbl: { fontSize: 14, color: '#6B7280' },

@@ -29,6 +29,7 @@ import MenuPagamento from '../components/MenuPagamento';
 import ConfirmModal from '../components/ConfirmModal';
 import PagarMultiplasModal from '../components/PagarMultiplasModal';
 import ValorLivreModal from '../components/ValorLivreModal';
+import ResumoPagamentoModal from '../components/ResumoPagamentoModal';
 import ParcelasModal, { PagamentoDetalhe } from '../components/ParcelasModal';
 import ProximosDiasModal from '../components/ProximosDiasModal';
 import ReordenarModal from '../components/ReordenarModal';
@@ -574,6 +575,9 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [loadingMultiplas, setLoadingMultiplas] = useState(false);
   // ⭐ Popup "Valor livre" (mínimo, 2 passos: campo + cenário)
   const [valorLivreVisible, setValorLivreVisible] = useState(false);
+  // ⭐ Resumo de pagamento (saldo/cheia/valor livre → confirma o cenário)
+  const [resumoVisible, setResumoVisible] = useState(false);
+  const [resumoValor, setResumoValor] = useState(0);
   const [modalEstornoVisible, setModalEstornoVisible] = useState(false);
   const [parcelasModal, setParcelasModal] = useState<ParcelaModal[]>([]);
   const [loadingParcelas, setLoadingParcelas] = useState(false);
@@ -1274,24 +1278,18 @@ export default function ClientesScreen({ navigation, route }: any) {
   }, [parcelaPagamento, processando, liqId, clienteModal, t]);
 
   // 1) Pagar 1 parcela — valor cheio, popup de confirmação
-  const acaoPagar1Parcela = useCallback(() => {
+  const acaoPagarValor = useCallback((valor: number) => {
     if (!parcelaPagamento) return;
-    const valorCheio = Number(parcelaPagamento.valor_parcela || 0);
-    const saldoEmp = Number(clienteModal?.saldo_emprestimo || 0);
-    // Valor cheio, EXCETO quando excederia o saldo do empréstimo (ex.: última
-    // parcela parcialmente paga — cobrar o cheio não é possível, pois não há
-    // excedente/crédito adiante). Nesse caso cobra o saldo (o que falta).
-    const valorCobrar = (saldoEmp > 0 && valorCheio > saldoEmp) ? saldoEmp : valorCheio;
-    const numParc = parcelaPagamento.numero_parcela;
     setMenuPagamentoVisible(false);
-    setConfirmModal({
-      visible: true,
-      titulo: t.confirmarPagamento || 'Confirmar pagamento',
-      mensagem: `${t.parcela} ${numParc} · ${fmt(valorCobrar)} · ${t.dinheiro}`,
-      corConfirmar: '#10B981',
-      onConfirmar: () => { setConfirmModal(c => ({ ...c, visible: false })); registrarPagamentoDireto(valorCobrar, 0); },
-    });
-  }, [parcelaPagamento, clienteModal, t, registrarPagamentoDireto]);
+    setResumoValor(valor);
+    setResumoVisible(true);
+  }, [parcelaPagamento]);
+
+  // Confirma o pagamento após o resumo
+  const handleResumoConfirmar = useCallback(() => {
+    setResumoVisible(false);
+    registrarPagamentoDireto(resumoValor, 0);
+  }, [resumoValor, registrarPagamentoDireto]);
 
   // 2) Valor livre — abre o modal com campo editável
   const acaoValorLivre = useCallback(() => {
@@ -1331,7 +1329,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       // Buscar todas as parcelas do empréstimo (para calcular a cascata do crédito)
       const { data, error } = await supabase
         .from('emprestimo_parcelas')
-        .select('id, numero_parcela, data_vencimento, valor_parcela, valor_saldo, status')
+        .select('id, numero_parcela, data_vencimento, valor_parcela, valor_pago, valor_saldo, status')
         .eq('emprestimo_id', clienteModal.emprestimo_id)
         .order('numero_parcela', { ascending: true });
       if (error) throw error;
@@ -1340,6 +1338,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         numero_parcela: p.numero_parcela,
         data_vencimento: p.data_vencimento,
         valor_parcela: Number(p.valor_parcela || 0),
+        valor_pago: Number(p.valor_pago || 0),
         valor_saldo: Number(p.valor_saldo ?? p.valor_parcela),
         status: p.status,
         valor_multa: 0,
@@ -1353,19 +1352,26 @@ export default function ClientesScreen({ navigation, route }: any) {
   }, [clienteModal, t]);
 
   // Confirma o pagamento de múltiplas parcelas (loop fn_registrar_pagamento nas selecionadas)
-  const handleMultiplasConfirmar = useCallback(async (parcelasSel: any[], totalEspecie: number) => {
-    if (processando || parcelasSel.length === 0) return;
+  const handleMultiplasConfirmar = useCallback(async (itens: any[], totalEspecie: number) => {
+    if (processando || !itens || itens.length === 0) return;
     setProcessando(true);
     try {
-      // Ordena por numero_parcela (frente pra trás) e paga cada uma pelo valor mostrado
-      const ordenadas = [...parcelasSel].sort((a, b) => a.numero_parcela - b.numero_parcela);
+      // Ordena por numero_parcela (frente pra trás)
+      const ordenadas = [...itens].sort((a, b) => a.parcela.numero_parcela - b.parcela.numero_parcela);
       let erros = 0;
       for (let i = 0; i < ordenadas.length; i++) {
-        const p = ordenadas[i];
+        const it = ordenadas[i];
+        const p = it.parcela;
+        // valorEspecie = quanto pagar em dinheiro nesta parcela (já descontado crédito).
+        // credito = quanto de crédito cobre esta parcela (zona 'credito' ou 'fronteira').
+        const valorEspecie = Number(it.valorEspecie || 0);
+        const valorCredito = Number(it.credito || 0);
+        // Se não há nada a pagar (nem espécie nem crédito), pula
+        if (valorEspecie <= 0 && valorCredito <= 0) continue;
         const { data, error } = await supabase.rpc('fn_registrar_pagamento', {
           p_parcela_id: p.parcela_id,
-          p_valor_pagamento: p.valorMostrado,
-          p_valor_credito: 0,
+          p_valor_pagamento: valorEspecie,
+          p_valor_credito: valorCredito,
           p_forma_pagamento: 'DINHEIRO',
           p_observacoes: `[LOTE ${i + 1}/${ordenadas.length}]`,
           p_latitude: coords?.lat || null,
@@ -1388,7 +1394,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     } finally {
       setProcessando(false);
     }
-  }, [processando, coords, liqId, clienteModal, t]);
+  }, [processando, coords, liqId, clienteModal, vendedor, t]);
 
   // 5) Quitar empréstimo — valor = saldo total, popup de confirmação
   const acaoQuitarEmprestimo = useCallback(() => {
@@ -2574,11 +2580,24 @@ return (
         saldoEmprestimo={Number(clienteModal?.saldo_emprestimo || 0)}
         creditoDisponivel={Number(dadosPagamento?.credito_disponivel || 0)}
         pagamentosParciais={pagamentosParciaisPag}
-        onPagar1Parcela={acaoPagar1Parcela}
-        onValorLivre={acaoValorLivre}
+        onPagarValor={acaoPagarValor}
         onUsarCredito={acaoUsarCredito}
         onPagarMultiplas={acaoPagarMultiplas}
         onQuitarEmprestimo={acaoQuitarEmprestimo}
+        t={t}
+      />
+
+      <ResumoPagamentoModal
+        visible={resumoVisible}
+        onClose={() => setResumoVisible(false)}
+        parcelaNumero={parcelaPagamento?.numero_parcela || 0}
+        clienteNome={clienteModal?.nome || ''}
+        valorPagamento={resumoValor}
+        saldoEmprestimo={Number(clienteModal?.saldo_emprestimo || 0)}
+        totalPagoEmprestimo={Number(emprestimoInfoPag?.total_pago || 0)}
+        valorTotalEmprestimo={Number(emprestimoInfoPag?.valor_total || 0)}
+        processando={processando}
+        onConfirmar={handleResumoConfirmar}
         t={t}
       />
 
