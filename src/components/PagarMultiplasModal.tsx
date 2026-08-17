@@ -208,11 +208,12 @@ export default function PagarMultiplasModal({
                 const sel = i < qtdSelecionada;
                 const saldo = Number(p.valor_saldo ?? p.valor_parcela);
                 const calcItem = calc.arr[i];
-                // O crédito só é mostrado se a parcela está SELECIONADA.
-                // Se não está selecionada, mostra o saldo normal (sem crédito).
-                const valorExibido = sel ? calcItem.exibido : saldo;
-                const zona = sel ? calcItem.zona : 'normal';
-                const credNota = sel ? calcItem.cred : 0;
+                // O CRÉDITO é sempre mostrado (pontilhada/fronteira), mesmo que a
+                // parcela não esteja selecionada — assim o vendedor vê onde está.
+                // O valor exibido usa o cálculo do crédito sempre.
+                const valorExibido = calcItem.exibido;
+                const zona = calcItem.zona;
+                const credNota = calcItem.cred;
                 const isCredito = zona === 'credito';
                 const isFronteira = zona === 'fronteira';
                 return (
@@ -220,17 +221,23 @@ export default function PagarMultiplasModal({
                     key={p.parcela_id}
                     style={[
                       S.linha,
-                      !sel && S.linhaOff,
+                      !sel && !isCredito && S.linhaOff,
                       sel && !isCredito && S.linhaSel,
-                      sel && isCredito && S.linhaCredito,
+                      isCredito && S.linhaCredito,
                     ]}
                     onPress={() => selecionarAte(i)}
                     activeOpacity={0.7}
                   >
                     <View style={S.linhaEsq}>
-                      <View style={[S.checkbox, sel && S.checkboxOn]}>
-                        {sel && <Text style={S.checkboxIcon}>✓</Text>}
-                      </View>
+                      {isCredito ? (
+                        <View style={S.creditoIcone}>
+                          <Text style={S.checkboxIcon}>✓</Text>
+                        </View>
+                      ) : (
+                        <View style={[S.checkbox, sel && S.checkboxOn]}>
+                          {sel && <Text style={S.checkboxIcon}>✓</Text>}
+                        </View>
+                      )}
                       <View>
                         <Text style={[S.linhaLbl, isCredito && { color: '#4F46E5' }]}>
                           {t.parcela} {p.numero_parcela}
@@ -352,6 +359,7 @@ const S = StyleSheet.create({
   linhaOff: { borderWidth: 0.5, borderColor: '#E5E7EB' },
   linhaSel: { borderWidth: 1.5, borderColor: '#6366F1' },
   linhaCredito: { borderWidth: 1.5, borderColor: '#6366F1', borderStyle: 'dashed', backgroundColor: '#EEF2FF' },
+  creditoIcone: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#6366F1', justifyContent: 'center', alignItems: 'center' },
   creditoTag: { fontSize: 13, color: '#4F46E5', fontWeight: '600' },
   linhaLbl: { fontSize: 14, color: '#1F2937' },
   linhaValor: { fontSize: 15, fontWeight: '500', color: '#1F2937' },

@@ -386,6 +386,14 @@ export default function ClientesScreen({ navigation, route }: any) {
   const { vendedor } = useAuth();
   const liqCtx = useLiquidacaoContext();
   const rotaId = route?.params?.rotaId || vendedor?.rota_id;
+  // Config da rota: se trabalha aos domingos (afeta cálculo de dias de atraso)
+  const [trabalhaDomingo, setTrabalhaDomingo] = useState(true);
+  useEffect(() => {
+    if (!rotaId) return;
+    supabase.from('rotas').select('trabalha_domingo').eq('id', rotaId).single()
+      .then(({ data }) => { if (data) setTrabalhaDomingo(data.trabalha_domingo !== false); })
+      .catch(() => {});
+  }, [rotaId]);
   // data_liquidacao = campo DATE puro sem timezone (adicionado na migration 09)
   // Fallback: data_abertura.substring(0,10) sem conversão UTC
   // Último fallback: data local do dispositivo
@@ -2567,6 +2575,7 @@ return (
         onEstornar={abrirEstorno}
         pagamentosDetalhados={pagamentosDetalhados}
         lang={lang}
+        trabalhaDomingo={trabalhaDomingo}
         t={t}
       />
 
