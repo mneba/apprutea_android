@@ -22,6 +22,11 @@ interface SolicitacaoRenovacao {
   frequencia: string;
   dia_semana_cobranca?: number | null;
   dia_mes_cobranca?: number | null;
+  data_primeiro_vencimento?: string | null;
+  dias_mes_cobranca?: number[] | null;
+  iniciar_proximo_mes?: boolean | null;
+  observacoes_emprestimo?: string | null;
+  microseguro_valor?: number | null;
 }
 
 interface UseNovaVendaFormParams {
@@ -89,17 +94,27 @@ export function useNovaVendaForm({
   const [diaMesPagamento, setDiaMesPagamento] = useState(
     solicitacaoRenovacao?.dia_mes_cobranca != null ? String(solicitacaoRenovacao.dia_mes_cobranca) : '15'
   );
-  const [diasMesFlexivel, setDiasMesFlexivel] = useState<number[]>([]);
-  const [iniciarProximoMes, setIniciarProximoMes] = useState(false);
-  const [dataPrimeiroVencimento, setDataPrimeiroVencimento] = useState(amanha());
-  const [observacoesEmprestimo, setObservacoesEmprestimo] = useState('');
+  const [diasMesFlexivel, setDiasMesFlexivel] = useState<number[]>(
+    solicitacaoRenovacao?.dias_mes_cobranca || []
+  );
+  const [iniciarProximoMes, setIniciarProximoMes] = useState(
+    solicitacaoRenovacao?.iniciar_proximo_mes ?? false
+  );
+  const [dataPrimeiroVencimento, setDataPrimeiroVencimento] = useState(
+    solicitacaoRenovacao?.data_primeiro_vencimento || amanha()
+  );
+  const [observacoesEmprestimo, setObservacoesEmprestimo] = useState(
+    solicitacaoRenovacao?.observacoes_emprestimo || ''
+  );
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showDiaSemanaModal, setShowDiaSemanaModal] = useState(false);
 
   // -----------------------------------------------------------
   // ESTADOS - MICROSEGURO
   // -----------------------------------------------------------
-  const [valorMicroseguro, setValorMicroseguro] = useState('');
+  const [valorMicroseguro, setValorMicroseguro] = useState(
+    solicitacaoRenovacao?.microseguro_valor != null ? String(solicitacaoRenovacao.microseguro_valor) : ''
+  );
 
   // -----------------------------------------------------------
   // MODAIS DE SELEÇÃO

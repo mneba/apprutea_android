@@ -34,6 +34,8 @@ interface FiltrosDrawerProps {
   drawerAnim: Animated.Value;
   drawerWidth: number;
   onClose: () => void;
+  onLimpar?: () => void;
+  temFiltroAtivo?: boolean;
   lang: Language;
   tab: TabAtiva;
   // Liquidação filters
@@ -90,6 +92,8 @@ export default function FiltrosDrawer({
   drawerAnim,
   drawerWidth,
   onClose,
+  onLimpar,
+  temFiltroAtivo,
   lang,
   tab,
   ord,
@@ -135,9 +139,17 @@ export default function FiltrosDrawer({
       >
         <View style={S.drawerHeader}>
           <Text style={S.drawerTitle}>{lang === 'es' ? 'Filtros' : 'Filtros'}</Text>
-          <TouchableOpacity onPress={onClose} activeOpacity={0.7}>
-            <Ionicons name="close" size={24} color="#374151" />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            {temFiltroAtivo && (
+              <TouchableOpacity onPress={onLimpar} activeOpacity={0.7} style={S.limparBtn}>
+                <Ionicons name="refresh-outline" size={15} color="#EF4444" />
+                <Text style={S.limparTx}>{lang === 'es' ? 'Limpiar' : 'Limpar'}</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={onClose} activeOpacity={0.7}>
+              <Ionicons name="close" size={24} color="#374151" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <ScrollView style={S.drawerContent} showsVerticalScrollIndicator={false}>
@@ -321,9 +333,9 @@ export default function FiltrosDrawer({
             </>
           )}
 
-          {/* Botão Aplicar/Fechar */}
+          {/* Botão Fechar (os filtros já aplicam ao selecionar) */}
           <TouchableOpacity style={S.drawerApplyBtn} onPress={onClose} activeOpacity={0.8}>
-            <Text style={S.drawerApplyText}>{lang === 'es' ? 'Aplicar' : 'Aplicar'}</Text>
+            <Text style={S.drawerApplyText}>{lang === 'es' ? 'Cerrar' : 'Fechar'}</Text>
           </TouchableOpacity>
         </ScrollView>
       </Animated.View>
@@ -368,6 +380,20 @@ const S = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#1F2937',
+  },
+  limparBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    backgroundColor: '#FEF2F2',
+  },
+  limparTx: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#EF4444',
   },
   drawerContent: {
     flex: 1,

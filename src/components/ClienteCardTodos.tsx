@@ -82,6 +82,7 @@ interface ClienteCardTodosProps {
   onLongPressEnd: () => void;
   onChangeEmpIdx: (newIdx: number) => void;
   onAbrirParcelas: (clienteId: string, clienteNome: string, emprestimoId: string, empStatus: string) => void;
+  onPagar?: (cliente: ClienteTodos, emprestimo: any) => void;
   onAbrirNotas: (clienteId: string, clienteNome: string) => void;
   onAbrirDetalhes: (cliente: { id: string; nome: string; telefone?: string | null; codigo_cliente?: string | number | null }) => void;
   onNovoEmprestimo: (cliente: ClienteTodos) => void;
@@ -107,6 +108,7 @@ export default function ClienteCardTodos({
   onLongPressEnd,
   onChangeEmpIdx,
   onAbrirParcelas,
+  onPagar,
   onAbrirNotas,
   onAbrirDetalhes,
   onNovoEmprestimo,
@@ -186,6 +188,24 @@ export default function ClienteCardTodos({
               <View style={S.sCol}>
                 <Text style={S.pValBig}>{fmt(emp.valor_parcela)}</Text>
                 <Text style={S.sLbl}>{t.saldoEmprestimo} {fmt(emp.saldo_emprestimo)}</Text>
+                {/* Composição do empréstimo: emprestado + juros + total.
+                    valor_total = valor_parcela × numero_parcelas (mesmo cálculo
+                    do ramo quitado). Juros = total − principal. */}
+                {emp.valor_principal > 0 && (emp.valor_parcela * emp.numero_parcelas) > 0 && (
+                  <View style={S.compEmp}>
+                    <Text style={S.compEmpLine}>
+                      {lang === 'es' ? 'Préstamo' : 'Empréstimo'}: <Text style={S.compEmpStrong}>{fmt(emp.valor_principal)}</Text>
+                    </Text>
+                    {(emp.valor_parcela * emp.numero_parcelas) > emp.valor_principal && (
+                      <Text style={S.compEmpLine}>
+                        {lang === 'es' ? 'Intereses' : 'Juros'}: <Text style={S.compEmpStrong}>{fmt((emp.valor_parcela * emp.numero_parcelas) - emp.valor_principal)}</Text>
+                      </Text>
+                    )}
+                    <Text style={S.compEmpLine}>
+                      {lang === 'es' ? 'Total' : 'Total'}: <Text style={S.compEmpStrong}>{fmt(emp.valor_parcela * emp.numero_parcelas)}</Text>
+                    </Text>
+                  </View>
+                )}
               </View>
             </>
           )}
@@ -300,6 +320,11 @@ export default function ClienteCardTodos({
 
           {/* Parcelas + Notas na mesma linha */}
           <View style={S.expActRow}>
+            {onPagar && (emp.status === 'ATIVO' || emp.status === 'VENCIDO') && (
+              <TouchableOpacity style={S.btPagarTodos} onPress={() => onPagar(c, emp)}>
+                <Text style={S.btPagarTodosTx}>{t.pagar || 'Pagar'}</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={S.btSecVerde} onPress={() => onAbrirParcelas(c.id, c.nome, emp.id, emp.status)}>
               <View style={S.btSecIconBox}><Text style={S.btSecIconTx}>☰</Text></View>
             </TouchableOpacity>
@@ -343,6 +368,9 @@ const S = StyleSheet.create({
   dataEmpLbl: { fontSize: 10, color: '#9CA3AF', marginTop: 2 },
   pValBig: { fontSize: 18, fontWeight: '800', color: '#1F2937', textAlign: 'right' },
   sCol: { alignItems: 'flex-end' },
+  compEmp: { marginTop: 4, alignItems: 'flex-end', gap: 1 },
+  compEmpLine: { fontSize: 11, color: '#6B7280' },
+  compEmpStrong: { color: '#374151', fontWeight: '700' },
   sLbl: { fontSize: 11, color: '#6B7280', marginBottom: 2 },
   exp: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
   aR: { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', borderRadius: 8, padding: 10, marginBottom: 10 },
@@ -356,6 +384,8 @@ const S = StyleSheet.create({
   eDotOn: { backgroundColor: '#3B82F6' },
   eNLbl: { fontSize: 10, color: '#6B7280' },
   expActRow: { flexDirection: 'row', gap: 8, marginBottom: 6, alignItems: 'center' },
+  btPagarTodos: { flex: 1, height: 46, borderRadius: 10, backgroundColor: '#10B981', alignItems: 'center', justifyContent: 'center' },
+  btPagarTodosTx: { color: '#fff', fontWeight: '700', fontSize: 15 },
   btSecVerde: { width: 46, height: 46, borderRadius: 10, backgroundColor: '#10B981', alignItems: 'center', justifyContent: 'center' },
   btSecAmarelo: { width: 46, height: 46, borderRadius: 10, backgroundColor: '#F59E0B', alignItems: 'center', justifyContent: 'center' },
   btSecIconBox: { alignItems: 'center', justifyContent: 'center' },

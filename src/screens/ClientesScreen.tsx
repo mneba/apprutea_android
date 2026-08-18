@@ -139,6 +139,7 @@ const textos = {
     total: 'Total', jaPago: 'Já Pago', saldo: 'Saldo', parcelas: 'Parcelas',
     progresso: 'Progresso', restantes: 'restante(s)',
     pagar: 'Pagar', verParcelas: 'Parcelas', contato: 'Contato', ir: 'IR', notas: 'Notas',
+    semParcelaEmAberto: 'Sem parcela em aberto',
     semClientes: 'Nenhum cliente encontrado', carregando: 'Carregando clientes...',
     statusAtraso: 'Atraso', statusInativo: 'Inativo',
     tipoFiltro: 'Tipo:...', statusFiltro: 'Status:...',
@@ -233,6 +234,7 @@ const textos = {
     total: 'Total', jaPago: 'Ya Pagó', saldo: 'Saldo', parcelas: 'Cuotas',
     progresso: 'Progreso', restantes: 'restante(s)',
     pagar: 'Pagar', verParcelas: 'Cuotas', contato: 'Contacto', ir: 'IR', notas: 'Notas',
+    semParcelaEmAberto: 'Sin cuota abierta',
     semClientes: 'Ningún cliente encontrado', carregando: 'Cargando clientes...',
     statusAtraso: 'Atraso', statusInativo: 'Inactivo',
     tipoFiltro: 'Tipo:...', statusFiltro: 'Estado:...',
@@ -552,7 +554,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [ocultarLiquidacao, setOcultarLiquidacao] = useState(false);
 
   // Sinaliza se há algum filtro do drawer ativo (bolinha vermelha no ícone)
-  const temFiltroAtivo = filtroTipo !== 'todos' || filtroStatus !== 'todos' || filtroFrequencia !== 'todos' || ocultarLiquidacao;
+  const temFiltroAtivo = filtro !== 'todos' || filtroTipo !== 'todos' || filtroStatus !== 'todos' || filtroFrequencia !== 'todos' || ocultarLiquidacao;
 
   // Reordenação de clientes
   const [modoReordenar, setModoReordenar] = useState(false);
@@ -1136,8 +1138,7 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   // FUNÇÃO ATUALIZADA - Busca dados completos via RPC antes de abrir modal
   const abrirPagamento = useCallback(async (parcela: ParcelaModal, clienteInfo?: { id: string; nome: string; emprestimo_id: string; saldo_emprestimo?: number; emprestimo_status?: string }) => {
-    if (!liqId && !isViz) { Alert.alert(t.atencao, t.liquidacaoNecessaria); return; }
-    
+    if (!liqId && !isViz) { Alert.alert(t.atencao, t.liquidacaoNecessaria); return; }    
     // Atualizar clienteModal se info do cliente foi passada (evita dados stale do cliente anterior)
     if (clienteInfo) {
       setClienteModal({ 
@@ -1214,7 +1215,45 @@ export default function ClientesScreen({ navigation, route }: any) {
     }
   }, [liqId, isViz, t, carregarGPS]);
 
-  // ═══════════════════════════════════════════════════════════════════
+  // Pagar cliente da aba "Todos": busca a próxima parcela em aberto e abre o menu
+  const pagarClienteTodos = useCallback(async (cliente: any, emprestimo: any) => {
+    if (!liqId) { Alert.alert(t.atencao, t.liquidacaoNecessaria); return; }
+    try {
+      // Primeira parcela em aberto (mais antiga não paga) do empréstimo
+      const { data, error } = await supabase
+        .from('emprestimo_parcelas')
+        .select('id, numero_parcela, valor_parcela, valor_pago, valor_saldo, valor_multa, status, data_vencimento, data_pagamento, saldo_excedente, liquidacao_id')
+        .eq('emprestimo_id', emprestimo.id)
+        .in('status', ['PENDENTE', 'PARCIAL', 'VENCIDO'])
+        .order('numero_parcela', { ascending: true })
+        .limit(1);
+      if (error) throw error;
+      const p = (data || [])[0];
+      if (!p) { Alert.alert(t.atencao, t.semParcelaEmAberto || 'Sem parcela em aberto'); return; }
+      const parcela: any = {
+        parcela_id: p.id,
+        numero_parcela: p.numero_parcela,
+        valor_parcela: Number(p.valor_parcela || 0),
+        valor_pago: Number(p.valor_pago || 0),
+        valor_saldo: Number(p.valor_saldo ?? p.valor_parcela),
+        valor_multa: Number(p.valor_multa || 0),
+        status: p.status,
+        data_vencimento: p.data_vencimento,
+        data_pagamento: p.data_pagamento,
+        saldo_excedente: Number(p.saldo_excedente || 0),
+        liquidacao_id: p.liquidacao_id,
+      };
+      abrirPagamento(parcela, {
+        id: cliente.id,
+        nome: cliente.nome,
+        emprestimo_id: emprestimo.id,
+        saldo_emprestimo: Number(emprestimo.valor_saldo ?? emprestimo.saldo_emprestimo ?? 0),
+        emprestimo_status: emprestimo.status,
+      });
+    } catch (e: any) {
+      Alert.alert(t.erroGenerico, e.message || 'Erro ao abrir pagamento');
+    }
+  }, [liqId, t, abrirPagamento]);
   // AÇÕES DO MENU DE PAGAMENTO (5 opções)
   // ═══════════════════════════════════════════════════════════════════
 
@@ -2201,6 +2240,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         onLongPressEnd={() => { if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; } }}
         onChangeEmpIdx={(newIdx) => setEmpIdxTodos(p => ({ ...p, [c.id]: newIdx }))}
         onAbrirParcelas={abrirParcelas}
+        onPagar={pagarClienteTodos}
         onAbrirNotas={(id, nome) => { setNotasClienteId(id); setNotasClienteNome(nome); setModalNotasClienteVisible(true); }}
         onAbrirDetalhes={(cli) => { setDetalhesCliente(cli); setModalDetalhesVisible(true); }}
         solicitacaoRenovacao={solicitacoesRenovacaoMap.get(c.id) || null}
@@ -2216,22 +2256,39 @@ export default function ClientesScreen({ navigation, route }: any) {
           });
         }}
         onAlterarSolicitacaoRenovacao={async (cli, solicId, empQuitadoId, valorSolic) => {
-          const { data: emp } = await supabase
-            .from('emprestimos')
-            .select('numero_parcelas, taxa_juros, frequencia_pagamento, dia_semana_cobranca, dia_mes_cobranca')
-            .eq('id', empQuitadoId)
+          // Busca os termos exatamente como o vendedor pediu (persistidos em
+          // renovacoes_pendentes no momento do bloqueio), não os do empréstimo
+          // antigo quitado — é isso que preserva a data que ele escolheu.
+          const { data: sa } = await supabase
+            .from('solicitacoes_autorizacao')
+            .select('renovacao_pendente_id')
+            .eq('id', solicId)
             .single();
+
+          let termos: any = null;
+          if (sa?.renovacao_pendente_id) {
+            const { data: rp } = await supabase.rpc('fn_buscar_detalhes_renovacao_pendente', {
+              p_renovacao_pendente_id: sa.renovacao_pendente_id,
+            });
+            termos = Array.isArray(rp) ? rp[0] : rp;
+          }
+
           const nav = navigation.getParent() || navigation;
           nav.navigate('NovoCliente', { dataLiq,
             clienteExistente: { id: cli.id, nome: cli.nome, telefone_celular: cli.telefone_celular, documento: cli.codigo_cliente?.toString() || '' },
             solicitacaoRenovacao: {
               solic_id: solicId,
-              valor_principal: valorSolic,
-              numero_parcelas: emp?.numero_parcelas || 10,
-              taxa_juros: emp?.taxa_juros || 20,
-              frequencia: emp?.frequencia_pagamento || 'DIARIO',
-              dia_semana_cobranca: emp?.dia_semana_cobranca || null,
-              dia_mes_cobranca: emp?.dia_mes_cobranca || null,
+              valor_principal: termos?.valor_aprovado ?? termos?.valor_principal ?? valorSolic,
+              numero_parcelas: termos?.numero_parcelas || 10,
+              taxa_juros: termos?.taxa_juros || 20,
+              frequencia: termos?.frequencia || 'DIARIO',
+              dia_semana_cobranca: termos?.dia_semana_cobranca ?? null,
+              dia_mes_cobranca: termos?.dia_mes_cobranca ?? null,
+              dias_mes_cobranca: termos?.dias_mes_cobranca ?? null,
+              iniciar_proximo_mes: termos?.iniciar_proximo_mes ?? false,
+              data_primeiro_vencimento: termos?.data_primeiro_vencimento ?? null,
+              observacoes_emprestimo: termos?.observacoes_emprestimo ?? null,
+              microseguro_valor: termos?.microseguro_valor ?? null,
             },
           });
         }}
@@ -2372,6 +2429,14 @@ return (
         drawerAnim={drawerAnim}
         drawerWidth={DRAWER_WIDTH}
         onClose={closeDrawer}
+        onLimpar={() => {
+          setFiltro('todos');
+          setFiltroTipo('todos');
+          setFiltroStatus('todos');
+          setFiltroFrequencia('todos');
+          setOcultarLiquidacao(false);
+        }}
+        temFiltroAtivo={temFiltroAtivo}
         lang={lang}
         tab={tab}
         ord={ord}
@@ -2782,22 +2847,39 @@ return (
           }
         }}
         onAlterarSolicitacaoRenovacao={async (cli, solicId, empQuitadoId, valorSolic) => {
-          const { data: emp } = await supabase
-            .from('emprestimos')
-            .select('numero_parcelas, taxa_juros, frequencia_pagamento, dia_semana_cobranca, dia_mes_cobranca')
-            .eq('id', empQuitadoId)
+          // Busca os termos exatamente como o vendedor pediu (persistidos em
+          // renovacoes_pendentes no momento do bloqueio), não os do empréstimo
+          // antigo quitado — é isso que preserva a data que ele escolheu.
+          const { data: sa } = await supabase
+            .from('solicitacoes_autorizacao')
+            .select('renovacao_pendente_id')
+            .eq('id', solicId)
             .single();
+
+          let termos: any = null;
+          if (sa?.renovacao_pendente_id) {
+            const { data: rp } = await supabase.rpc('fn_buscar_detalhes_renovacao_pendente', {
+              p_renovacao_pendente_id: sa.renovacao_pendente_id,
+            });
+            termos = Array.isArray(rp) ? rp[0] : rp;
+          }
+
           const nav = navigation.getParent() || navigation;
           nav.navigate('NovoCliente', { dataLiq,
             clienteExistente: { id: cli.id, nome: cli.nome, telefone_celular: (cli as any).telefone_celular, documento: (cli as any).codigo_cliente?.toString() || '' },
             solicitacaoRenovacao: {
               solic_id: solicId,
-              valor_principal: valorSolic,
-              numero_parcelas: emp?.numero_parcelas || 10,
-              taxa_juros: emp?.taxa_juros || 20,
-              frequencia: emp?.frequencia_pagamento || 'DIARIO',
-              dia_semana_cobranca: emp?.dia_semana_cobranca || null,
-              dia_mes_cobranca: emp?.dia_mes_cobranca || null,
+              valor_principal: termos?.valor_aprovado ?? termos?.valor_principal ?? valorSolic,
+              numero_parcelas: termos?.numero_parcelas || 10,
+              taxa_juros: termos?.taxa_juros || 20,
+              frequencia: termos?.frequencia || 'DIARIO',
+              dia_semana_cobranca: termos?.dia_semana_cobranca ?? null,
+              dia_mes_cobranca: termos?.dia_mes_cobranca ?? null,
+              dias_mes_cobranca: termos?.dias_mes_cobranca ?? null,
+              iniciar_proximo_mes: termos?.iniciar_proximo_mes ?? false,
+              data_primeiro_vencimento: termos?.data_primeiro_vencimento ?? null,
+              observacoes_emprestimo: termos?.observacoes_emprestimo ?? null,
+              microseguro_valor: termos?.microseguro_valor ?? null,
             },
           });
         }}
