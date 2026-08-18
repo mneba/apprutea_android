@@ -536,7 +536,6 @@ export default function ClientesScreen({ navigation, route }: any) {
   const closeDrawer = useCallback(() => {
     Animated.timing(drawerAnim, { toValue: DRAWER_WIDTH, duration: 200, useNativeDriver: true }).start(() => setDrawerVisible(false));
   }, [drawerAnim]);
-
   const [expanded, setExpanded] = useState<string | null>(null);
   const [empIdxMap, setEmpIdxMap] = useState<Record<string, number>>({});
   const [filtro, setFiltro] = useState<FiltroLiquidacao>('todos');
@@ -551,6 +550,9 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [showFiltroTipo, setShowFiltroTipo] = useState(false);
   const [showFiltroStatus, setShowFiltroStatus] = useState(false);
   const [ocultarLiquidacao, setOcultarLiquidacao] = useState(false);
+
+  // Sinaliza se há algum filtro do drawer ativo (bolinha vermelha no ícone)
+  const temFiltroAtivo = filtroTipo !== 'todos' || filtroStatus !== 'todos' || filtroFrequencia !== 'todos' || ocultarLiquidacao;
 
   // Reordenação de clientes
   const [modoReordenar, setModoReordenar] = useState(false);
@@ -2292,6 +2294,7 @@ return (
         <View style={S.filterRight}>
           <TouchableOpacity style={S.filterBtn} onPress={openDrawer} activeOpacity={0.7}>
             <Ionicons name="options-outline" size={20} color="#374151" />
+            {temFiltroAtivo && <View style={S.filterDot} />}
           </TouchableOpacity>
           <TouchableOpacity style={S.helpBtn} onPress={() => setModalLegendaVisible(true)} activeOpacity={0.7}>
             <Ionicons name="help-circle-outline" size={20} color="#9CA3AF" />
@@ -2957,6 +2960,18 @@ const S = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#E5E7EB',
+    position: 'relative',
+  },
+  filterDot: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: '#EF4444',
+    borderWidth: 1.5,
+    borderColor: '#FFF',
   },
   helpBtn: {
     width: 40,
