@@ -170,6 +170,24 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     || buscaDoc.renovacaoAprovadaTravada
     || form.isRenovacaoAprovada;
 
+  // Domingo só entra na lista se a rota trabalha nesse dia. Sem isso o
+  // vendedor conseguia agendar um semanal no domingo numa rota que não roda
+  // domingo, e as parcelas caíam num dia sem cobrança.
+  const diasSemanaDisponiveis = React.useMemo(
+    () => (config.trabalhaDomingo
+      ? form.DIAS_SEMANA
+      : form.DIAS_SEMANA.filter((d) => d.value !== '0')),
+    [config.trabalhaDomingo, form.DIAS_SEMANA]
+  );
+
+  // Se a rota não trabalha domingo e o formulário veio com domingo escolhido
+  // (default antigo ou termos de uma solicitação), reposiciona na segunda.
+  React.useEffect(() => {
+    if (!config.trabalhaDomingo && form.diaSemanaPagamento === '0') {
+      form.setDiaSemanaPagamento('1');
+    }
+  }, [config.trabalhaDomingo, form.diaSemanaPagamento]);
+
   const isClienteReadOnly = !!(clienteExistente?.id || buscaDoc.clienteEncontradoId);
   const isDisabled = isRenegociacao || buscaDoc.isVendaAprovadaTravada || form.isRenovacaoTravada || !!(buscaDoc.solicitacaoRenovacaoDetectada);
 
@@ -489,7 +507,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
       <ModalDiaSemana
         visible={form.showDiaSemanaModal}
-        diasSemana={form.DIAS_SEMANA}
+        diasSemana={diasSemanaDisponiveis}
         diaSemanaPagamento={form.diaSemanaPagamento}
         t={t}
         onSelect={form.setDiaSemanaPagamento}
