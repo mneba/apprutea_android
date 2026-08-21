@@ -43,6 +43,13 @@ interface SolicitacaoRenovacaoParam {
   frequencia: string;
   dia_semana_cobranca?: number | null;
   dia_mes_cobranca?: number | null;
+  // Termos completos vindos de renovacoes_pendentes — os mesmos que a
+  // ClientesScreen já enviava pelo card do cliente.
+  dias_mes_cobranca?: number[] | null;
+  iniciar_proximo_mes?: boolean | null;
+  data_primeiro_vencimento?: string | null;
+  observacoes_emprestimo?: string | null;
+  microseguro_valor?: number | null;
 }
 
 interface UseBuscaDocumentoParams {
@@ -233,7 +240,7 @@ export function useBuscaDocumento({
         if (temHistoricoQuitado && vendedor?.rota_id) {
           const { data: solicData } = await supabase
             .from('solicitacoes_autorizacao')
-            .select('id, status, valor_solicitado, valor_limite, emprestimo_id')
+            .select('id, status, valor_solicitado, valor_limite, emprestimo_id, renovacao_pendente_id')
             .eq('cliente_id', cli.id)
             .eq('rota_id', vendedor.rota_id)
             .eq('tipo_solicitacao', 'RENOVACAO_EXCEDE_ANTERIOR')
@@ -243,21 +250,47 @@ export function useBuscaDocumento({
             .maybeSingle();
 
           if (solicData) {
-            // Buscar dados do último empréstimo quitado para pré-preencher
-            const { data: empQuitado } = await supabase
-              .from('emprestimos')
-              .select('numero_parcelas, taxa_juros, frequencia_pagamento, dia_semana_cobranca, dia_mes_cobranca')
-              .eq('id', solicData.emprestimo_id)
-              .single();
+            // Termos vêm de `renovacoes_pendentes` — é lá que ficam os valores
+            // que o vendedor pediu e, depois, os que o admin aprovou (o web
+            // grava as edições via fn_resolver_renovacao_pendente).
+            // Antes este trecho copiava parcelas/taxa/frequência do último
+            // empréstimo QUITADO e usava `valor_solicitado` como valor: o
+            // formulário abria com os termos antigos, não com o que foi
+            // autorizado. A tela de Clientes já lia a fonte certa, então os
+            // dois caminhos mostravam coisas diferentes.
+            let termos: any = null;
+            if (solicData.renovacao_pendente_id) {
+              const { data: rp } = await supabase.rpc('fn_buscar_detalhes_renovacao_pendente', {
+                p_renovacao_pendente_id: solicData.renovacao_pendente_id,
+              });
+              termos = Array.isArray(rp) ? rp[0] : rp;
+            }
+
+            // Sem renovação pendente (solicitações antigas), cai no empréstimo
+            // quitado como antes — melhor que abrir o formulário vazio.
+            let empQuitado: any = null;
+            if (!termos) {
+              const { data } = await supabase
+                .from('emprestimos')
+                .select('numero_parcelas, taxa_juros, frequencia_pagamento, dia_semana_cobranca, dia_mes_cobranca')
+                .eq('id', solicData.emprestimo_id)
+                .single();
+              empQuitado = data;
+            }
 
             const solicParam: SolicitacaoRenovacaoParam = {
               solic_id: solicData.id,
-              valor_principal: solicData.valor_solicitado || 0,
-              numero_parcelas: empQuitado?.numero_parcelas || 10,
-              taxa_juros: empQuitado?.taxa_juros || 20,
-              frequencia: empQuitado?.frequencia_pagamento || 'DIARIO',
-              dia_semana_cobranca: empQuitado?.dia_semana_cobranca || null,
-              dia_mes_cobranca: empQuitado?.dia_mes_cobranca || null,
+              valor_principal: termos?.valor_aprovado ?? termos?.valor_principal ?? solicData.valor_solicitado ?? 0,
+              numero_parcelas: termos?.numero_parcelas || empQuitado?.numero_parcelas || 10,
+              taxa_juros: termos?.taxa_juros ?? empQuitado?.taxa_juros ?? 20,
+              frequencia: termos?.frequencia || empQuitado?.frequencia_pagamento || 'DIARIO',
+              dia_semana_cobranca: termos?.dia_semana_cobranca ?? empQuitado?.dia_semana_cobranca ?? null,
+              dia_mes_cobranca: termos?.dia_mes_cobranca ?? empQuitado?.dia_mes_cobranca ?? null,
+              dias_mes_cobranca: termos?.dias_mes_cobranca ?? null,
+              iniciar_proximo_mes: termos?.iniciar_proximo_mes ?? false,
+              data_primeiro_vencimento: termos?.data_primeiro_vencimento ?? null,
+              observacoes_emprestimo: termos?.observacoes_emprestimo ?? null,
+              microseguro_valor: termos?.microseguro_valor ?? null,
             };
 
             if (solicData.status === 'APROVADO') {
@@ -271,6 +304,11 @@ export function useBuscaDocumento({
               s.setFrequencia(solicParam.frequencia);
               if (solicParam.dia_semana_cobranca != null) s.setDiaSemanaPagamento(String(solicParam.dia_semana_cobranca));
               if (solicParam.dia_mes_cobranca != null) s.setDiaMesPagamento(String(solicParam.dia_mes_cobranca));
+              if (solicParam.dias_mes_cobranca) s.setDiasMesFlexivel(solicParam.dias_mes_cobranca);
+              if (solicParam.iniciar_proximo_mes != null) s.setIniciarProximoMes(solicParam.iniciar_proximo_mes);
+              if (solicParam.data_primeiro_vencimento) s.setDataPrimeiroVencimento(solicParam.data_primeiro_vencimento);
+              if (solicParam.observacoes_emprestimo) s.setObservacoesEmprestimo(solicParam.observacoes_emprestimo);
+              if (solicParam.microseguro_valor) s.setValorMicroseguro(String(solicParam.microseguro_valor));
               setTipoEmprestimoDetectado('RENOVACAO');
               setModalDocVisible(false);
               const msg = lang === 'es'
@@ -296,6 +334,11 @@ export function useBuscaDocumento({
               s.setFrequencia(solicParam.frequencia);
               if (solicParam.dia_semana_cobranca != null) s.setDiaSemanaPagamento(String(solicParam.dia_semana_cobranca));
               if (solicParam.dia_mes_cobranca != null) s.setDiaMesPagamento(String(solicParam.dia_mes_cobranca));
+              if (solicParam.dias_mes_cobranca) s.setDiasMesFlexivel(solicParam.dias_mes_cobranca);
+              if (solicParam.iniciar_proximo_mes != null) s.setIniciarProximoMes(solicParam.iniciar_proximo_mes);
+              if (solicParam.data_primeiro_vencimento) s.setDataPrimeiroVencimento(solicParam.data_primeiro_vencimento);
+              if (solicParam.observacoes_emprestimo) s.setObservacoesEmprestimo(solicParam.observacoes_emprestimo);
+              if (solicParam.microseguro_valor) s.setValorMicroseguro(String(solicParam.microseguro_valor));
               setTipoEmprestimoDetectado('RENOVACAO');
               setModalDocVisible(false);
             };
