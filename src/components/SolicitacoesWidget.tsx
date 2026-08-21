@@ -37,6 +37,8 @@ interface Solicitacao {
   vp_status?: string | null;
   vp_cliente_nome?: string | null;
   vp_cliente_documento?: string | null;
+  /** Documento a colar na busca da Nova Venda (cliente novo ou já cadastrado) */
+  documento_para_registrar?: string | null;
   vp_valor_principal?: number | null;
   vp_valor_aprovado?: number | null;
 }
@@ -222,7 +224,7 @@ export const SolicitacoesWidget: React.FC<Props> = ({ vendedorId, rotaId, lang =
           cliente_id,
           parcela_id,
           venda_pendente_id,
-          clientes:cliente_id (nome),
+          clientes:cliente_id (nome, documento),
           emprestimo_parcelas:parcela_id (numero_parcela, valor_pago),
           vendas_pendentes:venda_pendente_id (status, cliente_nome, cliente_documento, valor_principal, valor_aprovado)
         `)
@@ -236,6 +238,10 @@ export const SolicitacoesWidget: React.FC<Props> = ({ vendedorId, rotaId, lang =
       const mapped = (data || []).map((s: any) => ({
         ...s,
         cliente_nome: s.clientes?.nome || s.vendas_pendentes?.cliente_nome || null,
+        // Documento para o vendedor colar na busca da Nova Venda.
+        // Cliente novo vem de vendas_pendentes; cliente já cadastrado (adicional,
+        // renovação, renegociação) vem da própria tabela clientes.
+        documento_para_registrar: s.vendas_pendentes?.cliente_documento || s.clientes?.documento || null,
         parcela_numero: s.emprestimo_parcelas?.numero_parcela || null,
         valor_pago: s.emprestimo_parcelas?.valor_pago || null,
         venda_pendente_id: s.venda_pendente_id || null,
@@ -403,22 +409,28 @@ export const SolicitacoesWidget: React.FC<Props> = ({ vendedorId, rotaId, lang =
           )}
         </View>
 
-        {/* ⭐ Venda nova aprovada — documento do cliente + copiar */}
-        {item.tipo_solicitacao === 'VENDA_EXCEDE_LIMITE'
-          && item.status === 'APROVADO'
-          && item.vp_status === 'APROVADO'
-          && item.vp_cliente_documento && (
+        {/* Autorização aprovada — documento do cliente + copiar.
+            Vale para todos os tipos que terminam numa venda pela tela de Nova
+            Venda: venda que excede o limite (cliente novo), empréstimo
+            adicional, renovação e renegociação. Antes só aparecia para
+            VENDA_EXCEDE_LIMITE, então nas autorizações de cliente já
+            cadastrado o vendedor tinha de descobrir o documento por fora.
+            Para venda nova ainda exigimos vp_status APROVADO: a solicitação
+            pode estar aprovada e a venda pendente já resolvida. */}
+        {item.status === 'APROVADO'
+          && item.documento_para_registrar
+          && (item.tipo_solicitacao !== 'VENDA_EXCEDE_LIMITE' || item.vp_status === 'APROVADO') && (
           <View style={S.docBox}>
             <View style={S.docInfo}>
               <Text style={S.docLabel}>
                 {lang === 'es' ? 'Documento para registrar:' : 'Documento para registrar:'}
               </Text>
-              <Text style={S.docValor}>{item.vp_cliente_documento}</Text>
+              <Text style={S.docValor}>{item.documento_para_registrar}</Text>
             </View>
             <TouchableOpacity
               style={S.docCopiarBtn}
               onPress={async () => {
-                await Clipboard.setStringAsync(String(item.vp_cliente_documento));
+                await Clipboard.setStringAsync(String(item.documento_para_registrar));
                 const msg = lang === 'es' ? 'Documento copiado' : 'Documento copiado';
                 if (Platform.OS === 'web') { /* noop visual */ }
                 else { Alert.alert('✓', msg); }

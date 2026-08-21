@@ -84,7 +84,12 @@ export function useNovaVendaForm({
   const [taxaJuros, setTaxaJuros] = useState(
     solicitacaoRenovacao ? String(solicitacaoRenovacao.taxa_juros) : ''
   );
-  const [taxaJurosPersonalizada, setTaxaJurosPersonalizada] = useState(false);
+  // Autorização aprovada → campo livre, igual ao caminho de colar o documento
+  // (useBuscaDocumento também faz setTaxaJurosPersonalizada(true)).
+  // Com `false`, uma taxa fora dos botões padrão — 14%, por exemplo — não
+  // aparecia em lugar nenhum: os botões ficavam todos sem seleção e o
+  // vendedor não tinha como saber o juro autorizado.
+  const [taxaJurosPersonalizada, setTaxaJurosPersonalizada] = useState(!!solicitacaoRenovacao);
   const [frequencia, setFrequencia] = useState(
     solicitacaoRenovacao?.frequencia || 'DIARIO'
   );

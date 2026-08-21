@@ -35,6 +35,12 @@ interface Props {
   taxasLivre: boolean;
   // Flags
   isRenegociacao: boolean;
+  /**
+   * Venda autorizada pelo administrador: trava APENAS o valor do empréstimo,
+   * que é o que foi aprovado. Parcelas, taxa, frequência e datas seguem por
+   * conta do vendedor — antes tudo ficava travado e ele não conseguia ajustar
+   * o parcelamento ao combinado com o cliente.
+   */
   isVendaAprovadaTravada: boolean;
   camposComErro: Set<string>;
   lang: Lang;
@@ -93,13 +99,18 @@ export default function FormularioEmprestimo(props: Props) {
               🔒 {lang === 'es' ? 'Saldo deudor (no editable)' : 'Saldo devedor (não editável)'}
             </Text>
           )}
+          {!isRenegociacao && isVendaAprovadaTravada && (
+            <Text style={styles.hintRenegociacao}>
+              🔒 {lang === 'es' ? 'Valor autorizado por el administrador' : 'Valor autorizado pelo administrador'}
+            </Text>
+          )}
         </View>
         <View style={[styles.fieldGroup, { flex: 1 }]}>
           <Text style={[styles.fieldLabel, camposComErro.has('numeroParcelas') && styles.fieldLabelError]}>
             Parcelas <Text style={styles.required}>*</Text>
           </Text>
           <TextInput
-            style={[styles.input, camposComErro.has('numeroParcelas') && styles.inputError, isVendaAprovadaTravada && styles.inputDisabled]}
+            style={[styles.input, camposComErro.has('numeroParcelas') && styles.inputError]}
             value={numeroParcelas}
             onChangeText={(text) => {
               const num = text.replace(/[^\d]/g, '');
@@ -110,7 +121,6 @@ export default function FormularioEmprestimo(props: Props) {
             placeholderTextColor="#9CA3AF"
             keyboardType="numeric"
             maxLength={3}
-            editable={!isVendaAprovadaTravada}
           />
         </View>
       </View>
@@ -129,13 +139,11 @@ export default function FormularioEmprestimo(props: Props) {
                 style={[
                   styles.taxaButton,
                   taxaJuros === String(taxa) && styles.taxaButtonActive,
-                  isVendaAprovadaTravada && taxaJuros !== String(taxa) && { opacity: 0.4 },
                 ]}
                 onPress={() => {
-                  if (isVendaAprovadaTravada) return;
                   setTaxaJuros(String(taxa)); setTaxaJurosPersonalizada(false); limparErroCampo('taxaJuros');
                 }}
-                activeOpacity={isVendaAprovadaTravada ? 1 : 0.7}
+                activeOpacity={0.7}
               >
                 <Text style={[styles.taxaButtonText, taxaJuros === String(taxa) && styles.taxaButtonTextActive]}>
                   {taxa}%
@@ -146,13 +154,11 @@ export default function FormularioEmprestimo(props: Props) {
               style={[
                 styles.taxaButton,
                 taxaJurosPersonalizada && styles.taxaButtonActive,
-                isVendaAprovadaTravada && { opacity: 0.4 },
               ]}
               onPress={() => {
-                if (isVendaAprovadaTravada) return;
                 setTaxaJurosPersonalizada(true); setTaxaJuros('');
               }}
-              activeOpacity={isVendaAprovadaTravada ? 1 : 0.7}
+              activeOpacity={0.7}
             >
               <Text style={[styles.taxaButtonText, taxaJurosPersonalizada && styles.taxaButtonTextActive]}>
                 Outro
@@ -162,24 +168,21 @@ export default function FormularioEmprestimo(props: Props) {
         ) : (
           <View style={styles.rowFields}>
             <TextInput
-              style={[styles.input, { flex: 1 }, isVendaAprovadaTravada && styles.inputDisabled]}
+              style={[styles.input, { flex: 1 }]}
               value={taxaJuros}
               onChangeText={(text) => setTaxaJuros(text.replace(/[^\d.,]/g, ''))}
               placeholder={t.phJuros}
               placeholderTextColor="#9CA3AF"
               keyboardType="decimal-pad"
-              autoFocus={!isVendaAprovadaTravada}
-              editable={!isVendaAprovadaTravada}
+              autoFocus
             />
-            {!isVendaAprovadaTravada && (
-              <TouchableOpacity
-                style={styles.taxaCancelBtn}
-                onPress={() => { setTaxaJurosPersonalizada(false); setTaxaJuros(''); }}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.taxaCancelBtnText}>{t.voltar}</Text>
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity
+              style={styles.taxaCancelBtn}
+              onPress={() => { setTaxaJurosPersonalizada(false); setTaxaJuros(''); }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.taxaCancelBtnText}>{t.voltar}</Text>
+            </TouchableOpacity>
           </View>
         )}
       </View>
@@ -202,10 +205,8 @@ export default function FormularioEmprestimo(props: Props) {
               style={[
                 styles.radioOption,
                 frequencia === freq.value && styles.radioOptionActive,
-                isVendaAprovadaTravada && frequencia !== freq.value && { opacity: 0.4 },
               ]}
               onPress={() => {
-                if (isVendaAprovadaTravada) return;
                 setFrequencia(freq.value);
                 limparErroCampo('frequencia');
                 if (freq.value === 'DIARIO') {
@@ -214,7 +215,7 @@ export default function FormularioEmprestimo(props: Props) {
                   setDataPrimeiroVencimento(calcularDataMensal(parseInt(diaMesPagamento)));
                 }
               }}
-              activeOpacity={isVendaAprovadaTravada ? 1 : 0.7}
+              activeOpacity={0.7}
             >
               <View style={[styles.radioCircle, frequencia === freq.value && styles.radioCircleActive]}>
                 {frequencia === freq.value && <View style={styles.radioCircleDot} />}
@@ -234,10 +235,9 @@ export default function FormularioEmprestimo(props: Props) {
             Dia da semana <Text style={styles.required}>*</Text>
           </Text>
           <TouchableOpacity
-            style={[styles.selectField, camposComErro.has('diaSemanaPagamento') && styles.inputError, isVendaAprovadaTravada && styles.inputDisabled]}
-            onPress={() => { if (!isVendaAprovadaTravada) { onOpenDiaSemanaModal(); limparErroCampo('diaSemanaPagamento'); } }}
-            activeOpacity={isVendaAprovadaTravada ? 1 : 0.7}
-            disabled={isVendaAprovadaTravada}
+            style={[styles.selectField, camposComErro.has('diaSemanaPagamento') && styles.inputError]}
+            onPress={() => { onOpenDiaSemanaModal(); limparErroCampo('diaSemanaPagamento'); }}
+            activeOpacity={0.7}
           >
             <Text style={styles.selectFieldText}>{getDiaSemanaLabel()}</Text>
             <Text style={styles.selectFieldChevron}>▼</Text>
@@ -252,7 +252,7 @@ export default function FormularioEmprestimo(props: Props) {
             Dia do mês <Text style={styles.required}>*</Text>
           </Text>
           <TextInput
-            style={[styles.input, camposComErro.has('diaMesPagamento') && styles.inputError, isVendaAprovadaTravada && styles.inputDisabled]}
+            style={[styles.input, camposComErro.has('diaMesPagamento') && styles.inputError]}
             value={diaMesPagamento}
             onChangeText={(text) => {
               const num = text.replace(/[^\d]/g, '');
@@ -265,7 +265,6 @@ export default function FormularioEmprestimo(props: Props) {
             placeholderTextColor="#9CA3AF"
             keyboardType="numeric"
             maxLength={2}
-            editable={!isVendaAprovadaTravada}
           />
         </View>
       )}
@@ -318,10 +317,9 @@ export default function FormularioEmprestimo(props: Props) {
           Data 1º vencimento <Text style={styles.required}>*</Text>
         </Text>
         <TouchableOpacity
-          style={[styles.selectField, camposComErro.has('dataPrimeiroVencimento') && styles.inputError, isVendaAprovadaTravada && styles.inputDisabled]}
-          onPress={() => { if (!isVendaAprovadaTravada) { onOpenDatePicker(); limparErroCampo('dataPrimeiroVencimento'); } }}
-          activeOpacity={isVendaAprovadaTravada ? 1 : 0.7}
-          disabled={isVendaAprovadaTravada}
+          style={[styles.selectField, camposComErro.has('dataPrimeiroVencimento') && styles.inputError]}
+          onPress={() => { onOpenDatePicker(); limparErroCampo('dataPrimeiroVencimento'); }}
+          activeOpacity={0.7}
         >
           <Text style={styles.selectFieldText}>{formatarData(dataPrimeiroVencimento)}</Text>
           <Text style={styles.selectFieldChevron}>📅</Text>
