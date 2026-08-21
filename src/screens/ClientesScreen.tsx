@@ -541,6 +541,11 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [empIdxMap, setEmpIdxMap] = useState<Record<string, number>>({});
   const [filtro, setFiltro] = useState<FiltroLiquidacao>('todos');
+  // 'DIA' = só quem tem parcela vencendo na data da liquidação (mesma base de
+  // clientes_iniciais). 'CARREGADOS' inclui os atrasados de dias anteriores,
+  // que também vão para a rota. Começa em CARREGADOS para não mudar o que o
+  // vendedor já enxerga hoje.
+  const [escopoLiq, setEscopoLiq] = useState<'DIA' | 'CARREGADOS'>('CARREGADOS');
   const [ord, setOrd] = useState<OrdenacaoLiquidacao>('rota');
   const [showOrd, setShowOrd] = useState(false);
 
@@ -2048,8 +2053,18 @@ export default function ClientesScreen({ navigation, route }: any) {
   // Regra de negócio: vendedor visitou, cobrou (mesmo parcial/atrasada) → sai da lista
   const isCliPago = useCallback((c: ClienteAgrupado) => clientesPagosNaLiq.has(c.cliente_id), [clientesPagosNaLiq]);
 
+  // Cliente "do dia": tem ALGUMA parcela vencendo na data da liquidação.
+  // Varre todos os empréstimos do cliente, não só o primeiro — quem tem um
+  // vencendo hoje e outro atrasado continua sendo do dia.
+  const ehDoDiaCli = useCallback((c: ClienteAgrupado) => {
+    if (!dataLiq) return true;
+    return c.emprestimos.some(e => String(e.data_vencimento || '').substring(0, 10) === dataLiq);
+  }, [dataLiq]);
+
   const filtered = useMemo(() => {
     let r = [...grouped];
+    // Escopo só faz sentido no braço da liquidação; a aba "Todos" é a carteira
+    if (tab === 'liquidacao' && escopoLiq === 'DIA') r = r.filter(ehDoDiaCli);
     if (busca.trim()) { const b = normalizarBusca(busca); r = r.filter(c => normalizarBusca(c.nome).includes(b) || (c.telefone_celular && c.telefone_celular.includes(b)) || (c.endereco && normalizarBusca(c.endereco).includes(b))); }
     if (filtroFrequencia !== 'todos') r = r.filter(c => c.emprestimos.some(e => e.frequencia_pagamento === filtroFrequencia));
     if (filtro === 'atrasados') r = r.filter(c => !isCliPago(c) && c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas));
@@ -2092,11 +2107,19 @@ export default function ClientesScreen({ navigation, route }: any) {
         : (a, b) => a.nome.localeCompare(b.nome));
     }
     return r;
-  }, [grouped, busca, filtro, filtroFrequencia, ord, isCliPago, ordemRotaMap, pagMap]);
+  }, [grouped, busca, filtro, filtroFrequencia, ord, isCliPago, ordemRotaMap, pagMap, tab, escopoLiq, ehDoDiaCli]);
 
-  const cntTotal = grouped.filter(c => !isCliPago(c)).length;
-  const cntAtraso = grouped.filter(c => !isCliPago(c) && c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas)).length;
-  const cntPagas = grouped.filter(c => isCliPago(c)).length;
+  // Base dos contadores segue o escopo: com "Do dia" ativo, os números dos
+  // segmentos precisam refletir a lista exibida.
+  const baseLiq = useMemo(
+    () => (escopoLiq === 'DIA' ? grouped.filter(ehDoDiaCli) : grouped),
+    [grouped, escopoLiq, ehDoDiaCli]
+  );
+  const cntDoDia = useMemo(() => grouped.filter(ehDoDiaCli).length, [grouped, ehDoDiaCli]);
+
+  const cntTotal = baseLiq.filter(c => !isCliPago(c)).length;
+  const cntAtraso = baseLiq.filter(c => !isCliPago(c) && c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas)).length;
+  const cntPagas = baseLiq.filter(c => isCliPago(c)).length;
   const cntTotalGeral = grouped.length;
   const clientesLiqIds = useMemo(() => new Set(grouped.map(c => c.cliente_id)), [grouped]);
   const eIdx = (cid: string) => empIdxMap[cid] || 0;
@@ -2421,6 +2444,31 @@ return (
             </Text>
           </TouchableOpacity>
         </View>
+
+        {/* Escopo — só no braço da liquidação. Torna explícito que a rota
+            carrega, além dos clientes do dia, os atrasados de dias anteriores. */}
+        {tab === 'liquidacao' && liqId ? (
+          <View style={S.escopoRow}>
+            <TouchableOpacity
+              style={[S.escopoBtn, escopoLiq === 'DIA' && S.escopoBtnAtivo]}
+              onPress={() => setEscopoLiq('DIA')}
+              activeOpacity={0.7}
+            >
+              <Text style={[S.escopoTx, escopoLiq === 'DIA' && S.escopoTxAtivo]}>
+                {lang === 'es' ? 'Del día' : 'Do dia'} {cntDoDia}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[S.escopoBtn, escopoLiq === 'CARREGADOS' && S.escopoBtnAtivo]}
+              onPress={() => setEscopoLiq('CARREGADOS')}
+              activeOpacity={0.7}
+            >
+              <Text style={[S.escopoTx, escopoLiq === 'CARREGADOS' && S.escopoTxAtivo]}>
+                {lang === 'es' ? 'Cargados' : 'Carregados'} {cntTotalGeral}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
       </View>
 
       {/* ═══════════════════════════════════════════════════════════════════════
@@ -3007,6 +3055,25 @@ const S = StyleSheet.create({
   segmentBtnActiveTodos: { backgroundColor: '#D97706', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.15, shadowRadius: 2, elevation: 2 },
   segmentBtnText: { fontSize: 12, fontWeight: '600', color: '#374151' },
   segmentBtnTextActive: { color: '#fff' },
+
+  // Escopo da liquidação: do dia x carregados
+  escopoRow: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  escopoBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#fff',
+  },
+  escopoBtnAtivo: { backgroundColor: '#EFF6FF', borderColor: '#3B82F6' },
+  escopoTx: { fontSize: 11, fontWeight: '600', color: '#6B7280' },
+  escopoTxAtivo: { color: '#1D4ED8' },
 
   // Search
   searchRow: {
