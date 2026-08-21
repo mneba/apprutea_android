@@ -2061,24 +2061,24 @@ export default function ClientesScreen({ navigation, route }: any) {
       // (pagMap.created_at, com fallback data_pagamento) — senão a ordem da
       // lista não bate com as horas mostradas em cada card.
       const dtPag = (c: ClienteAgrupado): number => {
-        // Varre o pagMap por cliente_id (mesma lógica do cabeçalho de hora):
-        // pega o data_pagamento (MAX created_at) mais recente entre as
-        // parcelas pagas do cliente. Independe de qual parcela_id o
-        // empréstimo agrupado carrega.
-        let ms = -Infinity;
+        // PRIMEIRO pagamento do cliente na liquidação. Usa MIN, não MAX: se
+        // o cliente receber uma segunda cobrança mais tarde, ele não pode
+        // saltar para o fim da lista — a posição marca quando foi atendido.
+        let ms = Infinity;
         pagMap.forEach((p) => {
           if (p.cliente_id === c.cliente_id && p.data_pagamento) {
             const t = new Date(p.data_pagamento).getTime();
-            if (!isNaN(t) && t > ms) ms = t;
+            if (!isNaN(t) && t < ms) ms = t;
           }
         });
         return ms;
       };
       r.sort((a, b) => {
         const da = dtPag(a), db = dtPag(b);
-        // Decrescente: o pagamento MAIS RECENTE fica no topo (o vendedor vê
-        // logo o que acabou de registrar, sem rolar até o fim).
-        if (da !== db) return db - da;
+        // CRESCENTE: quem pagou primeiro aparece primeiro. Era decrescente
+        // (mais recente no topo), mas para conferir a operação o vendedor
+        // precisa seguir a ordem real em que registrou os pagamentos.
+        if (da !== db) return da - db;
         return a.nome.localeCompare(b.nome);    // desempate estável
       });
     } else {
