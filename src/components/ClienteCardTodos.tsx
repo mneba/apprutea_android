@@ -87,7 +87,12 @@ interface ClienteCardTodosProps {
   onAbrirDetalhes: (cliente: { id: string; nome: string; telefone?: string | null; codigo_cliente?: string | number | null }) => void;
   onNovoEmprestimo: (cliente: ClienteTodos) => void;
   solicitacaoRenovacao?: { solic_id: string; status: string; valor_solicitado: number; valor_limite: number; emprestimo_id: string | null } | null;
-  onAlterarSolicitacaoRenovacao?: (cliente: ClienteTodos, solicId: string, empQuitadoId: string, valorSolic: number) => void;
+  /**
+   * `statusSolic` decide se o formulário abre travado: APROVADO significa que
+   * o admin definiu valor e taxa; PENDENTE é o vendedor querendo alterar o
+   * próprio pedido, e aí os campos precisam ficar livres.
+   */
+  onAlterarSolicitacaoRenovacao?: (cliente: ClienteTodos, solicId: string, empQuitadoId: string, valorSolic: number, statusSolic: string) => void;
   onCancelarSolicitacaoRenovacao?: (solicId: string) => void;
   todosMode?: boolean;
 }
@@ -265,7 +270,7 @@ export default function ClienteCardTodos({
                 const valorLimite = solicitacaoRenovacao.valor_limite;
                 if (!isPendente) {
                   // APROVADO — ir direto para alterar
-                  onAlterarSolicitacaoRenovacao?.(c, solicId, empId, valorSolic);
+                  onAlterarSolicitacaoRenovacao?.(c, solicId, empId, valorSolic, solicitacaoRenovacao.status);
                   return;
                 }
                 const msg = lang === 'es'
@@ -277,7 +282,7 @@ export default function ClienteCardTodos({
                     : 'Solicitacao pendente de renovacao. OK = Alterar e cancelar / Cancelar = Ver mais opcoes';
                   const alterar = window.confirm(msgWeb);
                   if (alterar) {
-                    onAlterarSolicitacaoRenovacao?.(c, solicId, empId, valorSolic);
+                    onAlterarSolicitacaoRenovacao?.(c, solicId, empId, valorSolic, solicitacaoRenovacao.status);
                   } else {
                     const msgCancelar = lang === 'es' ? 'Cancelar la solicitud pendiente?' : 'Cancelar a solicitacao pendente?';
                     const cancelar = window.confirm(msgCancelar);
@@ -288,7 +293,7 @@ export default function ClienteCardTodos({
                     lang === 'es' ? 'Solicitud pendiente' : 'Solicitação pendente', msg,
                     [
                       { text: lang === 'es' ? 'Cancelar solicitud' : 'Cancelar solicitação', style: 'destructive', onPress: () => onCancelarSolicitacaoRenovacao?.(solicId) },
-                      { text: lang === 'es' ? 'Alterar y cancelar' : 'Alterar e cancelar', onPress: () => onAlterarSolicitacaoRenovacao?.(c, solicId, empId, valorSolic) },
+                      { text: lang === 'es' ? 'Alterar y cancelar' : 'Alterar e cancelar', onPress: () => onAlterarSolicitacaoRenovacao?.(c, solicId, empId, valorSolic, solicitacaoRenovacao.status) },
                       { text: lang === 'es' ? 'Cerrar' : 'Fechar', style: 'cancel' },
                     ]
                   );

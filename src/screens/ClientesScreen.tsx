@@ -2255,7 +2255,7 @@ export default function ClientesScreen({ navigation, route }: any) {
             } 
           });
         }}
-        onAlterarSolicitacaoRenovacao={async (cli, solicId, empQuitadoId, valorSolic) => {
+        onAlterarSolicitacaoRenovacao={async (cli, solicId, empQuitadoId, valorSolic, statusSolic) => {
           // Busca os termos exatamente como o vendedor pediu (persistidos em
           // renovacoes_pendentes no momento do bloqueio), não os do empréstimo
           // antigo quitado — é isso que preserva a data que ele escolheu.
@@ -2278,6 +2278,8 @@ export default function ClientesScreen({ navigation, route }: any) {
             clienteExistente: { id: cli.id, nome: cli.nome, telefone_celular: cli.telefone_celular, documento: cli.codigo_cliente?.toString() || '' },
             solicitacaoRenovacao: {
               solic_id: solicId,
+              // APROVADO trava valor e taxa no formulário; PENDENTE deixa livre
+              status: statusSolic,
               valor_principal: termos?.valor_aprovado ?? termos?.valor_principal ?? valorSolic,
               numero_parcelas: termos?.numero_parcelas || 10,
               taxa_juros: termos?.taxa_juros || 20,
@@ -2846,7 +2848,7 @@ return (
             ]); 
           }
         }}
-        onAlterarSolicitacaoRenovacao={async (cli, solicId, empQuitadoId, valorSolic) => {
+        onAlterarSolicitacaoRenovacao={async (cli, solicId, empQuitadoId, valorSolic, statusSolic) => {
           // Busca os termos exatamente como o vendedor pediu (persistidos em
           // renovacoes_pendentes no momento do bloqueio), não os do empréstimo
           // antigo quitado — é isso que preserva a data que ele escolheu.
@@ -2869,6 +2871,8 @@ return (
             clienteExistente: { id: cli.id, nome: cli.nome, telefone_celular: (cli as any).telefone_celular, documento: (cli as any).codigo_cliente?.toString() || '' },
             solicitacaoRenovacao: {
               solic_id: solicId,
+              // APROVADO trava valor e taxa no formulário; PENDENTE deixa livre
+              status: statusSolic,
               valor_principal: termos?.valor_aprovado ?? termos?.valor_principal ?? valorSolic,
               numero_parcelas: termos?.numero_parcelas || 10,
               taxa_juros: termos?.taxa_juros || 20,

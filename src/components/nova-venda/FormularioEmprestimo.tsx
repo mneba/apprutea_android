@@ -36,10 +36,10 @@ interface Props {
   // Flags
   isRenegociacao: boolean;
   /**
-   * Venda autorizada pelo administrador: trava APENAS o valor do empréstimo,
-   * que é o que foi aprovado. Parcelas, taxa, frequência e datas seguem por
-   * conta do vendedor — antes tudo ficava travado e ele não conseguia ajustar
-   * o parcelamento ao combinado com o cliente.
+   * Termos definidos pelo administrador: trava o VALOR e a TAXA, que são o
+   * que foi autorizado. Parcelas, frequência e datas seguem por conta do
+   * vendedor — antes tudo ficava travado e ele não conseguia ajustar o
+   * parcelamento ao combinado com o cliente.
    */
   isVendaAprovadaTravada: boolean;
   camposComErro: Set<string>;
@@ -139,11 +139,13 @@ export default function FormularioEmprestimo(props: Props) {
                 style={[
                   styles.taxaButton,
                   taxaJuros === String(taxa) && styles.taxaButtonActive,
+                  isVendaAprovadaTravada && taxaJuros !== String(taxa) && { opacity: 0.4 },
                 ]}
                 onPress={() => {
+                  if (isVendaAprovadaTravada) return;
                   setTaxaJuros(String(taxa)); setTaxaJurosPersonalizada(false); limparErroCampo('taxaJuros');
                 }}
-                activeOpacity={0.7}
+                activeOpacity={isVendaAprovadaTravada ? 1 : 0.7}
               >
                 <Text style={[styles.taxaButtonText, taxaJuros === String(taxa) && styles.taxaButtonTextActive]}>
                   {taxa}%
@@ -154,11 +156,13 @@ export default function FormularioEmprestimo(props: Props) {
               style={[
                 styles.taxaButton,
                 taxaJurosPersonalizada && styles.taxaButtonActive,
+                isVendaAprovadaTravada && { opacity: 0.4 },
               ]}
               onPress={() => {
+                if (isVendaAprovadaTravada) return;
                 setTaxaJurosPersonalizada(true); setTaxaJuros('');
               }}
-              activeOpacity={0.7}
+              activeOpacity={isVendaAprovadaTravada ? 1 : 0.7}
             >
               <Text style={[styles.taxaButtonText, taxaJurosPersonalizada && styles.taxaButtonTextActive]}>
                 Outro
@@ -168,14 +172,16 @@ export default function FormularioEmprestimo(props: Props) {
         ) : (
           <View style={styles.rowFields}>
             <TextInput
-              style={[styles.input, { flex: 1 }]}
+              style={[styles.input, { flex: 1 }, isVendaAprovadaTravada && styles.inputDisabled]}
               value={taxaJuros}
               onChangeText={(text) => setTaxaJuros(text.replace(/[^\d.,]/g, ''))}
               placeholder={t.phJuros}
               placeholderTextColor="#9CA3AF"
               keyboardType="decimal-pad"
-              autoFocus
+              autoFocus={!isVendaAprovadaTravada}
+              editable={!isVendaAprovadaTravada}
             />
+            {!isVendaAprovadaTravada && (
             <TouchableOpacity
               style={styles.taxaCancelBtn}
               onPress={() => { setTaxaJurosPersonalizada(false); setTaxaJuros(''); }}
@@ -183,6 +189,7 @@ export default function FormularioEmprestimo(props: Props) {
             >
               <Text style={styles.taxaCancelBtnText}>{t.voltar}</Text>
             </TouchableOpacity>
+            )}
           </View>
         )}
       </View>

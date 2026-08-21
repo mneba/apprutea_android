@@ -163,6 +163,13 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   // -----------------------------------------------------------
   // DERIVADOS
   // -----------------------------------------------------------
+  // Termos definidos pelo administrador: trava valor e taxa. Cobre os dois
+  // caminhos — venda aprovada, renovação aprovada detectada pelo documento e
+  // renovação aprovada aberta pelo card do cliente.
+  const termosAutorizados = buscaDoc.isVendaAprovadaTravada
+    || buscaDoc.renovacaoAprovadaTravada
+    || form.isRenovacaoAprovada;
+
   const isClienteReadOnly = !!(clienteExistente?.id || buscaDoc.clienteEncontradoId);
   const isDisabled = isRenegociacao || buscaDoc.isVendaAprovadaTravada || form.isRenovacaoTravada || !!(buscaDoc.solicitacaoRenovacaoDetectada);
 
@@ -335,7 +342,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                   valorPrincipal={form.valorPrincipal} taxaNum={form.taxaNum} parcelasNum={form.parcelasNum}
                   valorTotal={form.valorTotal} valorParcela={form.valorParcela} totalJuros={form.totalJuros}
                   taxasPermitidas={config.taxasPermitidas} taxasLivre={config.taxasLivre}
-                  isRenegociacao={isRenegociacao} isVendaAprovadaTravada={buscaDoc.isVendaAprovadaTravada}
+                  isRenegociacao={isRenegociacao} isVendaAprovadaTravada={termosAutorizados}
                   camposComErro={form.camposComErro} lang={lang}
                   handleValorEmprestimoChange={form.handleValorEmprestimoChange}
                   limparErroCampo={form.limparErroCampo}

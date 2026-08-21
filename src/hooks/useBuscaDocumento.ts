@@ -99,6 +99,11 @@ export function useBuscaDocumento({
   const [solicitacaoRenovacaoDetectada, setSolicitacaoRenovacaoDetectada] = useState<SolicitacaoRenovacaoParam | null>(
     solicitacaoRenovacaoParam || null
   );
+  // TRUE só quando a solicitação encontrada está APROVADA: o admin definiu
+  // valor e taxa, e o vendedor não pode alterá-los. No caso PENDENTE +
+  // "Alterar" ele precisa editar, por isso não dá para usar
+  // `solicitacaoRenovacaoDetectada`, que cobre os dois.
+  const [renovacaoAprovadaTravada, setRenovacaoAprovadaTravada] = useState(false);
   const vendaPendenteId = vendaPendenteParam?.id || vendaPendenteIdDetectada || null;
   const vendaPendenteModo = vendaPendenteParam?.modo || (vendaPendenteIdDetectada ? 'aprovada' : null);
   const isVendaAprovadaTravada = vendaPendenteModo === 'aprovada';
@@ -297,6 +302,7 @@ export function useBuscaDocumento({
               // Aprovada — pré-preencher form e travar
               preencherCliente();
               setSolicitacaoRenovacaoDetectada(solicParam);
+              setRenovacaoAprovadaTravada(true);
               s.setValorEmprestimo(String(solicParam.valor_principal));
               s.setNumeroParcelas(String(solicParam.numero_parcelas));
               s.setTaxaJuros(String(solicParam.taxa_juros));
@@ -664,6 +670,7 @@ export function useBuscaDocumento({
 
     // Solicitação de renovação detectada
     solicitacaoRenovacaoDetectada,
+    renovacaoAprovadaTravada,
 
     // Actions
     buscarClientePorDocumento,

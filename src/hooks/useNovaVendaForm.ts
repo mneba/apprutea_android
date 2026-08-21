@@ -16,6 +16,8 @@ import {
 
 interface SolicitacaoRenovacao {
   solic_id: string;
+  /** APROVADO trava valor e taxa; PENDENTE mantém livre */
+  status?: string;
   valor_principal: number;
   numero_parcelas: number;
   taxa_juros: number;
@@ -44,8 +46,11 @@ export function useNovaVendaForm({
   solicitacaoRenovacao,
   t,
 }: UseNovaVendaFormParams) {
-  // Flag: campos travados quando há solicitação de renovação (como vendaPendente aprovada)
+  // Veio de uma solicitação de renovação (aprovada ou pendente).
   const isRenovacaoTravada = !!solicitacaoRenovacao;
+  // Só quando APROVADA: o admin definiu valor e taxa e o vendedor não altera.
+  // Em PENDENTE o vendedor está justamente alterando o próprio pedido.
+  const isRenovacaoAprovada = (solicitacaoRenovacao as any)?.status === 'APROVADO';
 
   // -----------------------------------------------------------
   // ESTADOS - CLIENTE
@@ -400,6 +405,7 @@ export function useNovaVendaForm({
 
     // --- Solicitação de renovação ---
     isRenovacaoTravada,
+    isRenovacaoAprovada,
     solicitacaoRenovacaoId: solicitacaoRenovacao?.solic_id || null,
   };
 }

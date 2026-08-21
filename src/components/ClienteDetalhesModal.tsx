@@ -167,7 +167,8 @@ interface Props {
   cliente: ClienteInfo | null;
   lang?: Language;
   onNovoEmprestimo?: (cliente: ClienteInfo) => void;
-  onAlterarSolicitacaoRenovacao?: (cliente: ClienteInfo, solicitacaoId: string, emprestimoQuitadoId: string, valorSolicitado: number) => void;
+  /** `statusSolic` decide se o formulário abre travado — aqui é sempre PENDENTE */
+  onAlterarSolicitacaoRenovacao?: (cliente: ClienteInfo, solicitacaoId: string, emprestimoQuitadoId: string, valorSolicitado: number, statusSolic: string) => void;
   onCancelarSolicitacaoRenovacao?: (solicitacaoId: string) => void;
   onRenegociar?: (cliente: ClienteInfo, emprestimo: Emprestimo) => void;
 }
@@ -1326,7 +1327,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                   const alterar = window.confirm(msgWeb);
                   if (alterar) {
                     onClose();
-                    onAlterarSolicitacaoRenovacao?.(cliente, solicId, empId, valorSolic);
+                    onAlterarSolicitacaoRenovacao?.(cliente, solicId, empId, valorSolic, 'PENDENTE');
                   } else {
                     const msgCancelar = lang === 'es' ? 'Cancelar la solicitud pendiente?' : 'Cancelar a solicitacao pendente?';
                     const cancelar = window.confirm(msgCancelar);
@@ -1346,7 +1347,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                         text: lang === 'es' ? 'Alterar y cancelar' : 'Alterar e cancelar',
                         onPress: () => {
                           onClose();
-                          onAlterarSolicitacaoRenovacao?.(cliente, solicId, empId, valorSolic);
+                          onAlterarSolicitacaoRenovacao?.(cliente, solicId, empId, valorSolic, 'PENDENTE');
                         },
                       },
                       { text: lang === 'es' ? 'Cerrar' : 'Fechar', style: 'cancel' },
