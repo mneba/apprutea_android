@@ -1,10 +1,12 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Animated,
   Image,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View
 } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -86,7 +88,21 @@ const borderOf = (e: EmprestimoData, paga: boolean) => {
 const bgOf = (_e: EmprestimoData, paga: boolean) => paga ? 'rgba(16,185,129,0.05)' : '#fff';
 const isPagaFn = (pid: string, sd: string, set: Set<string>) => set.has(pid) || sd === 'PAGO';
 
+// Diferença em dias entre duas datas YYYY-MM-DD (sem timezone).
+const diasEntre = (ref?: string | null, venc?: string | null): number => {
+  if (!ref || !venc) return 0;
+  const r = ref.substring(0, 10).split('-').map(Number);
+  const v = venc.substring(0, 10).split('-').map(Number);
+  if (r.length !== 3 || v.length !== 3) return 0;
+  return Math.round((Date.UTC(r[0], r[1] - 1, r[2]) - Date.UTC(v[0], v[1] - 1, v[2])) / 86400000);
+};
+
 // ─── Props ──────────────────────────────────────────────────────────────────
+
+export interface ResumoPago {
+  dinheiroReal: number; creditoUsado: number; qtdParcelas: number;
+  somaParcelas: number; valorUnitario?: number | null;
+}
 
 interface ClienteCardLiquidacaoProps {
   cliente: ClienteAgrupado;
@@ -97,7 +113,10 @@ interface ClienteCardLiquidacaoProps {
   liqId: string | null;
   isViz: boolean;
   isClientePago?: boolean; // ⭐ Cliente está no filtro "Pagas" - desabilita pagamento
-  resumoPago?: { dinheiroReal: number; creditoUsado: number; qtdParcelas: number; somaParcelas: number; valorUnitario?: number | null };
+  resumoPago?: ResumoPago;
+  // Cliente com 2+ empréstimos: resumo do recebido POR empréstimo (chave =
+  // emprestimo_id). Cada slide do carrossel mostra o seu.
+  resumoPorEmprestimo?: Record<string, ResumoPago>;
   dataReferencia?: string | null; // dia da liquidação sendo vista (YYYY-MM-DD) — base dos dias de atraso
   lang: Language;
   notasCount: number;
@@ -126,28 +145,34 @@ interface ClienteCardLiquidacaoProps {
 
 // ─── Componente ─────────────────────────────────────────────────────────────
 
-export default function ClienteCardLiquidacao({
-  cliente: c,
-  emprestimo: e,
-  expanded: ex,
-  pagasSet,
-  naoPagosSet,
-  liqId,
-  isViz,
-  isClientePago = false,
-  resumoPago,
-  dataReferencia,
-  lang,
-  notasCount,
-  t,
-  onToggleExpand,
-  onPagar,
-  onAbrirParcelas,
-  onAbrirNotas,
-  onAbrirDetalhes,
-  onNaoPago,
-}: ClienteCardLiquidacaoProps) {
+export default function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
+  const {
+    cliente: c,
+    emprestimo: e,
+    expanded: ex,
+    pagasSet,
+    naoPagosSet,
+    liqId,
+    isViz,
+    isClientePago = false,
+    resumoPago,
+    dataReferencia,
+    lang,
+    notasCount,
+    t,
+    onToggleExpand,
+    onPagar,
+    onAbrirParcelas,
+    onAbrirNotas,
+    onAbrirDetalhes,
+    onNaoPago,
+  } = props;
   const swipeableRef = useRef<Swipeable>(null);
+
+  // Cliente com 2+ empréstimos ativos (ex.: crédito adicional autorizado):
+  // o card vira um carrossel horizontal, uma conta por slide. Com um único
+  // empréstimo o caminho abaixo continua idêntico ao de sempre.
+  if ((c.emprestimos?.length || 0) >= 2) return <CardMultiplo {...props} />;
 
   // ⭐ Se isClientePago é true, forçar pg = true para desabilitar pagamento
   const pg = isClientePago || isPagaFn(e.parcela_id, e.status_dia, pagasSet);
@@ -382,6 +407,228 @@ export default function ClienteCardLiquidacao({
   return cardContent;
 }
 
+// ─── Carrossel: cliente com 2+ empréstimos ──────────────────────────────────
+// Motivo (pedido do cliente): quando um crédito adicional é autorizado o
+// cliente passa a ter DUAS contas ativas, mas a liquidação só mostrava uma —
+// o cobrador não percebia que precisava cobrar as duas separadamente.
+// Cabeçalho do cliente fica fixo; cada conta é um slide com seus próprios
+// valores e botões, apontando para o respectivo empréstimo/parcela.
+
+function CardMultiplo({
+  cliente: c,
+  pagasSet,
+  naoPagosSet,
+  liqId,
+  isViz,
+  isClientePago = false,
+  resumoPorEmprestimo,
+  dataReferencia,
+  lang,
+  notasCount,
+  t,
+  onPagar,
+  onAbrirParcelas,
+  onAbrirNotas,
+  onAbrirDetalhes,
+}: ClienteCardLiquidacaoProps) {
+  const { width } = useWindowDimensions();
+  const [idx, setIdx] = useState(0);
+
+  const emps = c.emprestimos;
+  const n = emps.length;
+
+  // Largura útil dentro do card = tela − padding da lista (16×2) − padding do
+  // card (12×2) − borda esquerda (5). O slide ocupa 78% e o restante é o
+  // "espião" do próximo, sinalizando que dá para deslizar.
+  const UTIL = Math.max(220, width - 61);
+  const SLIDE = Math.round(UTIL * 0.78);
+  const GAP = 10;
+  const INTERVAL = SLIDE + GAP;
+
+  const pagoDe = (e: EmprestimoData) => isPagaFn(e.parcela_id, e.status_dia, pagasSet);
+  const qtdPagas = emps.filter(pagoDe).length;
+
+  // Borda do card = pior situação entre as contas, para a lista continuar
+  // legível pela cor sem precisar deslizar.
+  const pior = emps.reduce((acc, e) => {
+    const grau = pagoDe(e) ? -1 : (e.total_parcelas_vencidas || (e.is_parcela_atrasada ? 1 : 0));
+    return grau > acc.grau ? { grau, e } : acc;
+  }, { grau: -2, e: emps[0] });
+
+  const renderSlide = (e: EmprestimoData, i: number) => {
+    const pago = pagoDe(e);
+    const np = naoPagosSet?.has(e.parcela_id) || false;
+    const rp = resumoPorEmprestimo?.[e.emprestimo_id];
+    const bloqueado = pago || np || !liqId || isViz || isClientePago;
+    const valorAPagar = e.numero_parcela === e.numero_parcelas
+      ? (e.valor_pago_parcela > 0 && !pago ? e.saldo_parcela : e.valor_parcela)
+      : e.valor_parcela;
+    const diasAtraso = Math.max(0, diasEntre((e as any).dia_referencia || dataReferencia, e.data_vencimento));
+    const emDia = diasAtraso <= 0;
+    const corDias = emDia ? '#10B981' : corAtraso(e.total_parcelas_vencidas || 1);
+    const tipo = FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento;
+    const txtDias = diasAtraso === 1
+      ? (lang === 'es' ? '1 día' : '1 dia')
+      : `${diasAtraso} ${lang === 'es' ? 'días' : 'dias'}`;
+
+    return (
+      <View
+        key={e.emprestimo_id}
+        style={[S.slide, {
+          width: SLIDE,
+          marginRight: i === n - 1 ? 0 : GAP,
+          borderLeftColor: np ? '#6B7280' : borderOf(e, pago),
+          backgroundColor: np ? '#F9FAFB' : (pago ? 'rgba(16,185,129,0.06)' : '#fff'),
+        }]}
+      >
+        <View style={S.slideTop}>
+          <View style={S.slideTopL}>
+            <View style={[S.contaBdg, pago && S.contaBdgPago]}>
+              <Text style={[S.contaBdgTx, pago && S.contaBdgTxPago]}>
+                {lang === 'es' ? 'Cuenta' : 'Conta'} {i + 1} {lang === 'es' ? 'de' : 'de'} {n}
+                {pago ? (lang === 'es' ? ' · pagada' : ' · paga') : ''}
+              </Text>
+            </View>
+            <Text style={[S.breadTipo, { color: corDias, marginTop: 5 }]} numberOfLines={1}>
+              {tipo} · {emDia ? 'ok' : txtDias}
+            </Text>
+            <Text style={S.pLbl}>{t.parcela} {e.numero_parcela}/{e.numero_parcelas}</Text>
+          </View>
+          <View style={S.sCol}>
+            {pago && rp ? (
+              <>
+                <Text style={[S.pValBig, { color: '#059669' }]}>{fmt(rp.dinheiroReal)}</Text>
+                <Text style={S.pRecebidoLbl}>{lang === 'es' ? 'recibido' : 'recebido'}</Text>
+                {rp.creditoUsado > 0 ? (
+                  <Text style={S.pCreditoLbl}>+ {fmt(rp.creditoUsado)} {lang === 'es' ? 'crédito' : 'crédito'}</Text>
+                ) : null}
+              </>
+            ) : pago && e.pagamento_info ? (
+              <Text style={[S.pValBig, { color: '#10B981' }]}>{fmt(e.pagamento_info.valorPago)}</Text>
+            ) : np ? (
+              <Text style={[S.pValBig, { color: '#6B7280', textDecorationLine: 'line-through' }]}>{fmt(valorAPagar)}</Text>
+            ) : (
+              <Text style={S.pValBig}>{fmt(valorAPagar)}</Text>
+            )}
+            <Text style={S.sLbl}>{t.saldoEmprestimo} {fmt(e.saldo_emprestimo)}</Text>
+          </View>
+        </View>
+
+        <View style={S.slideComp}>
+          {typeof e.valor_total === 'number' && e.valor_total > 0 ? (
+            <Text style={S.slideCompTx} numberOfLines={1}>
+              {lang === 'es' ? 'Préstamo' : 'Empréstimo'}: <Text style={S.compEmpStrong}>{fmt(e.valor_principal)}</Text>
+              {'  ·  '}{lang === 'es' ? 'Intereses' : 'Juros'}: <Text style={S.compEmpStrong}>{fmt(e.valor_total - e.valor_principal)}</Text>
+            </Text>
+          ) : null}
+          <Text style={S.slideCompTx} numberOfLines={1}>
+            {typeof e.valor_total === 'number' && e.valor_total > 0
+              ? <>Total: <Text style={S.compEmpStrong}>{fmt(e.valor_total)}</Text>{'  ·  '}</>
+              : null}
+            {lang === 'es' ? 'Vence' : 'Venc.'} {fmtData(e.data_vencimento)}
+          </Text>
+        </View>
+
+        {!pago && Number(e.valor_pago_parcela || 0) > 0 && (
+          <View style={S.faixaParcial}>
+            <Text style={S.faixaParcialTx} numberOfLines={2}>
+              ⓘ {t.parcialmentePaga || 'Parcialmente paga'} · {fmt(Number(e.valor_pago_parcela || 0))} {t.deLbl || 'de'} {fmt(Number(e.valor_parcela || 0))}
+            </Text>
+          </View>
+        )}
+
+        <View style={S.expActRow}>
+          <TouchableOpacity
+            style={[S.btPagarGrande, bloqueado && S.btPagarDisabled]}
+            disabled={bloqueado}
+            onPress={() => {
+              if (bloqueado) return;
+              onPagar(
+                { parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0, valor_pago: e.valor_pago_parcela || 0, valor_saldo: e.saldo_parcela || e.valor_parcela },
+                { id: c.cliente_id, nome: c.nome, emprestimo_id: e.emprestimo_id, saldo_emprestimo: e.saldo_emprestimo, emprestimo_status: e.status_emprestimo }
+              );
+            }}
+          >
+            <Text style={S.btPagarIcon}>$</Text>
+            <Text style={S.btPagarText}>{t.pagar}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[S.btSecSm, { backgroundColor: '#10B981' }]} onPress={() => onAbrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}>
+            <Text style={S.btSecIconTx}>☰</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[S.btSecSm, { backgroundColor: '#F59E0B' }]} onPress={() => onAbrirNotas(c.cliente_id, c.nome)}>
+            <Text style={S.btSecIconTx}>✎</Text>
+            {notasCount > 0 && <View style={S.btSecBadge}><Text style={S.btSecBadgeT}>{notasCount}</Text></View>}
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
+  return (
+    <View style={[S.card, { borderLeftColor: borderOf(pior.e, pagoDe(pior.e)) }]}>
+      {/* === Cabeçalho do cliente (fixo, fora do carrossel) === */}
+      <View style={S.cardRow}>
+        {c.foto_url ? (
+          <Image source={{ uri: c.foto_url }} style={[S.av, { backgroundColor: '#E5E7EB' }]} />
+        ) : (
+          <View style={[S.av, { backgroundColor: qtdPagas === n ? '#10B981' : '#6366F1' }]}>
+            <Text style={S.avTx}>{getIni(c.nome)}</Text>
+          </View>
+        )}
+        <View style={S.cardInfo}>
+          <Text style={S.nome} numberOfLines={1}>{c.nome}</Text>
+          <Text style={S.sub} numberOfLines={1}>
+            {c.telefone_celular ? `📞 ${fmtTel(c.telefone_celular)}` : ''}{c.telefone_celular && c.endereco ? '  ◦  ' : ''}{c.endereco ? `📍 ${c.endereco}` : ''}
+          </Text>
+        </View>
+        <View style={{ alignItems: 'flex-end' }}>
+          <View style={S.contasBdg}>
+            <Text style={S.contasBdgTx}>{n} {lang === 'es' ? 'cuentas' : 'contas'} ‹ ›</Text>
+          </View>
+          {qtdPagas > 0 && (
+            <Text style={S.contasProg}>
+              {qtdPagas}/{n} {lang === 'es' ? 'pagadas' : 'pagas'}
+            </Text>
+          )}
+        </View>
+      </View>
+
+      {/* === Carrossel horizontal: uma conta por slide === */}
+      <View style={S.carrossel}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          decelerationRate="fast"
+          snapToInterval={INTERVAL}
+          snapToAlignment="start"
+          scrollEventThrottle={16}
+          contentContainerStyle={{ paddingRight: Math.max(0, UTIL - SLIDE) }}
+          onScroll={(ev) => {
+            const i = Math.round(ev.nativeEvent.contentOffset.x / INTERVAL);
+            const clamp = Math.min(n - 1, Math.max(0, i));
+            if (clamp !== idx) setIdx(clamp);
+          }}
+        >
+          {emps.map(renderSlide)}
+        </ScrollView>
+
+        <View style={S.dotsRow}>
+          {emps.map((e, i) => (
+            <View key={e.emprestimo_id} style={[S.dot, i === idx && S.dotOn]} />
+          ))}
+        </View>
+      </View>
+
+      <TouchableOpacity
+        style={S.linkDetalhes}
+        onPress={() => onAbrirDetalhes({ id: c.cliente_id, nome: c.nome, telefone: c.telefone_celular, endereco: c.endereco, codigo_cliente: c.codigo_cliente })}
+      >
+        <Text style={S.linkDetalhesTx}>{t.toqueDetalhes} ▽</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 // ─── Styles ─────────────────────────────────────────────────────────────────
 
 const S = StyleSheet.create({
@@ -427,6 +674,24 @@ const S = StyleSheet.create({
   btSecBadgeT: { fontSize: 9, fontWeight: '700', color: '#FFF' },
   linkDetalhes: { alignItems: 'center', paddingVertical: 4 },
   linkDetalhesTx: { fontSize: 12, color: '#9CA3AF' },
+  // ── Carrossel (cliente com 2+ empréstimos) ──
+  contasBdg: { backgroundColor: '#EEF2FF', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 20 },
+  contasBdgTx: { fontSize: 11, fontWeight: '700', color: '#6366F1' },
+  contasProg: { fontSize: 10, color: '#6B7280', marginTop: 3 },
+  carrossel: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+  slide: { borderWidth: 1, borderColor: '#E5E7EB', borderLeftWidth: 4, borderRadius: 12, padding: 11 },
+  slideTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  slideTopL: { flex: 1, paddingRight: 6 },
+  contaBdg: { alignSelf: 'flex-start', backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
+  contaBdgTx: { fontSize: 10, fontWeight: '700', color: '#B45309' },
+  contaBdgPago: { backgroundColor: '#D1FAE5' },
+  contaBdgTxPago: { color: '#065F46' },
+  slideComp: { marginTop: 7, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#F3F4F6', marginBottom: 9, gap: 1 },
+  slideCompTx: { fontSize: 10, color: '#9CA3AF' },
+  btSecSm: { width: 42, height: 44, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  dotsRow: { flexDirection: 'row', gap: 6, justifyContent: 'center', marginTop: 10 },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#D1D5DB' },
+  dotOn: { width: 20, backgroundColor: '#6366F1' },
   compEmp: { marginTop: 4, alignItems: 'flex-end', gap: 1 },
   compEmpLine: { fontSize: 11, color: '#6B7280' },
   compEmpStrong: { color: '#374151', fontWeight: '700' },

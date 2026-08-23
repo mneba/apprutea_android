@@ -43,6 +43,10 @@ interface PagarMultiplasModalProps {
     creditoDisponivelLbl?: string;
     selecioneEspecie?: string;
     pagaLbl?: string;
+    vencLbl?: string;
+    totalParcelasLbl?: string;
+    receberAgoraLbl?: string;
+    saldoAtualLbl?: string;
     creditoLbl?: string;
     parcelasEspecie?: string;
     totalPagarEspecie?: string;
@@ -62,6 +66,15 @@ interface PagarMultiplasModalProps {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 const fmt = (v: number) => '$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Vencimento em dd/mm/aaaa. Datas puras YYYY-MM-DD são fatiadas na string (sem
+// new Date) para não escorregar um dia por fuso.
+const fmtVenc = (d?: string | null) => {
+  if (!d) return '';
+  const s = String(d).substring(0, 10);
+  const p = s.split('-');
+  return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : '';
+};
 
 // ─── Componente ─────────────────────────────────────────────────────────────
 
@@ -117,9 +130,6 @@ export default function PagarMultiplasModal({
     }
   };
 
-  // As parcelas selecionadas são as primeiras `qtdSelecionada` em aberto
-  const selecionadas = emAberto.slice(0, qtdSelecionada);
-
   // ── Cálculo: cada parcela mostra o SALDO. Crédito recai na ÚLTIMA parcela ──
   // do EMPRÉSTIMO (não da seleção), cascateando do fim pra trás. Só as parcelas
   // SELECIONADAS entram no total em espécie e no crédito usado.
@@ -151,6 +161,11 @@ export default function PagarMultiplasModal({
 
   const totalEspecie = calc.total;
   const creditoUsado = calc.creditoUsado;
+  // Linhas selecionadas com o cálculo já feito (saldo/crédito), usadas na tela
+  // de confirmação. `somaSaldos` = o que as parcelas realmente devem, ou seja
+  // espécie + crédito — é o que abate do saldo do empréstimo.
+  const selecionadasCalc = calc.arr.filter(x => x.sel);
+  const somaSaldos = selecionadasCalc.reduce((s, x) => s + x.saldo, 0);
   const novoSaldo = Math.max(saldoEmprestimo - totalEspecie - creditoUsado, 0);
   const jaPagoDerivado = Math.max(valorTotalEmprestimo - saldoEmprestimo, 0);
 
@@ -196,7 +211,12 @@ export default function PagarMultiplasModal({
                 <View key={p.parcela_id} style={[S.linha, S.linhaPaga]}>
                   <View style={S.linhaEsq}>
                     <Text style={S.checkPaga}>✓</Text>
-                    <Text style={S.linhaLbl}>{t.parcela} {p.numero_parcela}</Text>
+                    <View>
+                      <Text style={S.linhaLbl}>{t.parcela} {p.numero_parcela}</Text>
+                      {!!fmtVenc(p.data_vencimento) && (
+                        <Text style={S.linhaVenc}>{t.vencLbl || 'Venc.'} {fmtVenc(p.data_vencimento)}</Text>
+                      )}
+                    </View>
                   </View>
                   <Text style={S.pagaTx}>{t.pagaLbl || 'Paga'}</Text>
                 </View>
@@ -245,6 +265,9 @@ export default function PagarMultiplasModal({
                             <Text style={S.pagoParcial}> ({t.pagoLbl || 'pago'} {fmt(Number(p.valor_pago))})</Text>
                           )}
                         </Text>
+                        {!!fmtVenc(p.data_vencimento) && (
+                          <Text style={S.linhaVenc}>{t.vencLbl || 'Venc.'} {fmtVenc(p.data_vencimento)}</Text>
+                        )}
                         {isFronteira && credNota > 0 && (
                           <Text style={S.notaCredito}>− {fmt(credNota)} {t.creditoLinhaLbl || 'crédito'}</Text>
                         )}
@@ -290,33 +313,53 @@ export default function PagarMultiplasModal({
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16 }}>
             <Text style={S.confTitulo}>{t.confirmarPagamento || 'Confirmar pagamento'}</Text>
 
+            {/* 1) O que está sendo quitado — cada parcela pelo seu SALDO (não
+                   pelo valor cheio: uma parcela parcial deve o que resta) e a
+                   soma logo abaixo, para o vendedor não somar de cabeça. */}
             <View style={S.confBloco}>
-              {selecionadas.map(p => (
-                <View key={p.parcela_id} style={S.confLinha}>
-                  <Text style={S.confLinhaLbl}>{t.parcela} {p.numero_parcela}</Text>
-                  <Text style={S.confLinhaVal}>{fmt(Number(p.valor_parcela))}</Text>
+              <Text style={S.confBlocoTit}>
+                {t.parcelasLbl || 'Parcelas'} ({selecionadasCalc.length})
+              </Text>
+              {selecionadasCalc.map(x => (
+                <View key={x.parcela.parcela_id} style={S.confLinha}>
+                  <Text style={S.confLinhaLbl}>
+                    {t.parcela} {x.parcela.numero_parcela}
+                    {!!fmtVenc(x.parcela.data_vencimento) && (
+                      <Text style={S.confLinhaVenc}>  ·  {fmtVenc(x.parcela.data_vencimento)}</Text>
+                    )}
+                  </Text>
+                  <Text style={S.confLinhaVal}>{fmt(x.saldo)}</Text>
                 </View>
               ))}
-            </View>
-
-            <View style={S.confCenario}>
+              <View style={S.confDivider} />
               <View style={S.confLinha}>
-                <Text style={S.confLinhaLbl}>{t.emprestimoLbl || 'Empréstimo'}</Text>
-                <Text style={S.confLinhaVal}>{fmt(valorTotalEmprestimo)}</Text>
-              </View>
-              <View style={S.confLinha}>
-                <Text style={S.confLinhaLbl}>{t.jaPagoLbl || 'Já pago'}</Text>
-                <Text style={S.confLinhaVal}>{fmt(jaPagoDerivado)}</Text>
+                <Text style={S.confSubTotLbl}>{t.totalParcelasLbl || 'Total das parcelas'}</Text>
+                <Text style={S.confSubTotVal}>{fmt(somaSaldos)}</Text>
               </View>
               {creditoUsado > 0 && (
                 <View style={S.confLinha}>
-                  <Text style={[S.confLinhaLbl, { color: '#4F46E5' }]}>{t.creditoLbl || 'Crédito usado'}</Text>
+                  <Text style={[S.confLinhaLbl, { color: '#4F46E5' }]}>− {t.creditoLbl || 'Crédito aplicado'}</Text>
                   <Text style={[S.confLinhaVal, { color: '#4F46E5' }]}>{fmt(creditoUsado)}</Text>
                 </View>
               )}
+            </View>
+
+            {/* 2) O número que importa na mão do vendedor: o dinheiro que ele
+                   recebe agora. Fica sozinho, em destaque. */}
+            <View style={S.confDestaque}>
+              <Text style={S.confDestaqueLbl}>{t.receberAgoraLbl || 'Receber agora, em espécie'}</Text>
+              <Text style={S.confDestaqueVal}>{fmt(totalEspecie)}</Text>
+            </View>
+
+            {/* 3) Efeito no saldo, como uma conta explícita. */}
+            <View style={S.confCenario}>
               <View style={S.confLinha}>
-                <Text style={S.confLinhaLbl}>{t.estePagamento || 'Este pagamento (espécie)'}</Text>
-                <Text style={[S.confLinhaVal, { fontWeight: '700' }]}>{fmt(totalEspecie)}</Text>
+                <Text style={S.confLinhaLbl}>{t.saldoAtualLbl || 'Saldo atual'}</Text>
+                <Text style={S.confLinhaVal}>{fmt(saldoEmprestimo)}</Text>
+              </View>
+              <View style={S.confLinha}>
+                <Text style={S.confLinhaLbl}>− {t.estePagamento || 'Este pagamento'}</Text>
+                <Text style={S.confLinhaVal}>{fmt(somaSaldos)}</Text>
               </View>
               <View style={S.confDivider} />
               <View style={S.confLinha}>
@@ -324,6 +367,13 @@ export default function PagarMultiplasModal({
                 <Text style={S.confNovoVal}>{fmt(novoSaldo)}</Text>
               </View>
             </View>
+
+            {/* Contexto do empréstimo — informação de apoio, fora da conta. */}
+            <Text style={S.confCtx}>
+              {t.emprestimoLbl || 'Empréstimo'} {fmt(valorTotalEmprestimo)}
+              {'   ·   '}
+              {t.jaPagoLbl || 'Já pago'} {fmt(jaPagoDerivado)}
+            </Text>
 
             <View style={S.confBotoes}>
               <TouchableOpacity style={S.btnVoltar} onPress={() => setConfirmando(false)} disabled={processando}>
@@ -362,6 +412,7 @@ const S = StyleSheet.create({
   creditoIcone: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#6366F1', justifyContent: 'center', alignItems: 'center' },
   creditoTag: { fontSize: 13, color: '#4F46E5', fontWeight: '600' },
   linhaLbl: { fontSize: 14, color: '#1F2937' },
+  linhaVenc: { fontSize: 11, color: '#9CA3AF', marginTop: 2 },
   linhaValor: { fontSize: 15, fontWeight: '500', color: '#1F2937' },
   checkPaga: { fontSize: 15, color: '#10B981' },
   pagaTx: { fontSize: 13, color: '#6B7280' },
@@ -384,8 +435,16 @@ const S = StyleSheet.create({
   confBloco: { backgroundColor: '#F9FAFB', borderRadius: 10, padding: 12, marginBottom: 10 },
   confLinha: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
   confLinhaLbl: { fontSize: 14, color: '#6B7280' },
+  confLinhaVenc: { fontSize: 12, color: '#9CA3AF' },
   confLinhaVal: { fontSize: 14, color: '#1F2937' },
-  confCenario: { backgroundColor: '#F9FAFB', borderRadius: 10, padding: 14, marginBottom: 16 },
+  confBlocoTit: { fontSize: 12, fontWeight: '700', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 6 },
+  confSubTotLbl: { fontSize: 14, fontWeight: '600', color: '#374151' },
+  confSubTotVal: { fontSize: 14, fontWeight: '700', color: '#1F2937' },
+  confDestaque: { backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', borderRadius: 10, padding: 14, marginBottom: 10, alignItems: 'center' },
+  confDestaqueLbl: { fontSize: 12, fontWeight: '700', color: '#047857', textTransform: 'uppercase', letterSpacing: 0.3 },
+  confDestaqueVal: { fontSize: 28, fontWeight: '800', color: '#047857', marginTop: 4 },
+  confCtx: { fontSize: 11, color: '#9CA3AF', textAlign: 'center', marginBottom: 16 },
+  confCenario: { backgroundColor: '#F9FAFB', borderRadius: 10, padding: 14, marginBottom: 10 },
   confDivider: { height: 1, backgroundColor: '#D1D5DB', marginVertical: 6 },
   confNovoLbl: { fontSize: 15, fontWeight: '700', color: '#1F2937' },
   confNovoVal: { fontSize: 18, fontWeight: '700', color: '#1F2937' },

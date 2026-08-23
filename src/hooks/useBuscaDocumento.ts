@@ -154,7 +154,7 @@ export function useBuscaDocumento({
       // ⭐ Busca APENAS exata (sem fallback por substring para evitar falsos positivos)
       const { data: clientes } = await supabase
         .from('clientes')
-        .select('id, nome, documento, telefone_celular, endereco, codigo_cliente, permite_emprestimo_adicional, permite_renegociacao')
+        .select('id, nome, documento, telefone_celular, endereco, codigo_cliente, status, permite_emprestimo_adicional, permite_renegociacao')
         .or(`documento.eq.${docSemMask},documento.eq.${docBusca}`)
         .limit(1);
 
@@ -162,6 +162,22 @@ export function useBuscaDocumento({
       if (!cli) {
         s.setDocumento(docBusca);
         setModalDocVisible(false);
+        return;
+      }
+
+      // ⭐ Cliente suspenso: barra AQUI, no primeiro contato com o cadastro.
+      // A fn_renovar_emprestimo também recusa, mas só no "Confirmar venda" —
+      // o cobrador já tinha preenchido tudo e, às vezes, combinado com o cliente.
+      if (String((cli as any).status || '').toUpperCase() === 'SUSPENSO') {
+        setBuscandoDoc(false);
+        const titulo = lang === 'es' ? 'Cliente suspendido' : 'Cliente suspenso';
+        const msg = lang === 'es'
+          ? `${cli.nome} está suspendido. No es posible iniciar renovación ni nuevo préstamo.`
+          : `${cli.nome} está suspenso. Não é possível iniciar renovação nem novo empréstimo.`;
+        if (Platform.OS === 'web') window.alert(`${titulo}
+
+${msg}`);
+        else Alert.alert(titulo, msg, [{ text: 'OK' }]);
         return;
       }
 
@@ -460,10 +476,24 @@ export function useBuscaDocumento({
       try {
         const { data: cli } = await supabase
           .from('clientes')
-          .select('id, nome, documento, telefone_celular, endereco, codigo_cliente, permite_emprestimo_adicional, permite_renegociacao')
+          .select('id, nome, documento, telefone_celular, endereco, codigo_cliente, status, permite_emprestimo_adicional, permite_renegociacao')
           .eq('id', clienteExistente.id)
           .single();
         if (!cli) return;
+
+        // Mesma trava do caminho por documento: cliente vindo pré-selecionado
+        // pelo card também não pode iniciar renovação estando suspenso.
+        if (String((cli as any).status || '').toUpperCase() === 'SUSPENSO') {
+          const titulo = lang === 'es' ? 'Cliente suspendido' : 'Cliente suspenso';
+          const msg = lang === 'es'
+            ? `${cli.nome} está suspendido. No es posible iniciar renovación ni nuevo préstamo.`
+            : `${cli.nome} está suspenso. Não é possível iniciar renovação nem novo empréstimo.`;
+          if (Platform.OS === 'web') { window.alert(`${titulo}
+
+${msg}`); navigation.goBack(); }
+          else Alert.alert(titulo, msg, [{ text: 'OK', onPress: () => navigation.goBack() }]);
+          return;
+        }
 
         const { data: emps } = await supabase
           .from('emprestimos')

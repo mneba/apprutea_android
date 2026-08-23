@@ -46,6 +46,12 @@ interface FiltrosDrawerProps {
   cntTotal: number;
   cntAtraso: number;
   cntPagas: number;
+  // Por vencimento: separa quem vence na data da liquidação de quem foi
+  // carregado atrasado de dias anteriores.
+  filtroVencimento: 'todos' | 'dia' | 'atrasados';
+  setFiltroVencimento: (v: 'todos' | 'dia' | 'atrasados') => void;
+  cntVencDia: number;
+  cntVencAtrasados: number;
   // Todos filters
   filtroTipo: string;
   setFiltroTipo: (f: string) => void;
@@ -103,6 +109,10 @@ export default function FiltrosDrawer({
   cntTotal,
   cntAtraso,
   cntPagas,
+  filtroVencimento,
+  setFiltroVencimento,
+  cntVencDia,
+  cntVencAtrasados,
   filtroTipo,
   setFiltroTipo,
   filtroStatus,
@@ -175,6 +185,36 @@ export default function FiltrosDrawer({
                     {o === 'rota' ? (lang === 'es' ? 'Orden de ruta' : 'Ordem da rota') : (lang === 'es' ? 'Nombre' : 'Nome')}
                   </Text>
                   {ord === o && <Ionicons name="checkmark" size={18} color="#2563EB" style={{ marginLeft: 'auto' }} />}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {/* ─── Seção: Por vencimentos (modo Liquidação) ─── */}
+          {tab === 'liquidacao' && (
+            <View style={S.drawerSection}>
+              <Text style={S.drawerSectionTitle}>
+                <Ionicons name="calendar-outline" size={16} color="#6B7280" /> {lang === 'es' ? 'Por vencimientos' : 'Por vencimentos'}
+              </Text>
+              {[
+                { k: 'todos' as const, l: lang === 'es' ? 'Todos' : 'Todos', cnt: cntVencDia + cntVencAtrasados, icon: 'layers-outline' as const },
+                { k: 'dia' as const, l: lang === 'es' ? 'Del día' : 'Do dia', cnt: cntVencDia, icon: 'today-outline' as const },
+                { k: 'atrasados' as const, l: lang === 'es' ? 'Atrasados' : 'Atrasados', cnt: cntVencAtrasados, icon: 'time-outline' as const },
+              ].map(f => (
+                <TouchableOpacity
+                  key={f.k}
+                  style={[S.drawerOption, filtroVencimento === f.k && S.drawerOptionActive]}
+                  onPress={() => { setFiltroVencimento(f.k); }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name={f.icon} size={18} color={filtroVencimento === f.k ? '#2563EB' : '#6B7280'} />
+                  <Text style={[S.drawerOptionText, filtroVencimento === f.k && S.drawerOptionTextActive]}>
+                    {f.l}
+                  </Text>
+                  <View style={[S.drawerBadge, filtroVencimento === f.k && S.drawerBadgeActive]}>
+                    <Text style={[S.drawerBadgeText, filtroVencimento === f.k && S.drawerBadgeTextActive]}>{f.cnt}</Text>
+                  </View>
+                  {filtroVencimento === f.k && <Ionicons name="checkmark" size={18} color="#2563EB" />}
                 </TouchableOpacity>
               ))}
             </View>

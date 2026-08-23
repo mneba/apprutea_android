@@ -85,6 +85,20 @@ interface ClienteAgrupado {
   emprestimos: EmprestimoData[]; qtd_emprestimos: number; tem_multiplos_vencimentos: boolean;
 }
 
+// Um item da lista da liquidação = UM card.
+// Normalmente é o cliente com todos os seus empréstimos (o card vira carrossel
+// quando são 2+). Na aba "Pagas" o cliente com 2+ contas é QUEBRADO em um card
+// por empréstimo pago: como a ordenação ali é o momento do pagamento, quem
+// pagou uma conta às 10h e a outra às 13h aparece duas vezes, cada uma na sua
+// posição real — com outros clientes entre elas.
+interface ItemLista {
+  key: string;
+  nome: string;               // exigido pelo AlphabetSidebar
+  cliente: ClienteAgrupado;
+  emprestimos: EmprestimoData[];
+  ms: number;                 // 1º pagamento do item nesta liquidação (ordenação)
+}
+
 interface ClienteTodos {
   id: string; codigo_cliente: number | null; nome: string;
   telefone_celular: string | null; status: string; tem_atraso: boolean;
@@ -545,7 +559,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   // clientes_iniciais). 'CARREGADOS' inclui os atrasados de dias anteriores,
   // que também vão para a rota. Começa em CARREGADOS para não mudar o que o
   // vendedor já enxerga hoje.
-  const [escopoLiq, setEscopoLiq] = useState<'DIA' | 'CARREGADOS'>('CARREGADOS');
+  const [filtroVencimento, setFiltroVencimento] = useState<'todos' | 'dia' | 'atrasados'>('todos');
   const [ord, setOrd] = useState<OrdenacaoLiquidacao>('rota');
   const [showOrd, setShowOrd] = useState(false);
 
@@ -2049,140 +2063,228 @@ export default function ClientesScreen({ navigation, route }: any) {
     return Array.from(m.values());
   }, [raw, pagMap, pagasSet]);
 
+  // Mapa parcela → empréstimo (o pagMap só guarda cliente_id). Usado para
+  // somar o recebido POR conta nos clientes com 2+ empréstimos.
+  const empDaParcela = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of raw) m.set(r.parcela_id, r.emprestimo_id);
+    return m;
+  }, [raw]);
+
   // Cliente é considerado "pago/visitado" se recebeu QUALQUER pagamento na liquidação atual
   // Regra de negócio: vendedor visitou, cobrou (mesmo parcial/atrasada) → sai da lista
   const isCliPago = useCallback((c: ClienteAgrupado) => clientesPagosNaLiq.has(c.cliente_id), [clientesPagosNaLiq]);
 
-  // Cliente "do dia": tem ALGUMA parcela vencendo na data da liquidação.
-  // Varre todos os empréstimos do cliente, não só o primeiro — quem tem um
-  // vencendo hoje e outro atrasado continua sendo do dia.
-  const ehDoDiaCli = useCallback((c: ClienteAgrupado) => {
-    if (!dataLiq) return true;
-    return c.emprestimos.some(e => String(e.data_vencimento || '').substring(0, 10) === dataLiq);
-  }, [dataLiq]);
+  // A mesma regra ("qualquer valor registrado → pago"), só que POR EMPRÉSTIMO.
+  // A flag do banco é por CLIENTE; com crédito adicional o cliente tem duas
+  // contas e cada uma vai para "Pagas" no seu próprio momento — a que ainda
+  // não recebeu nada continua na lista de pendentes.
+  const empsPagosNaLiq = useMemo(() => {
+    const s = new Set<string>();
+    pagMap.forEach((p, parcelaId) => {
+      const eid = empDaParcela.get(parcelaId);
+      if (!eid) return;
+      const n = (p as any).valor_pago_nesta_liq;
+      if (Number(n != null ? n : (p.valor_pago_atual || 0)) > 0) s.add(eid);
+    });
+    return s;
+  }, [pagMap, empDaParcela]);
+
+  // Momento do PRIMEIRO pagamento de cada empréstimo nesta liquidação. É o que
+  // ordena a aba "Pagas" e o que o cabeçalho de hora do card mostra — os dois
+  // precisam sair da mesma fonte, senão a ordem da lista não bate com as horas.
+  const msPrimeiroPagEmp = useMemo(() => {
+    const m = new Map<string, number>();
+    pagMap.forEach((p, parcelaId) => {
+      const eid = empDaParcela.get(parcelaId);
+      if (!eid || !p.data_pagamento) return;
+      const t = new Date(p.data_pagamento).getTime();
+      if (isNaN(t)) return;
+      const atual = m.get(eid);
+      if (atual == null || t < atual) m.set(eid, t);
+    });
+    return m;
+  }, [pagMap, empDaParcela]);
+
+  const msDoItem = useCallback((emps: EmprestimoData[]) => {
+    let ms = Infinity;
+    for (const e of emps) {
+      const t = msPrimeiroPagEmp.get(e.emprestimo_id);
+      if (t != null && t < ms) ms = t;
+    }
+    return ms;
+  }, [msPrimeiroPagEmp]);
+
+  // Ids de quem tem ALGUMA parcela vencendo na data da liquidação.
+  // Precisa varrer `raw` (uma linha por parcela) e não `grouped`: o
+  // agrupamento guarda só UMA parcela por empréstimo, preferindo a pendente
+  // de menor número. Um cliente com parcela atrasada e outra vencendo hoje
+  // no mesmo empréstimo perdia a de hoje e caía em "Atrasados".
+  const idsVencDia = useMemo(() => {
+    const ids = new Set<string>();
+    if (!dataLiq) return ids;
+    for (const r of raw) {
+      if (String(r.data_vencimento || '').substring(0, 10) === dataLiq) ids.add(r.cliente_id);
+    }
+    return ids;
+  }, [raw, dataLiq]);
+
+  const ehDoDiaCli = useCallback(
+    (c: ClienteAgrupado) => (!dataLiq ? true : idsVencDia.has(c.cliente_id)),
+    [idsVencDia, dataLiq]
+  );
+
+  // Transforma os clientes (já filtrados por escopo/busca) nos cards da lista.
+  // O cliente com 2+ contas é tratado conta a conta: na aba "Pagas" cada conta
+  // paga vira um card próprio; nas pendentes fica um card só, com as contas
+  // que ainda não receberam nada.
+  const montarItens = useCallback((base: ClienteAgrupado[], alvo: FiltroLiquidacao): ItemLista[] => {
+    const itens: ItemLista[] = [];
+    const temAtraso = (emps: EmprestimoData[]) =>
+      emps.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas);
+
+    for (const c of base) {
+      const multi = c.emprestimos.length >= 2;
+
+      if (alvo === 'pagas') {
+        if (!multi) {
+          if (!isCliPago(c)) continue;
+          itens.push({ key: c.cliente_id, nome: c.nome, cliente: c, emprestimos: c.emprestimos, ms: msDoItem(c.emprestimos) });
+          continue;
+        }
+        for (const e of c.emprestimos) {
+          if (!empsPagosNaLiq.has(e.emprestimo_id)) continue;
+          itens.push({ key: `${c.cliente_id}|${e.emprestimo_id}`, nome: c.nome, cliente: c, emprestimos: [e], ms: msDoItem([e]) });
+        }
+        continue;
+      }
+
+      // Pendentes ('todos') e 'atrasados': só as contas que ainda não receberam
+      // nada. Com 1 empréstimo vale a flag de cliente do banco, como sempre.
+      const pend = multi ? c.emprestimos.filter(e => !empsPagosNaLiq.has(e.emprestimo_id)) : c.emprestimos;
+      if (multi ? pend.length === 0 : isCliPago(c)) continue;
+      if (alvo === 'atrasados' && !temAtraso(pend)) continue;
+      itens.push({ key: c.cliente_id, nome: c.nome, cliente: c, emprestimos: pend, ms: Infinity });
+    }
+    return itens;
+  }, [isCliPago, empsPagosNaLiq, msDoItem]);
 
   const filtered = useMemo(() => {
     let r = [...grouped];
     // Escopo só faz sentido no braço da liquidação; a aba "Todos" é a carteira
-    if (tab === 'liquidacao' && escopoLiq === 'DIA') r = r.filter(ehDoDiaCli);
+    if (tab === 'liquidacao' && filtroVencimento === 'dia') r = r.filter(ehDoDiaCli);
+    else if (tab === 'liquidacao' && filtroVencimento === 'atrasados') r = r.filter(c => !ehDoDiaCli(c));
     if (busca.trim()) { const b = normalizarBusca(busca); r = r.filter(c => normalizarBusca(c.nome).includes(b) || (c.telefone_celular && c.telefone_celular.includes(b)) || (c.endereco && normalizarBusca(c.endereco).includes(b))); }
     if (filtroFrequencia !== 'todos') r = r.filter(c => c.emprestimos.some(e => e.frequencia_pagamento === filtroFrequencia));
-    if (filtro === 'atrasados') r = r.filter(c => !isCliPago(c) && c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas));
-    else if (filtro === 'pagas') r = r.filter(c => isCliPago(c));
-    else r = r.filter(c => !isCliPago(c)); // 'todos' mostra apenas pendentes (não pagos)
+
+    const itens = montarItens(r, filtro);
+
     if (filtro === 'pagas') {
       // #40: a aba Pagos ordena pela ORDEM EM QUE OS PAGAMENTOS FORAM
-      // REGISTRADOS. Usa a MESMA fonte que o cabeçalho de hora exibe
-      // (pagMap.created_at, com fallback data_pagamento) — senão a ordem da
-      // lista não bate com as horas mostradas em cada card.
-      const dtPag = (c: ClienteAgrupado): number => {
-        // PRIMEIRO pagamento do cliente na liquidação. Usa MIN, não MAX: se
-        // o cliente receber uma segunda cobrança mais tarde, ele não pode
-        // saltar para o fim da lista — a posição marca quando foi atendido.
-        let ms = Infinity;
-        pagMap.forEach((p) => {
-          if (p.cliente_id === c.cliente_id && p.data_pagamento) {
-            const t = new Date(p.data_pagamento).getTime();
-            if (!isNaN(t) && t < ms) ms = t;
-          }
-        });
-        return ms;
-      };
-      r.sort((a, b) => {
-        const da = dtPag(a), db = dtPag(b);
-        // CRESCENTE: quem pagou primeiro aparece primeiro. Era decrescente
-        // (mais recente no topo), mas para conferir a operação o vendedor
-        // precisa seguir a ordem real em que registrou os pagamentos.
-        if (da !== db) return da - db;
-        return a.nome.localeCompare(b.nome);    // desempate estável
-      });
+      // REGISTRADOS, CRESCENTE — quem pagou primeiro aparece primeiro, para o
+      // vendedor conferir a operação na sequência real. Com 2+ contas a
+      // posição é a da CONTA, não a do cliente: o mesmo cliente pode aparecer
+      // às 10h e de novo às 13h, com outros clientes no meio.
+      itens.sort((a, b) => (a.ms !== b.ms ? a.ms - b.ms : a.nome.localeCompare(b.nome)));
     } else {
-      r.sort(ord === 'rota'
+      itens.sort(ord === 'rota'
         ? (a, b) => {
-            const oa = ordemRotaMap.get(a.cliente_id) ?? 9999;
-            const ob = ordemRotaMap.get(b.cliente_id) ?? 9999;
+            const oa = ordemRotaMap.get(a.cliente.cliente_id) ?? 9999;
+            const ob = ordemRotaMap.get(b.cliente.cliente_id) ?? 9999;
             if (oa !== ob) return oa - ob;
             return a.nome.localeCompare(b.nome);
           }
         : (a, b) => a.nome.localeCompare(b.nome));
     }
-    return r;
-  }, [grouped, busca, filtro, filtroFrequencia, ord, isCliPago, ordemRotaMap, pagMap, tab, escopoLiq, ehDoDiaCli]);
+    return itens;
+  }, [grouped, busca, filtro, filtroFrequencia, ord, ordemRotaMap, tab, filtroVencimento, ehDoDiaCli, montarItens]);
 
   // Base dos contadores segue o escopo: com "Do dia" ativo, os números dos
   // segmentos precisam refletir a lista exibida.
-  const baseLiq = useMemo(
-    () => (escopoLiq === 'DIA' ? grouped.filter(ehDoDiaCli) : grouped),
-    [grouped, escopoLiq, ehDoDiaCli]
-  );
-  const cntDoDia = useMemo(() => grouped.filter(ehDoDiaCli).length, [grouped, ehDoDiaCli]);
+  const baseLiq = useMemo(() => {
+    if (filtroVencimento === 'dia') return grouped.filter(ehDoDiaCli);
+    if (filtroVencimento === 'atrasados') return grouped.filter(c => !ehDoDiaCli(c));
+    return grouped;
+  }, [grouped, filtroVencimento, ehDoDiaCli]);
 
-  const cntTotal = baseLiq.filter(c => !isCliPago(c)).length;
-  const cntAtraso = baseLiq.filter(c => !isCliPago(c) && c.emprestimos.some(e => e.status_dia === 'EM_ATRASO' || e.is_parcela_atrasada || e.tem_parcelas_vencidas)).length;
-  const cntPagas = baseLiq.filter(c => isCliPago(c)).length;
+  const cntVencDia = useMemo(() => grouped.filter(ehDoDiaCli).length, [grouped, ehDoDiaCli]);
+  const cntVencAtrasados = useMemo(() => grouped.filter(c => !ehDoDiaCli(c)).length, [grouped, ehDoDiaCli]);
+
+  // Contam CARDS, não clientes — é o que a lista mostra. Só difere para quem
+  // tem 2+ contas: em "Pagas" cada conta paga conta como um card.
+  const cntTotal = useMemo(() => montarItens(baseLiq, 'todos').length, [baseLiq, montarItens]);
+  const cntAtraso = useMemo(() => montarItens(baseLiq, 'atrasados').length, [baseLiq, montarItens]);
+  const cntPagas = useMemo(() => montarItens(baseLiq, 'pagas').length, [baseLiq, montarItens]);
   const cntTotalGeral = grouped.length;
   const clientesLiqIds = useMemo(() => new Set(grouped.map(c => c.cliente_id)), [grouped]);
   const eIdx = (cid: string) => empIdxMap[cid] || 0;
   const eSet = (cid: string, i: number) => setEmpIdxMap(p => ({ ...p, [cid]: i }));
-  const eAtual = (c: ClienteAgrupado) => c.emprestimos[Math.min(eIdx(c.cliente_id), c.emprestimos.length - 1)];
 
- const renderCard = (c: ClienteAgrupado) => {
-    const e = eAtual(c);
-    const clienteEstaPago = isCliPago(c);
-    // Resumo de pagamento na aba Pagos: soma o DINHEIRO REAL e o CRÉDITO de
-    // TODAS as parcelas pagas do cliente (um card por cliente, pode ter várias
-    // parcelas). Dinheiro real = valor_pago_atual - valor_credito_usado.
-    let dinheiroReal = 0, creditoUsado = 0, qtdParcelas = 0, somaParcelas = 0;
-    let valorUnitario: number | null = null;
-    let valoresIguais = true;
-    if (filtro === 'pagas') {
-      pagMap.forEach((p) => {
-        if (p.cliente_id === c.cliente_id) {
-          // ⭐ Valor DA LIQUIDAÇÃO exibida (não o acumulado da parcela). Uma
-          // parcela paga em vários dias (13,14,15,16) mostra em cada dia só o
-          // que foi recebido NAQUELE dia. Fallback para o acumulado se o campo
-          // por-liquidação não vier (RPC antiga).
-          const pnl = (p as any).valor_pago_nesta_liq;
-          const cnl = (p as any).valor_credito_usado_nesta_liq;
-          const pagoLiq = pnl != null ? Number(pnl) : (Number(p.valor_pago_atual) || 0);
-          const credLiq = cnl != null ? Number(cnl) : (Number((p as any).valor_credito_usado) || 0);
-          const vParc = Number(p.valor_parcela) || 0;
-          dinheiroReal += pagoLiq - credLiq;
-          creditoUsado += credLiq;
-          somaParcelas += vParc;
-          qtdParcelas += 1;
-          const vParcR = Math.round(vParc * 100);
-          if (valorUnitario === null) valorUnitario = vParc;
-          else if (Math.round((valorUnitario as number) * 100) !== vParcR) valoresIguais = false;
-        }
-      });
-    }
-    const resumoPago = filtro === 'pagas'
-      ? { dinheiroReal, creditoUsado, qtdParcelas, somaParcelas,
-          valorUnitario: valoresIguais ? valorUnitario : null }
-      : undefined;
-    if (typeof __DEV__ !== 'undefined' && __DEV__ && filtro === 'pagas' && qtdParcelas > 0) {
-      const entradas: any[] = [];
-      pagMap.forEach((p) => { if (p.cliente_id === c.cliente_id) entradas.push({ parcela_id: p.parcela_id, vParc: p.valor_parcela, pagoAtual: p.valor_pago_atual, credUsado: (p as any).valor_credito_usado, liq: p.liquidacao_id }); });
-      console.log('🔎 RESUMO_PAGO', c.nome, { qtdParcelas, dinheiroReal, somaParcelas, entradas });
+ const renderCard = (it: ItemLista) => {
+    const c = it.cliente;
+    const emps = it.emprestimos;
+    const multi = emps.length >= 2;
+    // O card só enxerga as contas DESTE item. Na aba "Pagas" cada conta paga é
+    // um card separado; nas pendentes ficam as contas ainda não cobradas.
+    const clienteDoCard: ClienteAgrupado = emps.length === c.emprestimos.length
+      ? c
+      : { ...c, emprestimos: emps, qtd_emprestimos: emps.length, tem_multiplos_vencimentos: emps.length > 1 };
+    const e = emps[Math.min(eIdx(c.cliente_id), emps.length - 1)];
+    // Com 2+ contas a regra vale por conta; com 1 vale a flag do banco.
+    const clienteEstaPago = c.emprestimos.length >= 2
+      ? emps.every(x => empsPagosNaLiq.has(x.emprestimo_id))
+      : isCliPago(c);
+
+    // Recebido NESTA liquidação, quebrado por empréstimo. Dinheiro real =
+    // valor pago − crédito usado. Usa os campos por-liquidação (uma parcela
+    // paga em vários dias mostra em cada dia só o que entrou naquele dia),
+    // com fallback para o acumulado se a RPC antiga não trouxer o campo.
+    type ResumoLinha = { dinheiroReal: number; creditoUsado: number; qtdParcelas: number; somaParcelas: number; valorUnitario?: number | null };
+    const porEmp: Record<string, ResumoLinha> = {};
+    pagMap.forEach((p, parcelaId) => {
+      if (p.cliente_id !== c.cliente_id) return;
+      const eid = empDaParcela.get(parcelaId);
+      if (!eid) return;
+      const pnl = (p as any).valor_pago_nesta_liq;
+      const cnl = (p as any).valor_credito_usado_nesta_liq;
+      const pagoLiq = pnl != null ? Number(pnl) : (Number(p.valor_pago_atual) || 0);
+      const credLiq = cnl != null ? Number(cnl) : (Number((p as any).valor_credito_usado) || 0);
+      const vParc = Number(p.valor_parcela) || 0;
+      const a = porEmp[eid] || (porEmp[eid] = { dinheiroReal: 0, creditoUsado: 0, qtdParcelas: 0, somaParcelas: 0, valorUnitario: null });
+      a.dinheiroReal += pagoLiq - credLiq;
+      a.creditoUsado += credLiq;
+      a.somaParcelas += vParc;
+      a.qtdParcelas += 1;
+      if (a.qtdParcelas === 1) a.valorUnitario = vParc;
+      else if (a.valorUnitario != null && Math.round(a.valorUnitario * 100) !== Math.round(vParc * 100)) a.valorUnitario = null;
+    });
+
+    // Carrossel: cada slide mostra o resumo da sua conta.
+    const resumoPorEmprestimo = multi ? porEmp : undefined;
+    // Card simples na aba Pagos: o resumo é o da única conta do card.
+    const resumoPago = (filtro === 'pagas' && !multi) ? porEmp[e.emprestimo_id] : undefined;
+
+    if (typeof __DEV__ !== 'undefined' && __DEV__ && filtro === 'pagas') {
+      console.log('🔎 RESUMO_PAGO', c.nome, { conta: e.emprestimo_id, resumo: porEmp[e.emprestimo_id] });
     }
     return (
       <ClienteCardLiquidacao
-        key={c.cliente_id}
-        cliente={c}
+        key={it.key}
+        cliente={clienteDoCard}
         emprestimo={e}
-        expanded={expanded === c.cliente_id}
+        expanded={expanded === it.key}
         pagasSet={pagasSet}
         naoPagosSet={naoPagosSet}
         liqId={liqId}
         isViz={isViz}
         isClientePago={clienteEstaPago}
         resumoPago={resumoPago}
+        resumoPorEmprestimo={resumoPorEmprestimo}
         dataReferencia={dataLiq}
         lang={lang}
         notasCount={notasCountMap.get(c.cliente_id) || 0}
         t={t}
-        onToggleExpand={() => setExpanded(p => p === c.cliente_id ? null : c.cliente_id)}
+        onToggleExpand={() => setExpanded(p => p === it.key ? null : it.key)}
         onPagar={abrirPagamento}
         onAbrirParcelas={abrirParcelas}
         onAbrirNotas={(id, nome) => { setNotasClienteId(id); setNotasClienteNome(nome); setModalNotasClienteVisible(true); }}
@@ -2445,30 +2547,6 @@ return (
           </TouchableOpacity>
         </View>
 
-        {/* Escopo — só no braço da liquidação. Torna explícito que a rota
-            carrega, além dos clientes do dia, os atrasados de dias anteriores. */}
-        {tab === 'liquidacao' && liqId ? (
-          <View style={S.escopoRow}>
-            <TouchableOpacity
-              style={[S.escopoBtn, escopoLiq === 'DIA' && S.escopoBtnAtivo]}
-              onPress={() => setEscopoLiq('DIA')}
-              activeOpacity={0.7}
-            >
-              <Text style={[S.escopoTx, escopoLiq === 'DIA' && S.escopoTxAtivo]}>
-                {lang === 'es' ? 'Del día' : 'Do dia'} {cntDoDia}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[S.escopoBtn, escopoLiq === 'CARREGADOS' && S.escopoBtnAtivo]}
-              onPress={() => setEscopoLiq('CARREGADOS')}
-              activeOpacity={0.7}
-            >
-              <Text style={[S.escopoTx, escopoLiq === 'CARREGADOS' && S.escopoTxAtivo]}>
-                {lang === 'es' ? 'Cargados' : 'Carregados'} {cntTotalGeral}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
       </View>
 
       {/* ═══════════════════════════════════════════════════════════════════════
@@ -2481,11 +2559,16 @@ return (
         onClose={closeDrawer}
         onLimpar={() => {
           setFiltro('todos');
+          setFiltroVencimento('todos');
           setFiltroTipo('todos');
           setFiltroStatus('todos');
           setFiltroFrequencia('todos');
           setOcultarLiquidacao(false);
         }}
+        filtroVencimento={filtroVencimento}
+        setFiltroVencimento={setFiltroVencimento}
+        cntVencDia={cntVencDia}
+        cntVencAtrasados={cntVencAtrasados}
         temFiltroAtivo={temFiltroAtivo}
         lang={lang}
         tab={tab}
@@ -2540,23 +2623,23 @@ return (
             <FlatList
               ref={flatListLiqRef}
               data={filtered}
-              keyExtractor={(item) => item.cliente_id}
-              renderItem={({ item }) => {
+              keyExtractor={(item) => item.key}
+              renderItem={({ item }: { item: ItemLista }) => {
                 if (filtro === 'pagas') {
-                  const e = eAtual(item);
-                  // Busca a data de pagamento varrendo o pagMap por CLIENTE_ID,
-                  // não pela parcela_id do empréstimo. Motivo: quando o cliente
-                  // tem parcela paga (braço B) + pendente (braço A), o
-                  // emp.parcela_id pode acabar sendo o da PENDENTE, e o pagMap
-                  // (chaveado por parcela) não acharia a data. Varrendo por
-                  // cliente, pegamos a parcela paga com sua hora.
+                  // Hora do PRIMEIRO pagamento das contas DESTE card — a mesma
+                  // que ordena a lista, senão a sequência exibida não bate com
+                  // as horas. Varre o pagMap pelas parcelas dos empréstimos do
+                  // item (não pela parcela_id do card: quando o empréstimo tem
+                  // parcela paga + pendente, o card guarda a PENDENTE e o
+                  // pagMap, chaveado por parcela, não acharia a data).
+                  const empsDoItem = new Set(item.emprestimos.map(x => x.emprestimo_id));
                   let dtSrc: string | null = null;
-                  let dtSrcMs = -Infinity;
-                  pagMap.forEach((p) => {
-                    if (p.cliente_id === item.cliente_id && p.data_pagamento) {
-                      const ms = new Date(p.data_pagamento).getTime();
-                      if (!isNaN(ms) && ms > dtSrcMs) { dtSrcMs = ms; dtSrc = p.data_pagamento; }
-                    }
+                  let dtSrcMs = Infinity;
+                  pagMap.forEach((p, parcelaId) => {
+                    const eid = empDaParcela.get(parcelaId);
+                    if (!eid || !empsDoItem.has(eid) || !p.data_pagamento) return;
+                    const ms = new Date(p.data_pagamento).getTime();
+                    if (!isNaN(ms) && ms < dtSrcMs) { dtSrcMs = ms; dtSrc = p.data_pagamento; }
                   });
                   const fmtDtPag = dtSrc ? (() => {
                     if (dtSrc.includes('T') || dtSrc.includes('+') || dtSrc.length > 10) {
@@ -3056,24 +3139,6 @@ const S = StyleSheet.create({
   segmentBtnText: { fontSize: 12, fontWeight: '600', color: '#374151' },
   segmentBtnTextActive: { color: '#fff' },
 
-  // Escopo da liquidação: do dia x carregados
-  escopoRow: {
-    flexDirection: 'row',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  escopoBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#fff',
-  },
-  escopoBtnAtivo: { backgroundColor: '#EFF6FF', borderColor: '#3B82F6' },
-  escopoTx: { fontSize: 11, fontWeight: '600', color: '#6B7280' },
-  escopoTxAtivo: { color: '#1D4ED8' },
 
   // Search
   searchRow: {

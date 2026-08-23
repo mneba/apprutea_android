@@ -122,6 +122,10 @@ export default function ClienteCardTodos({
   onCancelarSolicitacaoRenovacao,
   todosMode = false,
 }: ClienteCardTodosProps) {
+  // Cliente suspenso pelo administrador: não pode iniciar renovação nem
+  // empréstimo novo. Antes só era barrado no "Confirmar venda", depois de o
+  // cobrador já ter preenchido tudo — e às vezes já ter combinado com o cliente.
+  const suspenso = String(c.status || '').toUpperCase() === 'SUSPENSO';
   const a = c.tem_atraso;
   const vencidas = emp?.total_parcelas_vencidas || 0;
   const cor = a ? corAtraso(vencidas) : '#D1D5DB';
@@ -148,6 +152,12 @@ export default function ClienteCardTodos({
           <View style={S.nameRow}>
             <Text style={S.nome} numberOfLines={1}>{c.nome}</Text>
             {vencidas > 0 && <View style={S.bWarnNew}><Text style={S.bWarnNewI}>⚠</Text><Text style={S.bWarnNewT}>{vencidas}</Text></View>}
+            {suspenso && (
+              <View style={S.bSusp}>
+                <Ionicons name="ban-outline" size={11} color="#B91C1C" />
+                <Text style={S.bSuspTx}>{lang === 'es' ? 'Suspendido' : 'Suspenso'}</Text>
+              </View>
+            )}
           </View>
           {c.telefone_celular && <Text style={S.sub} numberOfLines={1}>📞 {fmtTel(c.telefone_celular)}</Text>}
         </View>
@@ -257,7 +267,20 @@ export default function ClienteCardTodos({
             const temAtivo = c.emprestimos.some(e => e.status === 'ATIVO' || e.status === 'VENCIDO');
             const clienteEmDia = !c.tem_atraso;
             const podeNovoEmprestimo = clienteEmDia && (!temAtivo || c.permite_emprestimo_adicional);
-            
+
+            // Suspenso: mostra o motivo no lugar do botão, em vez de sumir com
+            // ele — sumir faria o cobrador achar que é limitação de atraso.
+            if (suspenso) {
+              return (
+                <View style={[S.tAddRowActive, { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' }]}>
+                  <Ionicons name="ban-outline" size={16} color="#B91C1C" />
+                  <Text style={[S.tAddTextActive, { color: '#B91C1C', marginLeft: 6 }]}>
+                    {lang === 'es' ? 'Cliente suspendido' : 'Cliente suspenso'}
+                  </Text>
+                </View>
+              );
+            }
+
             if (!podeNovoEmprestimo) return null;
             
             if (solicitacaoRenovacao) {
@@ -354,6 +377,12 @@ export default function ClienteCardTodos({
 // ─── Styles ─────────────────────────────────────────────────────────────────
 
 const S = StyleSheet.create({
+  bSusp: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: '#FEE2E2', borderRadius: 4,
+    paddingHorizontal: 5, paddingVertical: 1, marginLeft: 4,
+  },
+  bSuspTx: { fontSize: 10, fontWeight: '700', color: '#B91C1C' },
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 12, marginBottom: 8, borderLeftWidth: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 2 },
   cardRow: { flexDirection: 'row' },
   av: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
