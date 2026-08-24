@@ -47,6 +47,7 @@ const TX = {
     semPermissaoCamera: 'Permissão de câmera negada.',
     semPermissaoGaleria: 'Permissão de galeria negada.',
     porLbl: 'por',
+    restantes: 'restantes',
   },
   es: {
     titulo: 'Documentos y evidencias',
@@ -67,6 +68,7 @@ const TX = {
     semPermissaoCamera: 'Permiso de cámara denegado.',
     semPermissaoGaleria: 'Permiso de galería denegado.',
     porLbl: 'por',
+    restantes: 'restantes',
   },
 };
 
@@ -107,8 +109,10 @@ export default function AnexosLista({
   const [urls, setUrls] = useState<Record<string, string>>({});
 
   const [menuVisivel, setMenuVisivel] = useState(false);
-  const [uriPendente, setUriPendente] = useState<string | null>(null);
-  const [tamanhoPendente, setTamanhoPendente] = useState<number | null>(null);
+  // Fila de envio. A galeria permite escolher várias de uma vez, mas cada
+  // anexo tem a SUA descrição — então elas entram numa fila e a caixa de
+  // descrição aparece uma vez por foto, em vez de um rótulo só para o lote.
+  const [fila, setFila] = useState<{ uri: string; tamanho: number | null }[]>([]);
   const [descricao, setDescricao] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [visualizando, setVisualizando] = useState<string | null>(null);
@@ -162,11 +166,10 @@ export default function AnexosLista({
       const r =
         origem === 'camera'
           ? await ImagePicker.launchCameraAsync(opts)
-          : await ImagePicker.launchImageLibraryAsync(opts);
+          : await ImagePicker.launchImageLibraryAsync({ ...opts, allowsMultipleSelection: true });
 
-      if (r.canceled || !r.assets?.[0]) return;
-      setUriPendente(r.assets[0].uri);
-      setTamanhoPendente(r.assets[0].fileSize ?? null);
+      if (r.canceled || !r.assets?.length) return;
+      setFila(r.assets.map(a => ({ uri: a.uri, tamanho: a.fileSize ?? null })));
       setDescricao('');
     } catch (e: any) {
       console.error('❌ [AnexosLista] escolher:', e);
@@ -175,25 +178,28 @@ export default function AnexosLista({
   };
 
   const confirmarEnvio = async () => {
-    if (!uriPendente || !descricao.trim() || enviando) return;
+    const atual = fila[0];
+    if (!atual || !descricao.trim() || enviando) return;
     setEnviando(true);
     setErro(null);
     try {
       await anexosSvc.enviar({
         clienteId,
         pagamentoId,
-        uri: uriPendente,
-        tamanhoOriginal: tamanhoPendente,
+        uri: atual.uri,
+        tamanhoOriginal: atual.tamanho,
         descricao,
         enviadoPor,
         enviadoPorNome,
       });
-      setUriPendente(null);
-      setTamanhoPendente(null);
+      // Avança na fila; a próxima foto reabre a caixa de descrição vazia.
+      const restante = fila.slice(1);
+      setFila(restante);
       setDescricao('');
       await carregar();
     } catch (e: any) {
       console.error('❌ [AnexosLista] enviar:', e);
+      // Mantém a foto na fila para o usuário tentar de novo ou cancelar.
       setErro(e?.message || 'Falha ao enviar.');
     } finally {
       setEnviando(false);
@@ -296,15 +302,20 @@ export default function AnexosLista({
 
       {/* Descrição + confirmação do envio */}
       <Modal
-        visible={!!uriPendente}
+        visible={fila.length > 0}
         transparent
         animationType="fade"
-        onRequestClose={() => !enviando && setUriPendente(null)}
+        onRequestClose={() => !enviando && setFila([])}
       >
         <View style={S.overlay}>
           <View style={S.box}>
-            <Text style={S.boxTitulo}>{t.descricaoTitulo}</Text>
-            {uriPendente && <Image source={{ uri: uriPendente }} style={S.previa} />}
+            <View style={S.boxTituloRow}>
+              <Text style={S.boxTitulo}>{t.descricaoTitulo}</Text>
+              {fila.length > 1 && (
+                <Text style={S.boxContador}>{fila.length} {t.restantes}</Text>
+              )}
+            </View>
+            {fila[0] && <Image source={{ uri: fila[0].uri }} style={S.previa} />}
             <TextInput
               style={S.input}
               value={descricao}
@@ -317,7 +328,7 @@ export default function AnexosLista({
             <View style={S.boxBotoes}>
               <TouchableOpacity
                 style={[S.btn, S.btnCancelar]}
-                onPress={() => setUriPendente(null)}
+                onPress={() => setFila([])}
                 disabled={enviando}
               >
                 <Text style={S.btnCancelarTx}>{t.cancelar}</Text>
@@ -390,7 +401,9 @@ const S = StyleSheet.create({
   sheetCancelarTx: { fontSize: 15, color: '#6B7280', fontWeight: '600' },
 
   box: { backgroundColor: '#fff', borderRadius: 16, padding: 18, width: '100%', maxWidth: 360 },
-  boxTitulo: { fontSize: 16, fontWeight: '700', color: '#1F2937', marginBottom: 12 },
+  boxTituloRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  boxTitulo: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
+  boxContador: { fontSize: 12, fontWeight: '600', color: '#6B7280' },
   previa: { width: '100%', height: 150, borderRadius: 10, backgroundColor: '#F3F4F6', marginBottom: 12 },
   input: { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, color: '#1F2937', marginBottom: 16 },
   boxBotoes: { flexDirection: 'row', gap: 10 },
