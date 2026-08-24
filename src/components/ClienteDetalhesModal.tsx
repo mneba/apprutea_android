@@ -16,6 +16,8 @@ import {
   View
 } from 'react-native';
 import { supabase } from '../services/supabase';
+import AnexosLista from './AnexosLista';
+import { useAuth } from '../contexts/AuthContext';
 
 // ==================== TIPOS ====================
 interface ClienteInfo {
@@ -63,13 +65,13 @@ interface Parcela {
   estornos?: { valor: number; data: string; motivo: string | null; por: string | null }[];
 }
 
-type Aba = 'pessoais' | 'emprestimo' | 'historico';
+type Aba = 'pessoais' | 'emprestimo' | 'historico' | 'documentos';
 type Language = 'pt-BR' | 'es';
 
 // ==================== TEXTOS ====================
 const T = {
   'pt-BR': {
-    pessoais: 'Pessoais', emprestimo: 'Empréstimo', historico: 'Histórico',
+    pessoais: 'Pessoais', emprestimo: 'Empréstimo', historico: 'Histórico', documentos: 'Docs',
     nome: 'Nome', telefone: 'Telefone', documento: 'Documento', endereco: 'Endereço',
     codigo: 'Código', status: 'Status',
     valorPrincipal: 'Principal', valorTotal: 'Total', valorPago: 'Pago', saldo: 'Saldo',
@@ -85,7 +87,7 @@ const T = {
     renegociar: 'Renegociar',
   },
   'es': {
-    pessoais: 'Personales', emprestimo: 'Préstamo', historico: 'Historial',
+    pessoais: 'Personales', emprestimo: 'Préstamo', historico: 'Historial', documentos: 'Docs',
     nome: 'Nombre', telefone: 'Teléfono', documento: 'Documento', endereco: 'Dirección',
     codigo: 'Código', status: 'Estado',
     valorPrincipal: 'Principal', valorTotal: 'Total', valorPago: 'Pagado', saldo: 'Saldo',
@@ -176,6 +178,7 @@ interface Props {
 // ==================== COMPONENTE ====================
 export default function ClienteDetalhesModal({ visible, onClose, cliente, lang = 'pt-BR', onNovoEmprestimo, onRenegociar, onAlterarSolicitacaoRenovacao, onCancelarSolicitacaoRenovacao }: Props) {
   const t = T[lang];
+  const { vendedor } = useAuth();
   const [aba, setAba] = useState<Aba>('pessoais');
   const [loading, setLoading] = useState(false);
   const [empAtivos, setEmpAtivos] = useState<Emprestimo[]>([]);
@@ -826,45 +829,63 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
 
     return (
       <View key={emp.id} style={S.empCard}>
-        {/* Header clicável */}
-        <TouchableOpacity style={S.empHeader} onPress={() => toggleExpand(emp.id)} activeOpacity={0.7}>
-          <View style={S.empHeaderLeft}>
-            <Text style={S.empValor}>{fmt(emp.valor_total)}</Text>
-            {emp.parcelas_vencidas > 0 && (
-              <View style={S.empVencBadge}>
-                <Text style={S.empVencText}>{emp.parcelas_vencidas} {t.vencidas.toLowerCase()}</Text>
-              </View>
-            )}
+        {/* TODO o resumo é a área de toque para expandir. Antes só a linha do
+            valor/status era clicável, então o toque funcionava ou não conforme
+            onde o dedo caía — e nada indicava que havia algo a abrir. */}
+        <TouchableOpacity
+          onPress={() => toggleExpand(emp.id)}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: isExp }}
+        >
+          <View style={S.empHeader}>
+            <View style={S.empHeaderLeft}>
+              <Text style={S.empValor}>{fmt(emp.valor_total)}</Text>
+              {emp.parcelas_vencidas > 0 && (
+                <View style={S.empVencBadge}>
+                  <Text style={S.empVencText}>{emp.parcelas_vencidas} {t.vencidas.toLowerCase()}</Text>
+                </View>
+              )}
+            </View>
+            <View style={[S.empStatusBadge, { backgroundColor: cor.bg }]}>
+              <Text style={[S.empStatusText, { color: cor.text }]}>{t[emp.status.toLowerCase() as keyof typeof t] || emp.status}</Text>
+            </View>
           </View>
-          <View style={[S.empStatusBadge, { backgroundColor: cor.bg }]}>
-            <Text style={[S.empStatusText, { color: cor.text }]}>{t[emp.status.toLowerCase() as keyof typeof t] || emp.status}</Text>
+
+          {/* Info compacta — linha 1: data, parcelas, % pago */}
+          <View style={S.empInfoRow}>
+            <Text style={S.empInfoItem}>{fmtData(emp.data_emprestimo)}</Text>
+            <Text style={S.empInfoDot}>•</Text>
+            <Text style={S.empInfoItem}>{emp.parcelas_pagas}/{emp.numero_parcelas} {t.parcelas.toLowerCase()}</Text>
+            <Text style={S.empInfoDot}>•</Text>
+            <Text style={S.empInfoItem}>{pct}%</Text>
+          </View>
+
+          {/* Info compacta — linha 2: principal + juros */}
+          <View style={[S.empInfoRow, { marginTop: 2 }]}>
+            <Text style={[S.empInfoItem, { color: '#059669', fontWeight: '600' }]}>
+              {lang === 'es' ? 'Capital' : 'Principal'}: {fmt(emp.valor_principal)}
+            </Text>
+            <Text style={S.empInfoDot}>•</Text>
+            <Text style={[S.empInfoItem, { color: '#D97706', fontWeight: '600' }]}>
+              {lang === 'es' ? 'Intereses' : 'Juros'}: {fmt(emp.valor_total - emp.valor_principal)} ({emp.taxa_juros}%)
+            </Text>
+          </View>
+
+          {/* Barra de progresso */}
+          <View style={S.empBarBg}>
+            <View style={[S.empBarFill, { width: `${pct}%`, backgroundColor: pct >= 100 ? '#10B981' : pct >= 50 ? '#3B82F6' : '#F59E0B' }]} />
+          </View>
+
+          {/* Afordância explícita: sem isto o card inteiro é clicável mas
+              continua parecendo um bloco de texto. */}
+          <View style={S.empExpandBtn}>
+            <Ionicons name={isExp ? 'chevron-up' : 'chevron-down'} size={15} color="#2563EB" />
+            <Text style={S.empExpandTx}>
+              {isExp ? t.fecharParcelas : `${t.verParcelas} (${emp.numero_parcelas})`}
+            </Text>
           </View>
         </TouchableOpacity>
-
-        {/* Info compacta — linha 1: data, parcelas, % pago */}
-        <View style={S.empInfoRow}>
-          <Text style={S.empInfoItem}>{fmtData(emp.data_emprestimo)}</Text>
-          <Text style={S.empInfoDot}>•</Text>
-          <Text style={S.empInfoItem}>{emp.parcelas_pagas}/{emp.numero_parcelas} {t.parcelas.toLowerCase()}</Text>
-          <Text style={S.empInfoDot}>•</Text>
-          <Text style={S.empInfoItem}>{pct}%</Text>
-        </View>
-
-        {/* Info compacta — linha 2: principal + juros */}
-        <View style={[S.empInfoRow, { marginTop: 2 }]}>
-          <Text style={[S.empInfoItem, { color: '#059669', fontWeight: '600' }]}>
-            {lang === 'es' ? 'Capital' : 'Principal'}: {fmt(emp.valor_principal)}
-          </Text>
-          <Text style={S.empInfoDot}>•</Text>
-          <Text style={[S.empInfoItem, { color: '#D97706', fontWeight: '600' }]}>
-            {lang === 'es' ? 'Intereses' : 'Juros'}: {fmt(emp.valor_total - emp.valor_principal)} ({emp.taxa_juros}%)
-          </Text>
-        </View>
-
-        {/* Barra de progresso */}
-        <View style={S.empBarBg}>
-          <View style={[S.empBarFill, { width: `${pct}%`, backgroundColor: pct >= 100 ? '#10B981' : pct >= 50 ? '#3B82F6' : '#F59E0B' }]} />
-        </View>
 
         {/* ⭐ Botão Renegociar / Solicitar / Aguardando — granular por empréstimo */}
         {(() => {
@@ -1436,6 +1457,21 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
     </ScrollView>
   );
 
+  // Documentos e evidências do cliente (comprovante de endereço, documento,
+  // foto do local/negócio). Ficam em bucket privado — ver services/anexos.ts.
+  const renderDocumentos = () => (
+    <ScrollView style={S.abaContent} showsVerticalScrollIndicator={false}>
+      {cliente?.id ? (
+        <AnexosLista
+          clienteId={cliente.id}
+          lang={lang}
+          enviadoPor={vendedor?.user_id || null}
+          enviadoPorNome={vendedor?.nome || null}
+        />
+      ) : null}
+    </ScrollView>
+  );
+
   // ==================== RENDER ====================
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -1474,7 +1510,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
 
           {/* Tabs */}
           <View style={S.tabs}>
-            {(['pessoais', 'emprestimo', 'historico'] as Aba[]).map(a => (
+            {(['pessoais', 'emprestimo', 'historico', 'documentos'] as Aba[]).map(a => (
               <TouchableOpacity
                 key={a}
                 style={[S.tab, aba === a && S.tabAtivo]}
@@ -1497,6 +1533,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           {aba === 'pessoais' && renderPessoais()}
           {aba === 'emprestimo' && renderEmprestimo()}
           {aba === 'historico' && renderHistorico()}
+          {aba === 'documentos' && renderDocumentos()}
         </View>
       </View>
 
@@ -1819,6 +1856,8 @@ const S = StyleSheet.create({
   empCard: { backgroundColor: '#F9FAFB', borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#E5E7EB' },
   empHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   empHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  empExpandBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 10, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#BFDBFE', backgroundColor: '#EFF6FF' },
+  empExpandTx: { fontSize: 13, fontWeight: '600', color: '#2563EB' },
   empValor: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
   empVencBadge: { backgroundColor: '#FEE2E2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
   empVencText: { fontSize: 10, fontWeight: '600', color: '#DC2626' },

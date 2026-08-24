@@ -492,6 +492,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     clientesPagosNaLiq, setClientesPagosNaLiq,
     ordemRotaMap, setOrdemRotaMap,
     loading, setLoading,
+    revalidando,
     refreshing, setRefreshing,
     loadLiq,
     atualizarSaldoLocalLiq,
@@ -2445,7 +2446,10 @@ export default function ClientesScreen({ navigation, route }: any) {
     );
   }
 
-  if (loading) return (<View style={S.lW}><ActivityIndicator size="large" color="#3B82F6" /><Text style={S.lT}>{t.carregando}</Text></View>);
+  // Spinner de tela cheia SÓ na primeira carga, quando não há nada a mostrar.
+  // Com lista em tela, a recarga é reconciliação em segundo plano (ver o
+  // comentário em useClientesLiquidacao) e a tela continua utilizável.
+  if (loading && raw.length === 0) return (<View style={S.lW}><ActivityIndicator size="large" color="#3B82F6" /><Text style={S.lT}>{t.carregando}</Text></View>);
 
 return (
     <View style={S.c}>
@@ -2597,10 +2601,19 @@ return (
         }}
         t={t}
       />
+      {/* Recarga em segundo plano: a lista continua na tela e utilizável; esta
+          faixa fina é o único sinal de que os dados estão sendo conferidos. */}
+      {(tab === 'liquidacao' ? revalidando : (loadTodos && todosList.length > 0)) && (
+        <View style={S.faixaAtualizando}>
+          <ActivityIndicator size="small" color="#2563EB" />
+          <Text style={S.faixaAtualizandoTx}>{lang === 'es' ? 'Actualizando…' : 'Atualizando…'}</Text>
+        </View>
+      )}
+
       {/* ═══════════════════════════════════════════════════════════════════════
           LISTAS — ambas sempre montadas, visibilidade via display
           ═══════════════════════════════════════════════════════════════════════ */}
-      
+
       {/* Lista Liquidação (colapsada quando inativa, mas sempre montada) */}
       <View style={tab === 'liquidacao' ? { flex: 1 } : { height: 0, overflow: 'hidden' }}>
         {filtered.length === 0 ? (
@@ -2703,7 +2716,7 @@ return (
 
       {/* Lista Todos (colapsada quando inativa, mas sempre montada) */}
       <View style={tab === 'todos' ? { flex: 1 } : { height: 0, overflow: 'hidden' }}>
-        {loadTodos ? (
+        {loadTodos && todosList.length === 0 ? (
           <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
         ) : todosFilt.length === 0 ? (
           <View style={S.em}><Ionicons name="document-text-outline" size={48} color="#9CA3AF" /><Text style={S.emT}>{t.semClientes}</Text></View>
@@ -3220,6 +3233,8 @@ const S = StyleSheet.create({
   // Lista
   ls: { flex: 1, marginTop: 10, zIndex: 1 },
   lsI: { paddingHorizontal: 16 },
+  faixaAtualizando: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#EFF6FF', paddingVertical: 6 },
+  faixaAtualizandoTx: { fontSize: 12, fontWeight: '600', color: '#2563EB' },
 
   // Empty state
   em: { alignItems: 'center', paddingTop: 60 },

@@ -157,11 +157,24 @@ export default function useClientesLiquidacao({
     limparEstado,
   ]);
 
-  // Modo espelho: refletir o loading do contexto enquanto ele busca
+  // Modo espelho: refletir o loading do contexto enquanto ele busca — mas SÓ
+  // quando não há nada na tela.
+  //
+  // Com a lista já montada, toda recarga é RECONCILIAÇÃO em segundo plano
+  // (pós-pagamento, estorno, pull-to-refresh, volta de foco com dados stale):
+  // os dados corretos já estão na tela por atualização otimista. Virar
+  // `loading` aqui trocava a lista inteira por um spinner de tela cheia
+  // durante os segundos da RPC — era essa a "lentidão" percebida depois de
+  // clicar em Pagar e ao entrar em Clientes, e não o tempo da consulta.
+  // Stale-while-revalidate: mostra o que já se tem, atualiza por baixo.
   useEffect(() => {
     if (autonomo) return;
-    if (ctx.carregandoClientes) setLoading(true);
-  }, [autonomo, ctx.carregandoClientes]);
+    if (ctx.carregandoClientes && raw.length === 0) setLoading(true);
+  }, [autonomo, ctx.carregandoClientes, raw.length]);
+
+  // Recarga acontecendo COM dados na tela — para um aviso discreto, sem
+  // esconder a lista.
+  const revalidando = !autonomo && ctx.carregandoClientes && raw.length > 0;
 
   // ═══════════════════════════════════════════════════════════════════════
   // MODO AUTÔNOMO — busca própria via repositório
@@ -257,6 +270,7 @@ export default function useClientesLiquidacao({
     setOrdemRotaMap,
     loading,
     setLoading,
+    revalidando,
     refreshing,
     setRefreshing,
     loadLiq,

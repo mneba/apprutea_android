@@ -9,6 +9,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useAuth } from '../contexts/AuthContext';
+import AnexosLista from './AnexosLista';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -172,10 +174,23 @@ interface DetalhesPopupProps {
   onClose: () => void;
   parcela: ParcelaModal | null;
   pagamentos: PagamentoDetalhe[];
+  clienteId?: string | null;
+  lang: 'pt-BR' | 'es';
+  podeAnexar?: boolean;
+  enviadoPor?: string | null;
+  enviadoPorNome?: string | null;
   t: ParcelasModalProps['t'];
 }
 
-function DetalhesPopup({ visible, onClose, parcela, pagamentos, t }: DetalhesPopupProps) {
+function DetalhesPopup({
+  visible, onClose, parcela, pagamentos, clienteId, lang,
+  podeAnexar = true, enviadoPor, enviadoPorNome, t,
+}: DetalhesPopupProps) {
+  // Comprovantes abrem sob demanda, um pagamento por vez: a lista de anexos
+  // consulta o banco ao montar, e renderizar todas de uma vez faria N buscas
+  // só para abrir o popup.
+  const [comprovanteAberto, setComprovanteAberto] = useState<string | null>(null);
+
   if (!parcela) return null;
 
   const valorPago = parcela.valor_pago || 0;
@@ -379,6 +394,44 @@ function DetalhesPopup({ visible, onClose, parcela, pagamentos, t }: DetalhesPop
                           )}
                         </View>
                       </View>
+
+                      {/* Comprovante deste pagamento. O cliente às vezes paga
+                          por transferência e manda o comprovante; fica preso
+                          ao PAGAMENTO, não à parcela — uma parcela paga em
+                          três dias tem três comprovantes diferentes.
+                          Importados não têm id próprio, logo não têm âncora. */}
+                      {clienteId && pp.id && !isImportado && (
+                        <View style={D.compBox}>
+                          <TouchableOpacity
+                            style={D.compBtn}
+                            onPress={() => setComprovanteAberto(comprovanteAberto === pp.id ? null : pp.id!)}
+                            activeOpacity={0.7}
+                          >
+                            <Ionicons
+                              name={comprovanteAberto === pp.id ? 'chevron-up' : 'receipt-outline'}
+                              size={13}
+                              color="#2563EB"
+                            />
+                            <Text style={D.compBtnTx}>
+                              {comprovanteAberto === pp.id
+                                ? (lang === 'es' ? 'Ocultar comprobante' : 'Ocultar comprovante')
+                                : (lang === 'es' ? 'Comprobante' : 'Comprovante')}
+                            </Text>
+                          </TouchableOpacity>
+                          {comprovanteAberto === pp.id && (
+                            <View style={D.compConteudo}>
+                              <AnexosLista
+                                clienteId={clienteId}
+                                pagamentoId={pp.id}
+                                lang={lang}
+                                enviadoPor={enviadoPor}
+                                enviadoPorNome={enviadoPorNome}
+                                podeEditar={podeAnexar}
+                              />
+                            </View>
+                          )}
+                        </View>
+                      )}
                     </View>
                   );
                 })}
@@ -491,6 +544,10 @@ const D = StyleSheet.create({
   pagValor: { fontSize: 15, fontWeight: '700', color: '#10B981' },
   pagInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   pagInfoText: { fontSize: 11, color: '#9CA3AF' },
+  compBox: { marginTop: 8, borderTopWidth: 1, borderTopColor: '#EFF2F5', paddingTop: 8 },
+  compBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: '#BFDBFE', backgroundColor: '#EFF6FF' },
+  compBtnTx: { fontSize: 12, fontWeight: '600', color: '#2563EB' },
+  compConteudo: { marginTop: 10 },
 
   // Badges
   formaBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#F3F4F6', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 4 },
@@ -516,7 +573,7 @@ export default function ParcelasModal({
   trabalhaDomingo = true,
   onPagar, onPagarMultiplo, onEstornar, pagamentosDetalhados, t,
 }: ParcelasModalProps) {
-
+  const { vendedor } = useAuth();
   const [parcelaDetalhes, setParcelaDetalhes] = useState<ParcelaModal | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -924,6 +981,11 @@ export default function ParcelasModal({
             ? (pagamentosDetalhados.get(parcelaDetalhes.parcela_id) || [])
             : []
         }
+        clienteId={clienteModal?.id || null}
+        lang={lang}
+        podeAnexar={!isViz}
+        enviadoPor={vendedor?.user_id || null}
+        enviadoPorNome={vendedor?.nome || null}
         t={t}
       />
     </>
