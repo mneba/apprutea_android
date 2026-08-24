@@ -1035,7 +1035,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       // Busca TODOS os pagamentos (incluindo estornados) para pMap + popup de detalhes
       const { data: pagamentos } = await supabase
         .from('pagamentos_parcelas')
-        .select('parcela_id, valor_pago_atual, valor_credito_usado, valor_credito_gerado, liquidacao_id, forma_pagamento, estornado, created_at, motivo_estorno, estornado_por, data_estorno')
+        .select('id, parcela_id, valor_pago_atual, valor_credito_usado, valor_credito_gerado, liquidacao_id, forma_pagamento, estornado, created_at, motivo_estorno, estornado_por, data_estorno')
         .in('parcela_id', ids)
         .order('created_at', { ascending: true });
       
@@ -1091,6 +1091,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       (pagamentos || []).forEach((p: any) => {
         const dataLiqPag = p.liquidacao_id ? (liqDataMap.get(p.liquidacao_id) || null) : null;
         const entry: PagamentoDetalhe = {
+          id: p.id,   // âncora do comprovante — anexo prende no PAGAMENTO
           valor_pago_total: p.valor_pago_atual || 0,
           valor_credito_usado: p.valor_credito_usado || 0,
           valor_credito_gerado: p.valor_credito_gerado || 0,

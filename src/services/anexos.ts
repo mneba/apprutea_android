@@ -65,7 +65,7 @@ const base64ParaBytes = (b64: string): Uint8Array => {
  *
  * Ponto único de redimensionamento: se um dia a lib mudar, muda só aqui.
  */
-async function prepararImagem(uri: string): Promise<{ base64: string; mime: string }> {
+export async function prepararImagem(uri: string): Promise<{ base64: string; mime: string }> {
   const r = await ImageManipulator.manipulateAsync(
     uri,
     [{ resize: { width: LADO_MAX_PX } }],

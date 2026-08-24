@@ -17,6 +17,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
+import { prepararImagem } from '../services/anexos';
 
 // ============================================================
 // TIPOS
@@ -34,6 +35,10 @@ interface Categoria {
 // TRADUÇÕES
 // ============================================================
 type Lang = 'pt-BR' | 'es';
+
+/** Máximo de comprovantes por lançamento. */
+const MAX_FOTOS = 5;
+
 const textos = {
   'pt-BR': {
     titulo: 'NOVA MOVIMENTAÇÃO', tituloHeader: 'MOVIMENTAÇÃO',
@@ -57,8 +62,10 @@ const textos = {
     erroInesperado: 'Erro inesperado ao registrar movimentação.',
     cancelar: 'Cancelar?', cancelarMsg: 'Os dados preenchidos serão perdidos.',
     simCancelar: 'Sim, cancelar', nao: 'Não',
-    foto: 'Foto (opcional)', adicionarFoto: 'Adicionar foto', trocarFoto: 'Trocar foto',
+    foto: 'Fotos (opcional)', adicionarFoto: 'Adicionar foto', trocarFoto: 'Trocar foto',
     removerFoto: 'Remover', erroFoto: 'Não foi possível carregar a foto.',
+    fotosContador: 'de 5 anexos', limiteFotos: 'Limite de anexos',
+    limiteFotosMsg: 'Você pode anexar até 5 fotos por lançamento.',
     permissaoCamera: 'Permissão necessária', permissaoCameraMsg: 'Precisamos de acesso à câmera.',
     permissaoGaleria: 'Precisamos de acesso à galeria.',
     fotoTitulo: 'Foto', fotoOpcao: 'Como deseja adicionar a foto?',
@@ -86,8 +93,10 @@ const textos = {
     erroInesperado: 'Error inesperado al registrar movimiento.',
     cancelar: '¿Cancelar?', cancelarMsg: 'Los datos ingresados se perderán.',
     simCancelar: 'Sí, cancelar', nao: 'No',
-    foto: 'Foto (opcional)', adicionarFoto: 'Agregar foto', trocarFoto: 'Cambiar foto',
+    foto: 'Fotos (opcional)', adicionarFoto: 'Agregar foto', trocarFoto: 'Cambiar foto',
     removerFoto: 'Quitar', erroFoto: 'No fue posible cargar la foto.',
+    fotosContador: 'de 5 adjuntos', limiteFotos: 'Límite de adjuntos',
+    limiteFotosMsg: 'Puede adjuntar hasta 5 fotos por movimiento.',
     permissaoCamera: 'Permiso necesario', permissaoCameraMsg: 'Necesitamos acceso a la cámara.',
     permissaoGaleria: 'Necesitamos acceso a la galería.',
     fotoTitulo: 'Foto', fotoOpcao: '¿Cómo desea agregar la foto?',
@@ -112,8 +121,10 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
   const [categoria, setCategoria] = useState('');
   const [valor, setValor] = useState('');
   const [descricao, setDescricao] = useState('');
-  const [fotoUri, setFotoUri] = useState<string | null>(null);
-  const [fotoBase64, setFotoBase64] = useState<string | null>(null);
+  // Até MAX_FOTOS comprovantes por lançamento. Era um só; um pagamento de
+  // fornecedor costuma ter nota + comprovante de transferência, e o cobrador
+  // ficava tendo de escolher qual anexar.
+  const [fotos, setFotos] = useState<{ uri: string }[]>([]);
   const [fotoUploading, setFotoUploading] = useState(false);
 
   // Categorias
@@ -215,11 +226,23 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
   // FOTO
   // -----------------------------------------------------------
   const handleAdicionarFoto = () => {
+    if (fotos.length >= MAX_FOTOS) {
+      Alert.alert(t.limiteFotos, t.limiteFotosMsg);
+      return;
+    }
     Alert.alert(t.fotoTitulo, t.fotoOpcao, [
       { text: t.camera, onPress: () => abrirCamera() },
       { text: t.galeria, onPress: () => abrirGaleria() },
       { text: t.nao, style: 'cancel' },
     ]);
+  };
+
+  // Só a URI é guardada: o base64 das 5 fotos de uma vez estoura a memória do
+  // aparelho. A conversão acontece no envio, uma por vez.
+  const opcoesPicker: ImagePicker.ImagePickerOptions = {
+    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    allowsEditing: false,
+    quality: 1,   // o redimensionamento é feito em prepararImagem
   };
 
   const abrirCamera = async () => {
@@ -228,15 +251,9 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
       Alert.alert(t.permissaoCamera, t.permissaoCameraMsg);
       return;
     }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: false,
-      quality: 0.7,
-      base64: true,
-    });
+    const result = await ImagePicker.launchCameraAsync(opcoesPicker);
     if (!result.canceled && result.assets[0]) {
-      setFotoUri(result.assets[0].uri);
-      setFotoBase64(result.assets[0].base64 || null);
+      setFotos(prev => [...prev, { uri: result.assets[0].uri }].slice(0, MAX_FOTOS));
     }
   };
 
@@ -246,50 +263,57 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
       Alert.alert(t.permissaoCamera, t.permissaoGaleria);
       return;
     }
+    // Seleção múltipla, limitada ao que ainda cabe.
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: false,
-      quality: 0.7,
-      base64: true,
+      ...opcoesPicker,
+      allowsMultipleSelection: true,
+      selectionLimit: MAX_FOTOS - fotos.length,
     });
-    if (!result.canceled && result.assets[0]) {
-      setFotoUri(result.assets[0].uri);
-      setFotoBase64(result.assets[0].base64 || null);
+    if (!result.canceled && result.assets?.length) {
+      const novas = result.assets.map(a => ({ uri: a.uri }));
+      setFotos(prev => [...prev, ...novas].slice(0, MAX_FOTOS));
     }
   };
 
-  const uploadFoto = async (liquidacaoId: string, vendedorId: string): Promise<string | null> => {
-    if (!fotoBase64) {
-      console.warn('[UPLOAD-FOTO] fotoBase64 vazio — nada a enviar');
-      return null;
-    }
+  const removerFoto = (idx: number) => {
+    setFotos(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  /**
+   * Envia todas as fotos e devolve as URLs na ordem em que foram anexadas.
+   * Uma falha isolada não derruba o lançamento: a foto que falhar é pulada e
+   * registrada no log — perder um comprovante é ruim, perder a movimentação
+   * inteira é pior.
+   */
+  const uploadFotos = async (liquidacaoId: string, vendedorId: string): Promise<string[]> => {
+    if (fotos.length === 0) return [];
     setFotoUploading(true);
+    const urls: string[] = [];
     try {
-      const ext = (fotoUri?.split('.').pop()?.toLowerCase()) || 'jpg';
-      const fileName = `movimentacoes/${vendedorId}/${liquidacaoId}_${Date.now()}.${ext}`;
-      const contentType = ext === 'png' ? 'image/png' : 'image/jpeg';
+      for (let i = 0; i < fotos.length; i++) {
+        try {
+          const { base64 } = await prepararImagem(fotos[i].uri);
+          const fileName = `movimentacoes/${vendedorId}/${liquidacaoId}_${Date.now()}_${i}.jpg`;
 
-      // ⭐ base64 → Uint8Array (padrão confiável em React Native/Hermes)
-      const byteChars = atob(fotoBase64);
-      const byteArray = new Uint8Array(byteChars.length);
-      for (let i = 0; i < byteChars.length; i++) {
-        byteArray[i] = byteChars.charCodeAt(i);
-      }
+          // base64 → Uint8Array (padrão confiável em React Native/Hermes)
+          const byteChars = atob(base64);
+          const byteArray = new Uint8Array(byteChars.length);
+          for (let j = 0; j < byteChars.length; j++) byteArray[j] = byteChars.charCodeAt(j);
 
-      const { error } = await supabase.storage.from('fotos').upload(fileName, byteArray, {
-        contentType,
-        upsert: false,
-      });
-      if (error) {
-        console.error('[UPLOAD-FOTO] erro upload:', error);
-        throw error;
+          const { error } = await supabase.storage.from('fotos').upload(fileName, byteArray, {
+            contentType: 'image/jpeg',
+            upsert: false,
+          });
+          if (error) throw error;
+
+          const { data: urlData } = supabase.storage.from('fotos').getPublicUrl(fileName);
+          urls.push(urlData.publicUrl);
+          console.log(`[UPLOAD-FOTO] ${i + 1}/${fotos.length} enviada`);
+        } catch (err) {
+          console.error(`[UPLOAD-FOTO] falhou na foto ${i + 1}:`, err);
+        }
       }
-      const { data: urlData } = supabase.storage.from('fotos').getPublicUrl(fileName);
-      console.log('[UPLOAD-FOTO] URL gerada:', urlData.publicUrl);
-      return urlData.publicUrl;
-    } catch (err) {
-      console.error('[UPLOAD-FOTO] Erro:', err);
-      return null;
+      return urls;
     } finally {
       setFotoUploading(false);
     }
@@ -311,9 +335,11 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
     setEnviandoSolicitacao(true);
     try {
       // Upload foto se houver (antes de criar a solicitação)
-      let fotoUrl: string | null = null;
-      if (fotoBase64) {
-        fotoUrl = await uploadFoto(limiteExcedidoInfo.liquidacaoId, limiteExcedidoInfo.vendedorId);
+      // Todos os comprovantes vão para a solicitação. p_foto_url continua
+      // recebendo o primeiro, por compatibilidade com o que já lê essa coluna.
+      let comprovantes: string[] = [];
+      if (fotos.length > 0) {
+        comprovantes = await uploadFotos(limiteExcedidoInfo.liquidacaoId, limiteExcedidoInfo.vendedorId);
       }
 
       const tipoMov = tipo === 'PAGAR' ? 'DESPESA' : 'RECEITA';
@@ -327,7 +353,8 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
         p_descricao:       descricao.trim() || null,
         p_valor:           valorNumerico,
         p_forma_pagamento: 'DINHEIRO',
-        p_foto_url:        fotoUrl,
+        p_foto_url:        comprovantes[0] || null,
+        p_comprovantes_urls: comprovantes,
         p_justificativa:   justificativa.trim(),
         p_valor_limite:    limiteExcedidoInfo.limite,
       });
@@ -485,12 +512,14 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
 
       // Upload foto se houver
       const financeiroId = Array.isArray(data) ? data[0]?.financeiro_id : data?.financeiro_id;
-      if (fotoUri && financeiroId) {
-        const fotoUrl = await uploadFoto(liqData.id, vendedorId);
-        if (fotoUrl) {
+      if (fotos.length > 0 && financeiroId) {
+        const urls = await uploadFotos(liqData.id, vendedorId);
+        if (urls.length > 0) {
+          // foto_url continua com a PRIMEIRA para não quebrar o que já lê essa
+          // coluna (web e relatórios); comprovantes_urls guarda todas, na ordem.
           await supabase
             .from('financeiro')
-            .update({ foto_url: fotoUrl })
+            .update({ foto_url: urls[0], comprovantes_urls: urls })
             .eq('id', financeiroId);
         }
       }
@@ -712,20 +741,38 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
         {/* ============================== */}
         <View style={styles.section}>
           <View style={styles.sectionBody}>
-            <Text style={styles.fieldLabel}>{t.foto}</Text>
-            {fotoUri ? (
-              <View style={styles.fotoContainer}>
-                <Image source={{ uri: fotoUri }} style={styles.fotoPreview} resizeMode="cover" />
-                <View style={styles.fotoBtns}>
-                  <TouchableOpacity style={styles.fotoBtnSecondary} onPress={handleAdicionarFoto} activeOpacity={0.7}>
-                    <Text style={styles.fotoBtnSecondaryText}>🔄 {t.trocarFoto}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.fotoBtnRemover} onPress={() => { setFotoUri(null); setFotoBase64(null); }} activeOpacity={0.7}>
-                    <Text style={styles.fotoBtnRemoverText}>✕ {t.removerFoto}</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : (
+            <View style={styles.fotoLabelRow}>
+              <Text style={styles.fieldLabel}>{t.foto}</Text>
+              {fotos.length > 0 && (
+                <Text style={styles.fotoContador}>{fotos.length} {t.fotosContador}</Text>
+              )}
+            </View>
+
+            {/* Miniaturas em faixa horizontal: com até 5 anexos, uma prévia
+                grande por foto empurraria o resto do formulário para fora. */}
+            {fotos.length > 0 && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.fotoStrip}
+                contentContainerStyle={{ gap: 8 }}
+              >
+                {fotos.map((f, i) => (
+                  <View key={`${f.uri}-${i}`} style={styles.fotoThumbBox}>
+                    <Image source={{ uri: f.uri }} style={styles.fotoThumb} resizeMode="cover" />
+                    <TouchableOpacity
+                      style={styles.fotoThumbX}
+                      onPress={() => removerFoto(i)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.fotoThumbXText}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+
+            {fotos.length < MAX_FOTOS && (
               <TouchableOpacity style={styles.fotoBtn} onPress={handleAdicionarFoto} activeOpacity={0.7}>
                 <Text style={styles.fotoBtnIcon}>📷</Text>
                 <Text style={styles.fotoBtnText}>{t.adicionarFoto}</Text>
@@ -1313,17 +1360,15 @@ const styles = StyleSheet.create({
   },
   fotoBtnIcon: { fontSize: 22 },
   fotoBtnText: { fontSize: 14, color: '#6B7280', fontWeight: '500' },
-  fotoContainer: { gap: 8 },
-  fotoPreview: { width: '100%', height: 160, borderRadius: 10, backgroundColor: '#F3F4F6' },
-  fotoBtns: { flexDirection: 'row', gap: 8 },
-  fotoBtnSecondary: {
-    flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 8,
-    borderWidth: 1, borderColor: '#3B82F6', backgroundColor: '#EFF6FF',
+  fotoLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  fotoContador: { fontSize: 12, color: '#9CA3AF', fontWeight: '600' },
+  fotoStrip: { marginBottom: 10 },
+  fotoThumbBox: { width: 84, height: 84 },
+  fotoThumb: { width: 84, height: 84, borderRadius: 10, backgroundColor: '#F3F4F6' },
+  fotoThumbX: {
+    position: 'absolute', top: -6, right: -6, width: 24, height: 24, borderRadius: 12,
+    backgroundColor: '#DC2626', alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: '#fff',
   },
-  fotoBtnSecondaryText: { fontSize: 13, color: '#3B82F6', fontWeight: '500' },
-  fotoBtnRemover: {
-    flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 8,
-    borderWidth: 1, borderColor: '#EF4444', backgroundColor: '#FEF2F2',
-  },
-  fotoBtnRemoverText: { fontSize: 13, color: '#EF4444', fontWeight: '500' },
+  fotoThumbXText: { fontSize: 12, color: '#fff', fontWeight: '700', lineHeight: 14 },
 });
