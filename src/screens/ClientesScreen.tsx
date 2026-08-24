@@ -1467,16 +1467,22 @@ export default function ClientesScreen({ navigation, route }: any) {
   }, [processando, coords, liqId, clienteModal, vendedor, t]);
 
   // 5) Quitar empréstimo — valor = saldo total, popup de confirmação
+  //
+  // clienteModal.saldo_emprestimo (emprestimos.valor_saldo) já vem LÍQUIDO do
+  // crédito acumulado — é mantido pelo trigger atualizar_saldo_emprestimo(),
+  // que soma o saldo pendente das parcelas e já desconta o saldo_excedente
+  // (crédito) existente. Por isso o valor a cobrar em espécie é o próprio
+  // saldo, sem subtrair credito_disponivel de novo (isso descontava o
+  // crédito duas vezes e deixava exatamente esse valor em aberto após a
+  // "quitação" — bug relatado pelo cliente Talles Alan Pineiros, rota
+  // Barcelona). O crédito antigo continua no pool e é consumido pela própria
+  // fn_registrar_pagamento na cascata de auto-quitação das demais parcelas.
   const acaoQuitarEmprestimo = useCallback(() => {
     if (!parcelaPagamento || !clienteModal) return;
     const saldo = Number(clienteModal.saldo_emprestimo || 0);
-    const credito = Number(dadosPagamento?.credito_disponivel || 0);
     if (saldo <= 0) { Alert.alert(t.atencao, t.semSaldoQuitar || 'Empréstimo já está quitado'); return; }
-    const especie = Math.max(saldo - credito, 0);
     setMenuPagamentoVisible(false);
-    const msg = credito > 0
-      ? `${t.saldoTotalLbl || 'Saldo total'}: ${fmt(saldo)}\n${t.credito}: ${fmt(credito)}\n${t.emEspecie || 'Em espécie'}: ${fmt(especie)}`
-      : `${t.saldoTotalLbl || 'Saldo total'}: ${fmt(saldo)} · ${t.dinheiro}`;
+    const msg = `${t.saldoTotalLbl || 'Saldo total'}: ${fmt(saldo)} · ${t.dinheiro}`;
     setConfirmModal({
       visible: true,
       titulo: t.quitarEmprestimo || 'Quitar empréstimo',
@@ -1484,11 +1490,10 @@ export default function ClientesScreen({ navigation, route }: any) {
       corConfirmar: '#10B981',
       onConfirmar: () => {
         setConfirmModal(cc => ({ ...cc, visible: false }));
-        const usarCred = credito > 0;
-        registrarPagamentoDireto(especie, usarCred ? credito : 0);
+        registrarPagamentoDireto(saldo, 0);
       },
     });
-  }, [parcelaPagamento, clienteModal, dadosPagamento, t, registrarPagamentoDireto]);
+  }, [parcelaPagamento, clienteModal, t, registrarPagamentoDireto]);
 
   // Chama a RPC de crédito em cascata
   // Função para ir para próxima parcela pendente
