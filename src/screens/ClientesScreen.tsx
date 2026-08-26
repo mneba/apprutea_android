@@ -2305,7 +2305,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     // valor pago − crédito usado. Usa os campos por-liquidação (uma parcela
     // paga em vários dias mostra em cada dia só o que entrou naquele dia),
     // com fallback para o acumulado se a RPC antiga não trouxer o campo.
-    type ResumoLinha = { dinheiroReal: number; creditoUsado: number; qtdParcelas: number; somaParcelas: number; valorUnitario?: number | null };
+    type ResumoLinha = { dinheiroReal: number; creditoUsado: number; creditoGerado: number; qtdParcelas: number; somaParcelas: number; valorUnitario?: number | null };
     const porEmp: Record<string, ResumoLinha> = {};
     pagMap.forEach((p, parcelaId) => {
       if (p.cliente_id !== c.cliente_id) return;
@@ -2315,15 +2315,30 @@ export default function ClientesScreen({ navigation, route }: any) {
       const cnl = (p as any).valor_credito_usado_nesta_liq;
       const pagoLiq = pnl != null ? Number(pnl) : (Number(p.valor_pago_atual) || 0);
       const credLiq = cnl != null ? Number(cnl) : (Number((p as any).valor_credito_usado) || 0);
+      const credGer = Number((p as any).valor_credito_gerado) || 0;
       const vParc = Number(p.valor_parcela) || 0;
-      const a = porEmp[eid] || (porEmp[eid] = { dinheiroReal: 0, creditoUsado: 0, qtdParcelas: 0, somaParcelas: 0, valorUnitario: null });
+      const a = porEmp[eid] || (porEmp[eid] = { dinheiroReal: 0, creditoUsado: 0, creditoGerado: 0, qtdParcelas: 0, somaParcelas: 0, valorUnitario: null });
       a.dinheiroReal += pagoLiq - credLiq;
       a.creditoUsado += credLiq;
+      a.creditoGerado += credGer;
       a.somaParcelas += vParc;
       a.qtdParcelas += 1;
       if (a.qtdParcelas === 1) a.valorUnitario = vParc;
       else if (a.valorUnitario != null && Math.round(a.valorUnitario * 100) !== Math.round(vParc * 100)) a.valorUnitario = null;
     });
+
+    // ⭐ O crédito exibido é só o que veio de FORA do dia.
+    //
+    // Um pagamento grande numa parcela pequena gera crédito que a auto-quitação
+    // consome na mesma operação. Somar esse crédito ao dinheiro recebido faz a
+    // tela mentir: o thalles pagou $576 e o card mostrava "$576 recebido +
+    // $504 crédito" para 8 parcelas de $72 — soma $1.080 para uma conta de
+    // $576. O crédito gerado e consumido no mesmo dia é circulação interna,
+    // não dinheiro adicional.
+    for (const k of Object.keys(porEmp)) {
+      const a = porEmp[k];
+      a.creditoUsado = Math.max(0, a.creditoUsado - a.creditoGerado);
+    }
 
     // Carrossel: cada slide mostra o resumo da sua conta.
     const resumoPorEmprestimo = multi ? porEmp : undefined;
