@@ -88,6 +88,23 @@ const borderOf = (e: EmprestimoData, paga: boolean) => {
 const bgOf = (_e: EmprestimoData, paga: boolean) => paga ? 'rgba(16,185,129,0.05)' : '#fff';
 const isPagaFn = (pid: string, sd: string, set: Set<string>) => set.has(pid) || sd === 'PAGO';
 
+/**
+ * Quanto cobrar nesta parcela.
+ *
+ * O teto é o SALDO DO EMPRÉSTIMO. Um cliente que pagou adiantado pode ter
+ * saldo menor que uma parcela (ex.: parcela $36, saldo $29): exibir a parcela
+ * cheia manda o cobrador pedir mais do que o cliente deve, e o valor nem seria
+ * aceito no registro. É a mesma regra que MenuPagamento já aplica em
+ * `valorCheioLimitado` — o card estava sem ela, e os dois discordavam na tela.
+ */
+const valorACobrar = (e: EmprestimoData, paga: boolean): number => {
+  const base = e.numero_parcela === e.numero_parcelas
+    ? (e.valor_pago_parcela > 0 && !paga ? e.saldo_parcela : e.valor_parcela)
+    : e.valor_parcela;
+  const saldo = Number(e.saldo_emprestimo || 0);
+  return saldo > 0 && base > saldo ? saldo : base;
+};
+
 // Diferença em dias entre duas datas YYYY-MM-DD (sem timezone).
 const diasEntre = (ref?: string | null, venc?: string | null): number => {
   if (!ref || !venc) return 0;
@@ -180,9 +197,7 @@ export default function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps)
   const bc = borderOf(e, pg);
   const bg = bgOf(e, pg);
   const pi = e.pagamento_info;
-  const valorAPagar = e.numero_parcela === e.numero_parcelas
-    ? (e.valor_pago_parcela > 0 && !pg ? e.saldo_parcela : e.valor_parcela)
-    : e.valor_parcela;
+  const valorAPagar = valorACobrar(e, pg);
 
   // Swipe desabilitado temporariamente
   const podeSwipe = false;
@@ -460,9 +475,7 @@ function CardMultiplo({
     const np = naoPagosSet?.has(e.parcela_id) || false;
     const rp = resumoPorEmprestimo?.[e.emprestimo_id];
     const bloqueado = pago || np || !liqId || isViz || isClientePago;
-    const valorAPagar = e.numero_parcela === e.numero_parcelas
-      ? (e.valor_pago_parcela > 0 && !pago ? e.saldo_parcela : e.valor_parcela)
-      : e.valor_parcela;
+    const valorAPagar = valorACobrar(e, pago);
     const diasAtraso = Math.max(0, diasEntre((e as any).dia_referencia || dataReferencia, e.data_vencimento));
     const emDia = diasAtraso <= 0;
     const corDias = emDia ? '#10B981' : corAtraso(e.total_parcelas_vencidas || 1);

@@ -502,7 +502,14 @@ export default function ClientesScreen({ navigation, route }: any) {
     liqId,
     enabled: !usarCacheCtx && temSelecaoLiq,
     seed: seedClientes,
-    onReload: liqCtx.recarregarClientes,
+    // ⚠️ recarregarTUDO, não só os clientes.
+    // `recarregarClientes` relê a lista do dia mas NÃO relê a linha de
+    // `liquidacoes_diarias`. Com isso, nenhum caminho de refresh desta tela
+    // (puxar para atualizar, voltar o foco, pós-pagamento) enxergava uma
+    // mudança de status feita pelo admin no painel — reabertura, fechamento.
+    // O objeto ficava velho em memória até a tela ser destruída e remontada,
+    // que é o "só funciona saindo e entrando do sistema" relatado pelo campo.
+    onReload: liqCtx.recarregarTudo,
   });
 
   // DEBUG TEMPORÁRIO - REMOVER DEPOIS
@@ -610,6 +617,8 @@ export default function ClientesScreen({ navigation, route }: any) {
   // ⭐ Resumo de pagamento (saldo/cheia/valor livre → confirma o cenário)
   const [resumoVisible, setResumoVisible] = useState(false);
   const [resumoValor, setResumoValor] = useState(0);
+  // Complemento em crédito do pagamento em curso (0 quando é só dinheiro).
+  const [resumoCredito, setResumoCredito] = useState(0);
   const [modalEstornoVisible, setModalEstornoVisible] = useState(false);
   const [parcelasModal, setParcelasModal] = useState<ParcelaModal[]>([]);
   const [loadingParcelas, setLoadingParcelas] = useState(false);
@@ -1348,18 +1357,22 @@ export default function ClientesScreen({ navigation, route }: any) {
   }, [parcelaPagamento, processando, liqId, clienteModal, t]);
 
   // 1) Pagar 1 parcela — valor cheio, popup de confirmação
-  const acaoPagarValor = useCallback((valor: number) => {
+  // O menu manda dinheiro E crédito. O crédito é o complemento quando o
+  // dinheiro disponível não cobre a parcela inteira — sem ele a parcela ficava
+  // PARCIAL com o crédito intacto (caso Maichel: $29 numa parcela de $36).
+  const acaoPagarValor = useCallback((valorEspecie: number, valorCredito: number = 0) => {
     if (!parcelaPagamento) return;
     setMenuPagamentoVisible(false);
-    setResumoValor(valor);
+    setResumoValor(valorEspecie);
+    setResumoCredito(valorCredito);
     setResumoVisible(true);
   }, [parcelaPagamento]);
 
   // Confirma o pagamento após o resumo
   const handleResumoConfirmar = useCallback(() => {
     setResumoVisible(false);
-    registrarPagamentoDireto(resumoValor, 0);
-  }, [resumoValor, registrarPagamentoDireto]);
+    registrarPagamentoDireto(resumoValor, resumoCredito);
+  }, [resumoValor, resumoCredito, registrarPagamentoDireto]);
 
   // 2) Valor livre — abre o modal com campo editável
   const acaoValorLivre = useCallback(() => {
@@ -1477,12 +1490,58 @@ export default function ClientesScreen({ navigation, route }: any) {
   // "quitação" — bug relatado pelo cliente Talles Alan Pineiros, rota
   // Barcelona). O crédito antigo continua no pool e é consumido pela própria
   // fn_registrar_pagamento na cascata de auto-quitação das demais parcelas.
+  // Chama fn_quitar_emprestimo, que distribui dinheiro + crédito por TODAS as
+  // parcelas abertas. Antes isto mandava o saldo inteiro numa parcela só via
+  // fn_registrar_pagamento: a parcela ficava PARCIAL, as demais seguiam
+  // abertas e o empréstimo era dado como quitado. É também o caminho que a
+  // web já usa — as duas pontas passam a quitar igual.
+  const quitarEmprestimoRpc = useCallback(async (dinheiro: number) => {
+    if (!clienteModal?.emprestimo_id || processando) return;
+    setProcessando(true);
+    try {
+      const { data, error } = await supabase.rpc('fn_quitar_emprestimo', {
+        p_emprestimo_id: clienteModal.emprestimo_id,
+        p_valor_pagamento: dinheiro,
+        p_forma_pagamento: 'DINHEIRO',
+        p_observacoes: null,
+        p_latitude: coords?.lat || null,
+        p_longitude: coords?.lng || null,
+        p_precisao_gps: coords?.acc || null,
+        p_liquidacao_id: liqId || null,
+        p_user_id: vendedor?.user_id || null,
+      });
+      if (error) throw error;
+      const res = Array.isArray(data) ? data[0] : data;
+      if (res?.sucesso) {
+        setModalPagamentoVisible(false);
+        setMenuPagamentoVisible(false);
+        setParcelaPagamento(null);
+        setDadosPagamento(null);
+        atualizarSaldoLocalLiq(clienteModal.emprestimo_id);
+        atualizarSaldoLocalTodos(clienteModal.emprestimo_id);
+        showAlert(t.sucesso || 'Sucesso', res.mensagem || 'Empréstimo quitado');
+        loadLiq();
+      } else {
+        showAlert(t.erroGenerico, res?.mensagem || 'Erro ao quitar');
+      }
+    } catch (e: any) {
+      showAlert(t.erroGenerico, e.message || 'Erro ao quitar');
+    } finally {
+      setProcessando(false);
+    }
+  }, [clienteModal, processando, coords, liqId, t]);
+
   const acaoQuitarEmprestimo = useCallback(() => {
     if (!parcelaPagamento || !clienteModal) return;
-    const saldo = Number(clienteModal.saldo_emprestimo || 0);
-    if (saldo <= 0) { Alert.alert(t.atencao, t.semSaldoQuitar || 'Empréstimo já está quitado'); return; }
+    // saldo_emprestimo já vem líquido de crédito (a trigger desconta), então
+    // é exatamente o dinheiro que fn_quitar_emprestimo espera receber.
+    const dinheiro = Number(clienteModal.saldo_emprestimo || 0);
+    const credito = Number(dadosPagamento?.credito_disponivel || 0);
+    if (dinheiro <= 0 && credito <= 0) { Alert.alert(t.atencao, t.semSaldoQuitar || 'Empréstimo já está quitado'); return; }
     setMenuPagamentoVisible(false);
-    const msg = `${t.saldoTotalLbl || 'Saldo total'}: ${fmt(saldo)} · ${t.dinheiro}`;
+    const msg = credito > 0
+      ? `${fmt(dinheiro)} ${t.dinheiro} + ${fmt(credito)} ${t.credito || 'crédito'}`
+      : `${t.saldoTotalLbl || 'Saldo total'}: ${fmt(dinheiro)} · ${t.dinheiro}`;
     setConfirmModal({
       visible: true,
       titulo: t.quitarEmprestimo || 'Quitar empréstimo',
@@ -1490,10 +1549,10 @@ export default function ClientesScreen({ navigation, route }: any) {
       corConfirmar: '#10B981',
       onConfirmar: () => {
         setConfirmModal(cc => ({ ...cc, visible: false }));
-        registrarPagamentoDireto(saldo, 0);
+        quitarEmprestimoRpc(dinheiro);
       },
     });
-  }, [parcelaPagamento, clienteModal, t, registrarPagamentoDireto]);
+  }, [parcelaPagamento, clienteModal, dadosPagamento, t, quitarEmprestimoRpc]);
 
   // Chama a RPC de crédito em cascata
   // Função para ir para próxima parcela pendente
@@ -2486,6 +2545,24 @@ return (
       <View style={S.newHeader}>
         <Text style={S.newTitle}>{t.titulo || 'Clientes'}</Text>
         <View style={S.filterRight}>
+          {/* Sincronizar — pedido direto do campo. Mudanças feitas pelo admin
+              (reabertura, fechamento, autorização) chegam com um toque, sem
+              precisar sair e entrar do app. Azul para não se perder entre os
+              ícones cinzas: é ação, não configuração. */}
+          <TouchableOpacity
+            style={S.syncBtn}
+            onPress={onRefresh}
+            disabled={refreshing || revalidando}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={lang === 'es' ? 'Sincronizar' : 'Sincronizar'}
+          >
+            {refreshing || revalidando ? (
+              <ActivityIndicator size="small" color="#2563EB" />
+            ) : (
+              <Ionicons name="sync-outline" size={20} color="#2563EB" />
+            )}
+          </TouchableOpacity>
           <TouchableOpacity style={S.filterBtn} onPress={openDrawer} activeOpacity={0.7}>
             <Ionicons name="options-outline" size={20} color="#374151" />
             {temFiltroAtivo && <View style={S.filterDot} />}
@@ -3187,6 +3264,16 @@ const S = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  syncBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: '#EFF6FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
   },
   filterBtn: {
     width: 40,

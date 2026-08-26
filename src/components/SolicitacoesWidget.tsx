@@ -3,6 +3,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import * as Clipboard from 'expo-clipboard';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -30,6 +31,8 @@ interface Solicitacao {
   expira_em: string;
   data_resolucao: string | null;
   motivo_resolucao: string | null;
+  /** Dia que o vendedor pediu para abrir (ABERTURA_RETROATIVA / DIAS_FALTANTES). */
+  data_solicitada: string | null;
   cliente_nome?: string;
   parcela_numero?: number;
   valor_pago?: number;
@@ -129,6 +132,7 @@ export const SolicitacoesWidget: React.FC<Props> = ({ vendedorId, rotaId, lang =
   const [temNovasResolucoes, setTemNovasResolucoes] = useState(false);
   const [countPendentes, setCountPendentes] = useState(0);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const liqCtx = useLiquidacaoContext();
 
   const STORAGE_KEY = `@solicitacoes_ultima_viz_${vendedorId}`;
 
@@ -221,6 +225,7 @@ export const SolicitacoesWidget: React.FC<Props> = ({ vendedorId, rotaId, lang =
           expira_em,
           data_resolucao,
           motivo_resolucao,
+          data_solicitada,
           cliente_id,
           parcela_id,
           venda_pendente_id,
@@ -269,6 +274,16 @@ export const SolicitacoesWidget: React.FC<Props> = ({ vendedorId, rotaId, lang =
   useEffect(() => {
     verificarNovasResolucoes();
   }, [verificarNovasResolucoes]);
+
+  // Realtime: o contexto carimba a cada evento em solicitacoes_autorizacao da
+  // rota. O sino acende na hora da aprovação, em vez de esperar o polling —
+  // que fica só como rede de segurança para quando a subscription cair.
+  useEffect(() => {
+    if (!liqCtx.solicitacoesUpdatedAt) return;
+    verificarNovasResolucoes();
+    if (modalVisible) carregarSolicitacoes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liqCtx.solicitacoesUpdatedAt]);
 
   // Polling a cada 2 minutos para verificar novas resoluções
   useEffect(() => {
@@ -348,6 +363,17 @@ export const SolicitacoesWidget: React.FC<Props> = ({ vendedorId, rotaId, lang =
     }
   };
 
+  // Dia pedido, em dd/MM. `data_solicitada` é DATE puro (YYYY-MM-DD): fatiar a
+  // string em vez de usar new Date, que joga para o dia anterior em UTC-3.
+  const formatarDiaSolicitado = (d: string | null): string => {
+    if (!d) return '';
+    const p = String(d).substring(0, 10).split('-');
+    return p.length === 3 ? `${p[2]}/${p[1]}` : '';
+  };
+
+  const ehSolicitacaoDeAbertura = (tipo: string) =>
+    tipo === 'ABERTURA_RETROATIVA' || tipo === 'ABERTURA_DIAS_FALTANTES';
+
   const formatarValor = (valor: number) => {
     return new Intl.NumberFormat(lang === 'es' ? 'es-CO' : 'pt-BR', {
       style: 'currency',
@@ -366,13 +392,29 @@ export const SolicitacoesWidget: React.FC<Props> = ({ vendedorId, rotaId, lang =
       <View style={S.card}>
         <View style={S.cardHeader}>
           <View style={S.cardTipo}>
-            <Text style={S.cardTipoText}>{getTipoLabel(item.tipo_solicitacao)}</Text>
+            <Text style={S.cardTipoText}>
+              {getTipoLabel(item.tipo_solicitacao)}
+              {/* Sem o dia, várias solicitações de abertura ficam idênticas na
+                  lista e o vendedor não sabe qual foi liberada. */}
+              {ehSolicitacaoDeAbertura(item.tipo_solicitacao) && item.data_solicitada
+                ? ` · ${formatarDiaSolicitado(item.data_solicitada)}`
+                : ''}
+            </Text>
           </View>
           <View style={[S.cardStatus, { backgroundColor: statusConfig.bg }]}>
             <Ionicons name={statusConfig.iconName} size={14} color={statusConfig.color} />
             <Text style={[S.cardStatusText, { color: statusConfig.color }]}>{statusConfig.label}</Text>
           </View>
         </View>
+
+        {ehSolicitacaoDeAbertura(item.tipo_solicitacao) && item.data_solicitada && (
+          <View style={S.cardInfo}>
+            <Ionicons name="calendar-outline" size={16} color="#2563EB" />
+            <Text style={[S.cardInfoText, { color: '#2563EB', fontWeight: '700' }]}>
+              {lang === 'es' ? 'Día solicitado:' : 'Dia solicitado:'} {formatarDiaSolicitado(item.data_solicitada)}
+            </Text>
+          </View>
+        )}
 
         {item.cliente_nome && (
           <View style={S.cardInfo}>

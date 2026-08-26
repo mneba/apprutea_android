@@ -32,7 +32,13 @@ interface MenuPagamentoProps {
   /** Pagamentos parciais desta parcela (data/liquidação/valor). */
   pagamentosParciais?: { valor: number; dataLiq: string | null }[];
   // Ações
-  onPagarValor: (valor: number) => void;   // paga um valor (saldo, cheia ou livre) em espécie
+  /**
+   * Registra o pagamento da parcela atual.
+   * `valorCredito` é o complemento que sai do crédito quando o dinheiro
+   * disponível não cobre a parcela inteira — sem ele a parcela ficava
+   * PARCIAL e o crédito intacto, com o empréstimo aparentando quitado.
+   */
+  onPagarValor: (valorEspecie: number, valorCredito: number) => void;
   onUsarCredito: () => void;
   onPagarMultiplas: () => void;
   onQuitarEmprestimo: () => void;
@@ -52,6 +58,8 @@ interface MenuPagamentoProps {
     selecionarParcelas?: string;
     saldoTotalLbl?: string;
     creditoLbl?: string;
+    dinheiroLbl?: string;
+    creditoLbl2?: string;
     pagarVarias?: string;
     quitarEmprestimo?: string;
     quantoPagar?: string;
@@ -110,8 +118,17 @@ export default function MenuPagamento({
 
   const parciais = (pagamentosParciais || []).filter(p => p.valor > 0);
 
-  // Valor cheio limitado ao saldo do empréstimo (caso "matematicamente impossível")
-  const valorCheioLimitado = (saldoEmprestimo > 0 && valorCheio > saldoEmprestimo) ? saldoEmprestimo : valorCheio;
+  // O DINHEIRO nunca pode passar do saldo do empréstimo — que já vem líquido
+  // de crédito. Quando a parcela vale mais que esse saldo, a diferença sai do
+  // crédito do próprio cliente: é o que fecha a parcela em vez de deixá-la
+  // PARCIAL. Ex.: parcela $36, saldo $29, crédito $79 → $29 + $7.
+  const teto = (v: number) => (saldoEmprestimo > 0 && v > saldoEmprestimo) ? saldoEmprestimo : v;
+  const complemento = (v: number) => Math.min(Math.max(v - teto(v), 0), creditoDisponivel);
+
+  const valorCheioLimitado = teto(valorCheio);
+  const creditoCheio = complemento(valorCheio);
+  const valorSaldoLimitado = teto(valorSaldo);
+  const creditoSaldo = complemento(valorSaldo);
 
   const confirmarValorLivre = () => {
     const v = parseValor(valorLivre);
@@ -120,7 +137,7 @@ export default function MenuPagamento({
       setErro(`${t.valorAcimaMax || 'Valor acima do máximo:'} ${fmt(saldoEmprestimo)}`);
       return;
     }
-    onPagarValor(v);
+    onPagarValor(v, 0);
   };
 
   if (!visible || !parcela) return null;
@@ -169,11 +186,18 @@ export default function MenuPagamento({
                       </View>
                       <Text style={[S.opcaoLbl, opcao === 'saldo' && S.opcaoLblSel]}>{t.pagarSaldo || 'Pagar saldo'}</Text>
                     </View>
-                    <Text style={S.opcaoVal}>{fmt(valorSaldo)}</Text>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={S.opcaoVal}>{fmt(valorSaldo)}</Text>
+                      {creditoSaldo > 0 && (
+                        <Text style={S.opcaoComp}>
+                          {fmt(valorSaldoLimitado)} {t.dinheiroLbl || 'dinheiro'} + {fmt(creditoSaldo)} {t.creditoLbl2 || 'crédito'}
+                        </Text>
+                      )}
+                    </View>
                   </TouchableOpacity>
                   {opcao === 'saldo' && (
-                    <TouchableOpacity style={S.btnConfirmar} onPress={() => onPagarValor(valorSaldo)}>
-                      <Text style={S.btnConfirmarTx}>{t.confirmar || 'Confirmar'} {fmt(valorSaldo)}</Text>
+                    <TouchableOpacity style={S.btnConfirmar} onPress={() => onPagarValor(valorSaldoLimitado, creditoSaldo)}>
+                      <Text style={S.btnConfirmarTx}>{t.confirmar || 'Confirmar'} {fmt(valorSaldoLimitado)}</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -188,10 +212,17 @@ export default function MenuPagamento({
                     </View>
                     <Text style={[S.opcaoLbl, opcao === 'cheia' && S.opcaoLblSel]}>{t.pagar1Cheia || 'Pagar 1 parcela cheia'}</Text>
                   </View>
-                  <Text style={S.opcaoVal}>{fmt(valorCheioLimitado)}</Text>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={S.opcaoVal}>{fmt(creditoCheio > 0 ? valorCheio : valorCheioLimitado)}</Text>
+                    {creditoCheio > 0 && (
+                      <Text style={S.opcaoComp}>
+                        {fmt(valorCheioLimitado)} {t.dinheiroLbl || 'dinheiro'} + {fmt(creditoCheio)} {t.creditoLbl2 || 'crédito'}
+                      </Text>
+                    )}
+                  </View>
                 </TouchableOpacity>
                 {opcao === 'cheia' && (
-                  <TouchableOpacity style={S.btnConfirmar} onPress={() => onPagarValor(valorCheioLimitado)}>
+                  <TouchableOpacity style={S.btnConfirmar} onPress={() => onPagarValor(valorCheioLimitado, creditoCheio)}>
                     <Text style={S.btnConfirmarTx}>{t.confirmar || 'Confirmar'} {fmt(valorCheioLimitado)}</Text>
                   </TouchableOpacity>
                 )}
@@ -337,6 +368,7 @@ const S = StyleSheet.create({
   opcaoLbl: { fontSize: 14, color: '#1F2937' },
   opcaoLblSel: { fontWeight: '700' },
   opcaoVal: { fontSize: 17, fontWeight: '700', color: '#1F2937' },
+  opcaoComp: { fontSize: 11, color: '#4F46E5', fontWeight: '600', marginTop: 2 },
   opcaoHint: { fontSize: 12, color: '#9CA3AF' },
   opcaoCred: { fontSize: 14, fontWeight: '700', color: '#4F46E5' },
   resumoTx: { fontSize: 13, color: '#6B7280', marginBottom: 8 },

@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Dimensions,
   Modal,
   RefreshControl,
@@ -252,6 +253,23 @@ export default function LiquidacaoScreen({ navigation }: any) {
   
   // Estados do Calendário
   const [mostrarCalendario, setMostrarCalendario] = useState(false);
+  // Solicitações de abertura da rota (YYYY-MM-DD → status). Servem para
+  // destacar no calendário o dia que o vendedor pediu para abrir — sem isso
+  // ele não consegue distinguir os pedidos quando há vários.
+  const [solicAberturaPorDia, setSolicAberturaPorDia] = useState<Map<string, string>>(new Map());
+  // Pulso do alerta no calendário. Um único valor animado serve todos os dias
+  // — criar um por célula seria desperdício e eles piscariam fora de sincronia.
+  const pulso = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulso, { toValue: 1, duration: 650, useNativeDriver: true }),
+        Animated.timing(pulso, { toValue: 0, duration: 650, useNativeDriver: true }),
+      ]),
+    );
+    anim.start();
+    return () => anim.stop();
+  }, [pulso]);
   const [modoVisualizacao, setModoVisualizacaoLocal] = useState(false);
   const [dataVisualizacao, setDataVisualizacaoLocal] = useState<Date | null>(null);
   const [mesAtual, setMesAtual] = useState(new Date().getMonth());
@@ -502,9 +520,70 @@ export default function LiquidacaoScreen({ navigation }: any) {
     }
   };
 
+  // Busca os pedidos de abertura dos últimos 60 dias para marcar no calendário.
+  const carregarSolicitacoesAbertura = useCallback(async () => {
+    if (!vendedor?.rota_id) return;
+    const desde = new Date();
+    desde.setDate(desde.getDate() - 60);
+    const { data, error } = await supabase
+      .from('solicitacoes_autorizacao')
+      .select('data_solicitada, status, created_at')
+      .eq('rota_id', vendedor.rota_id)
+      .in('tipo_solicitacao', ['ABERTURA_RETROATIVA', 'ABERTURA_DIAS_FALTANTES'])
+      .not('data_solicitada', 'is', null)
+      .gte('created_at', desde.toISOString())
+      .order('created_at', { ascending: true });
+    if (error) { console.error('Erro ao carregar solicitações de abertura:', error); return; }
+    const m = new Map<string, string>();
+    for (const r of (data || [])) {
+      const k = String((r as any).data_solicitada).substring(0, 10);
+      // Havendo mais de um pedido para o mesmo dia, o resolvido prevalece
+      // sobre o pendente — é o desfecho que interessa ao vendedor.
+      const atual = m.get(k);
+      if (!atual || atual === 'PENDENTE') m.set(k, (r as any).status);
+    }
+    setSolicAberturaPorDia(m);
+  }, [vendedor?.rota_id]);
+
+  useEffect(() => { carregarSolicitacoesAbertura(); }, [carregarSolicitacoesAbertura]);
+
+  // Enquanto o calendário está na tela, o vendedor normalmente está ESPERANDO
+  // a autorização — e nada reconsultava com a tela já montada, obrigando a
+  // sair e voltar. Ref para não recriar o intervalo a cada render nem capturar
+  // uma closure velha de carregarLiquidacoes (que não é useCallback).
+  const recarregarCalendarioRef = useRef<() => void>(() => {});
+  recarregarCalendarioRef.current = () => {
+    carregarLiquidacoes();
+    carregarSolicitacoesAbertura();
+  };
+
+  // Realtime: o contexto carimba solicitacoesUpdatedAt a cada evento em
+  // solicitacoes_autorizacao da rota. A aprovação do admin chega em segundos,
+  // sem o cobrador tocar em nada.
+  useEffect(() => {
+    if (!liqCtx.solicitacoesUpdatedAt) return;
+    recarregarCalendarioRef.current();
+  }, [liqCtx.solicitacoesUpdatedAt]);
+
+  // Rede de segurança do Realtime, não o caminho principal: em 3G instável a
+  // subscription cai sem avisar. Intervalo folgado justamente por ser fallback
+  // — era 20s quando o polling era a única forma de saber.
+  useEffect(() => {
+    if (!mostrarCalendario) return;
+    const id = setInterval(() => recarregarCalendarioRef.current(), 120000);
+    return () => clearInterval(id);
+  }, [mostrarCalendario]);
+
   const onRefresh = () => {
     setRefreshing(true);
     carregarLiquidacoes();
+    carregarSolicitacoesAbertura();
+    // Esta tela mantém a própria cópia da liquidação (state local), enquanto a
+    // ClientesScreen lê a do contexto. Sem sincronizar as duas, o vendedor
+    // atualizava aqui, via o status novo (ex.: REABERTO), ia para Clientes e
+    // encontrava a versão velha — foi o que gerou o "naveguei entre as telas
+    // várias vezes e não atualizou".
+    liqCtx.recarregarTudo();
   };
 
   // ==================== CALENDÁRIO ====================
@@ -1111,6 +1190,64 @@ export default function LiquidacaoScreen({ navigation }: any) {
   }
 
   // ==================== RENDER CALENDÁRIO ====================
+  // Chave YYYY-MM-DD montada com os campos LOCAIS da Date. Nunca toISOString,
+  // que converte para UTC e desloca o dia em UTC-3.
+  const chaveDia = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  /**
+   * O único alerta que importa: a solicitação de abertura MAIS RECENTE que
+   * ainda não virou liquidação.
+   *
+   * Só uma, e não uma de cada estado: uma autorização antiga que o vendedor
+   * nunca usou vira histórico assim que ele pede outro dia. Empilhar avisos
+   * (18/07, 31/07, 20/08…) afogava justamente o que exige ação agora.
+   * Dia já aberto sai daqui — o pedido cumpriu seu papel.
+   */
+  const alertaSolic = (() => {
+    const abertos = new Set(
+      todasLiquidacoes.map(l =>
+        String((l as any).data_liquidacao || l.data_abertura).substring(0, 10),
+      ),
+    );
+    const candidatos: { data: string; status: string }[] = [];
+    solicAberturaPorDia.forEach((status, data) => {
+      if (abertos.has(data)) return;
+      if (status !== 'PENDENTE' && status !== 'APROVADO') return;  // negado não alerta
+      candidatos.push({ data, status });
+    });
+    candidatos.sort((a, b) => a.data.localeCompare(b.data));
+    return candidatos.length ? candidatos[candidatos.length - 1] : null;
+  })();
+
+  /** Cor do pulso do dia, ou null. Pisca apenas o dia do alerta vigente. */
+  const corPulso = (dia: DiaCalendario): string | null => {
+    if (!dia.mesAtual || dia.liquidacao || !alertaSolic) return null;
+    if (chaveDia(dia.data) !== alertaSolic.data) return null;
+    return alertaSolic.status === 'APROVADO' ? '#10B981' : '#F59E0B';
+  };
+
+  // Texto abaixo do calendário: o piscar sozinho não diz o que fazer.
+  const avisoSolic = (() => {
+    if (!alertaSolic) return null;
+    const p = alertaSolic.data.split('-');
+    const dm = `${p[2]}/${p[1]}`;
+    if (alertaSolic.status === 'APROVADO') {
+      return {
+        cor: '#10B981',
+        texto: language === 'pt-BR'
+          ? `Dia ${dm} autorizado — toque no dia para abrir.`
+          : `Día ${dm} autorizado — toque el día para abrir.`,
+      };
+    }
+    return {
+      cor: '#F59E0B',
+      texto: language === 'pt-BR'
+        ? `Dia ${dm} com solicitação em aberto — aguarde a autorização.`
+        : `Día ${dm} con solicitud abierta — espere la autorización.`,
+    };
+  })();
+
   if (mostrarCalendario) {
     const diasDoMes = gerarDiasDoMes();
     
@@ -1162,6 +1299,20 @@ export default function LiquidacaoScreen({ navigation }: any) {
                   onPress={() => handleClickDia(dia)}
                   disabled={!dia.mesAtual || dia.ehFuturo}
                 >
+                  {/* Alerta pulsante do pedido de abertura. Some assim que o
+                      dia é aberto — a partir daí valem as cores normais de
+                      aberto/fechado/reaberto. Antes isto era uma borda
+                      colorida, que colidia com o verde de "Aberto" da legenda
+                      e tornava o calendário ilegível. */}
+                  {corPulso(dia) && (
+                    <Animated.View
+                      style={[
+                        styles.diaPulso,
+                        { backgroundColor: corPulso(dia) as string,
+                          opacity: pulso.interpolate({ inputRange: [0, 1], outputRange: [0.12, 0.55] }) },
+                      ]}
+                    />
+                  )}
                   <Text style={[
                     styles.diaNumero,
                     !dia.mesAtual && styles.diaNumeroOutroMes,
@@ -1209,6 +1360,22 @@ export default function LiquidacaoScreen({ navigation }: any) {
                   <Text style={styles.legendaTexto}>{t.legendaSemRegistro}</Text>
                 </View>
               </View>
+
+              {/* Explica o que o dia piscando significa e o que fazer. */}
+              {avisoSolic && (
+                <View style={styles.avisoSolicBox}>
+                  <View style={styles.avisoSolicLinha}>
+                    <Animated.View
+                      style={[
+                        styles.avisoSolicPonto,
+                        { backgroundColor: avisoSolic.cor,
+                          opacity: pulso.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }) },
+                      ]}
+                    />
+                    <Text style={[styles.avisoSolicTx, { color: avisoSolic.cor }]}>{avisoSolic.texto}</Text>
+                  </View>
+                </View>
+              )}
             </View>
           </View>
 
@@ -2109,6 +2276,11 @@ const styles = StyleSheet.create({
   diaSemanaText: { fontSize: 12, fontWeight: '600', color: '#9CA3AF' },
   diasGrid: { flexDirection: 'row', flexWrap: 'wrap' },
   diaCell: { alignItems: 'center', justifyContent: 'flex-start', paddingTop: 4, paddingBottom: 6, minHeight: 52 },
+  diaPulso: { position: 'absolute', top: 2, left: 2, right: 2, bottom: 2, borderRadius: 10 },
+  avisoSolicBox: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#F3F4F6', gap: 8 },
+  avisoSolicLinha: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  avisoSolicPonto: { width: 9, height: 9, borderRadius: 5 },
+  avisoSolicTx: { flex: 1, fontSize: 12.5, fontWeight: '600', lineHeight: 18 },
   diaCellHoje: { backgroundColor: '#EFF6FF', borderRadius: 8 },
   diaNumero: { fontSize: 14, fontWeight: '500', color: '#1F2937' },
   diaNumeroOutroMes: { color: '#D1D5DB' },

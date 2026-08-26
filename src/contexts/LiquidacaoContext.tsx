@@ -28,6 +28,12 @@ interface LiquidacaoContextType {
   ordemRotaMap: Map<string, number>;
   carregandoClientes: boolean;
   clientesUpdatedAt: number;
+  /**
+   * Carimbo que muda a cada evento em `solicitacoes_autorizacao` da rota.
+   * As telas observam este número para se recarregarem sozinhas quando o
+   * admin aprova algo — sem cada uma abrir a própria subscription.
+   */
+  solicitacoesUpdatedAt: number;
   /** `liqOverride` evita depender do state já ter propagado (ver recarregarTudo). */
   recarregarClientes: (force?: boolean, liqOverride?: LiquidacaoDiaria | null) => Promise<void>;
   recarregarTudo: () => Promise<void>;
@@ -63,6 +69,7 @@ const LiquidacaoContext = createContext<LiquidacaoContextType>({
   ordemRotaMap: new Map(),
   carregandoClientes: false,
   clientesUpdatedAt: 0,
+  solicitacoesUpdatedAt: 0,
   recarregarClientes: async () => {},
   recarregarTudo: async () => {},
 
@@ -103,6 +110,7 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
   const [ordemRotaMap, setOrdemRotaMap] = useState<Map<string, number>>(new Map());
   const [carregandoClientes, setCarregandoClientes] = useState(false);
   const [clientesUpdatedAt, setClientesUpdatedAt] = useState(0);
+  const [solicitacoesUpdatedAt, setSolicitacoesUpdatedAt] = useState(0);
 
   // Dedupe de chamadas NÃO forçadas (evita rajada de requisições iguais)
   const recarregandoClientesRef = useRef(false);
@@ -241,6 +249,54 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
     await recarregarClientes(true, liq);
   }, [recarregarLiquidacao, recarregarClientes]);
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // REALTIME — um canal por rota, para toda a aplicação
+  //
+  // Sem isto, mudanças feitas pelo admin (reabrir, fechar, aprovar uma
+  // autorização) só chegavam quando o cobrador puxava a tela ou esperava o
+  // polling. O canal é único e mora aqui: cada tela abrir a sua multiplicaria
+  // conexões e sairia de sincronia.
+  //
+  // ⚠️ O Realtime NÃO reenvia o que passou enquanto o app esteve desconectado.
+  // Por isso, ao (re)assinar, disparamos uma recarga completa antes de confiar
+  // nos eventos incrementais — é o "catch-up" da reconexão.
+  // ═══════════════════════════════════════════════════════════════════════
+  const recarregarTudoRef = useRef(recarregarTudo);
+  recarregarTudoRef.current = recarregarTudo;
+
+  useEffect(() => {
+    const rotaId = vendedor?.rota_id;
+    if (!rotaId) return;
+
+    const canal = supabase
+      .channel(`rota-${rotaId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'liquidacoes_diarias', filter: `rota_id=eq.${rotaId}` },
+        (payload) => {
+          console.log('📡 [Realtime] liquidacoes_diarias:', payload.eventType);
+          recarregarTudoRef.current();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'solicitacoes_autorizacao', filter: `rota_id=eq.${rotaId}` },
+        (payload) => {
+          console.log('📡 [Realtime] solicitacoes_autorizacao:', payload.eventType);
+          setSolicitacoesUpdatedAt(Date.now());
+        },
+      )
+      .subscribe((status) => {
+        console.log('📡 [Realtime] canal rota-' + rotaId + ':', status);
+        if (status === 'SUBSCRIBED') {
+          recarregarTudoRef.current();
+          setSolicitacoesUpdatedAt(Date.now());
+        }
+      });
+
+    return () => { supabase.removeChannel(canal); };
+  }, [vendedor?.rota_id]);
+
   // Carregar liquidação ao montar e quando vendedor mudar
   useEffect(() => {
     if (vendedor?.rota_id) {
@@ -289,6 +345,7 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
     ordemRotaMap,
     carregandoClientes,
     clientesUpdatedAt,
+    solicitacoesUpdatedAt,
     recarregarClientes,
     recarregarTudo,
 
@@ -317,6 +374,7 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
     ordemRotaMap,
     carregandoClientes,
     clientesUpdatedAt,
+    solicitacoesUpdatedAt,
     recarregarClientes,
     recarregarTudo,
     modoVisualizacao,
