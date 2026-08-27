@@ -349,6 +349,34 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   // Exclui pagamentos feitos APENAS com crédito (forma_pagamento = 'CREDITO')
   // Pagamentos com dinheiro/transferência contam o valor_pago_atual (não valor_pago_total que inclui crédito usado)
   const pagamentosDinheiro = pagamentos.filter(p => p.forma_pagamento !== 'CREDITO');
+
+  // Crédito consumido e parcelas fechadas por crédito, por empréstimo, DENTRO
+  // desta liquidação.
+  //
+  // Serve para não anunciar como "Crédito gerado" um excedente que foi
+  // consumido na mesma operação. Um pagamento de $576 numa parcela de $72 gera
+  // $504 e a auto-quitação come tudo no mesmo instante — o extrato dizia
+  // "Crédito gerado: $504" como se o cliente tivesse ficado com esse valor,
+  // sem mencionar que 7 parcelas foram quitadas ali.
+  const creditoDoDiaPorEmprestimo = new Map<string, { consumido: number; parcelas: number }>();
+  for (const p of pagamentos) {
+    const eid = (p as any).emprestimo_id;
+    if (!eid) continue;
+    const a = creditoDoDiaPorEmprestimo.get(eid) || { consumido: 0, parcelas: 0 };
+    a.consumido += parseFloat((p as any).valor_credito_usado || 0);
+    if (p.forma_pagamento === 'CREDITO') a.parcelas += 1;
+    creditoDoDiaPorEmprestimo.set(eid, a);
+  }
+
+  /** Excedente que REALMENTE sobrou, e quantas parcelas o crédito fechou. */
+  const creditoLiquido = (p: any) => {
+    const gerado = parseFloat(p.valor_credito_gerado || 0);
+    const doDia = creditoDoDiaPorEmprestimo.get(p.emprestimo_id) || { consumido: 0, parcelas: 0 };
+    return {
+      excedente: Math.max(0, gerado - doDia.consumido),
+      parcelasQuitadas: doDia.parcelas,
+    };
+  };
   const totalPagamentos = pagamentosDinheiro.reduce((s, p) => {
     // valor_pago_atual = dinheiro + crédito usado neste pagamento
     // valor_pago_total = valor aplicado na parcela (pode ser diferente se gerou excedente)
@@ -445,14 +473,14 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
       <div class="c cinza" style="font-size:10px">── ${t.cobrancasParcelas} (${pagamentosDinheiro.length}) ──</div>
       ${pagamentosDinheiro.map((p, idx) => {
         const nomeCliente = (p.clientes as any)?.nome || (p.cliente as any)?.nome || `Parcela ${p.numero_parcela}`;
-        const excedente = parseFloat(p.valor_credito_gerado || 0);
         // ⭐ Mostrar o valor que entrou no caixa (dinheiro), não o valor_pago_total
         const valorPagoAtual = parseFloat(p.valor_pago_atual || p.valor_pago_total || 0);
         const creditoUsado = parseFloat(p.valor_credito_usado || 0);
         const dinheiroRecebido = valorPagoAtual - creditoUsado;
+        const liqH = creditoLiquido(p);
         return `<div class="mov">
           <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${nomeCliente}</span><span class="mov-val verde">+${fmt(dinheiroRecebido)}</span></div>
-          <div class="mov-sub" style="color:#6B7280">${lang === 'es' ? 'Cuota' : 'Parcela'} ${p.numero_parcela}: ${fmt(parseFloat(p.valor_parcela || 0))}${excedente > 0 ? ` · ${lang === 'es' ? 'Crédito generado' : 'Crédito gerado'}: ${fmt(excedente)}` : ''}${creditoUsado > 0 ? ` · ${lang === 'es' ? 'Crédito usado' : 'Crédito usado'}: ${fmt(creditoUsado)}` : ''}</div>
+          <div class="mov-sub" style="color:#6B7280">${lang === 'es' ? 'Cuota' : 'Parcela'} ${p.numero_parcela}: ${fmt(parseFloat(p.valor_parcela || 0))}${creditoUsado > 0 ? ` · ${fmt(creditoUsado)} ${lang === 'es' ? 'con crédito' : 'com crédito'}` : ''}${liqH.parcelasQuitadas > 0 ? ` · ${lang === 'es' ? 'liquidó' : 'quitou'} +${liqH.parcelasQuitadas} ${lang === 'es' ? 'cuotas' : 'parcelas'}` : ''}${liqH.excedente > 0 ? ` · ${lang === 'es' ? 'Crédito generado' : 'Crédito gerado'}: ${fmt(liqH.excedente)}` : ''}</div>
           <div class="mov-meta"><span>${fmtHora(p.created_at)}</span>${p.forma_pagamento ? `<span>${p.forma_pagamento}</span>` : ''}</div>
         </div>`;
       }).join('')}
@@ -811,12 +839,11 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                         <Text style={[cupom.centro, { fontSize: 10, marginTop: 6, color: '#6B7280' }]}>── {t.cobrancasParcelas} ({pagamentosDinheiro.length}) ──</Text>
                         {pagamentosDinheiro.map((p, idx) => {
                           const nomeCliente = (p.clientes as any)?.nome || (p.cliente as any)?.nome || `Parcela ${p.numero_parcela}`;
-                          const excedente = parseFloat(p.valor_credito_gerado || 0);
                           // ⭐ Mostrar o valor que entrou no caixa (dinheiro), não o valor_pago_total
                           const valorPagoAtual = parseFloat(p.valor_pago_atual || p.valor_pago_total || 0);
                           const creditoUsado = parseFloat(p.valor_credito_usado || 0);
                           const dinheiroRecebido = valorPagoAtual - creditoUsado;
-                          const temExcedente = excedente > 0;
+                          const liq = creditoLiquido(p);
                           return (
                             <View key={p.id}>
                               <View style={cupom.itemRow}>
@@ -827,8 +854,9 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                               <Text style={[cupom.itemSub, { color: '#6B7280', fontSize: 9 }]}>
                                 {'   '}
                                 {lang === 'es' ? 'Cuota' : 'Parcela'} {p.numero_parcela}: {fmt(parseFloat(p.valor_parcela || 0))}
-                                {temExcedente && ` · ${lang === 'es' ? 'Crédito generado' : 'Crédito gerado'}: ${fmt(excedente)}`}
-                                {creditoUsado > 0 && ` · ${lang === 'es' ? 'Crédito usado' : 'Crédito usado'}: ${fmt(creditoUsado)}`}
+                                {creditoUsado > 0 && ` · ${fmt(creditoUsado)} ${lang === 'es' ? 'con crédito' : 'com crédito'}`}
+                                {liq.parcelasQuitadas > 0 && ` · ${lang === 'es' ? 'liquidó' : 'quitou'} +${liq.parcelasQuitadas} ${lang === 'es' ? 'cuotas' : 'parcelas'}`}
+                                {liq.excedente > 0 && ` · ${lang === 'es' ? 'Crédito generado' : 'Crédito gerado'}: ${fmt(liq.excedente)}`}
                               </Text>
                               <View style={cupom.itemMeta}>
                                 <Text style={cupom.itemHora}>   {fmtHora(p.created_at)}</Text>

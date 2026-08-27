@@ -320,8 +320,14 @@ export default function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps)
             <View style={{ alignItems: 'flex-end' }}>
               <Text style={[S.pValBig, { color: '#059669' }]}>{fmt(resumoPago.dinheiroReal)}</Text>
               <Text style={S.pRecebidoLbl}>{lang === 'es' ? 'recibido' : 'recebido'}</Text>
+              {/* "pagos com crédito", não "+ crédito": este número COMPÕE o valor
+                  da parcela, não é saldo a favor do cliente. Com o rótulo antigo
+                  o cobrador lia como se o cliente ainda tivesse esse crédito
+                  guardado — e o saldo disponível dele podia ser zero. */}
               {resumoPago.creditoUsado > 0 ? (
-                <Text style={S.pCreditoLbl}>+ {fmt(resumoPago.creditoUsado)} {lang === 'es' ? 'crédito' : 'crédito'}</Text>
+                <Text style={S.pCreditoLbl}>
+                  {fmt(resumoPago.creditoUsado)} {lang === 'es' ? 'pagados con crédito' : 'pagos com crédito'}
+                </Text>
               ) : null}
               <Text style={S.pParcelaDiscreta}>
                 {resumoPago.qtdParcelas > 1
@@ -513,7 +519,9 @@ function CardMultiplo({
                 <Text style={[S.pValBig, { color: '#059669' }]}>{fmt(rp.dinheiroReal)}</Text>
                 <Text style={S.pRecebidoLbl}>{lang === 'es' ? 'recibido' : 'recebido'}</Text>
                 {rp.creditoUsado > 0 ? (
-                  <Text style={S.pCreditoLbl}>+ {fmt(rp.creditoUsado)} {lang === 'es' ? 'crédito' : 'crédito'}</Text>
+                  <Text style={S.pCreditoLbl}>
+                    {fmt(rp.creditoUsado)} {lang === 'es' ? 'pagados con crédito' : 'pagos com crédito'}
+                  </Text>
                 ) : null}
               </>
             ) : pago && e.pagamento_info ? (
