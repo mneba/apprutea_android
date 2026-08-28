@@ -34,6 +34,16 @@ const { width, height } = Dimensions.get('window');
 const fmt = (v: number | null | undefined) =>
   '$ ' + (v ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+/**
+ * Um lançamento pode ter até 5 comprovantes (`comprovantes_urls`), mas os
+ * registros anteriores à coluna têm só `foto_url`. Regra única de leitura.
+ */
+const comprovantesDe = (registro: any): string[] => {
+  const lista = registro?.comprovantes_urls;
+  if (Array.isArray(lista) && lista.length > 0) return lista.filter(Boolean);
+  return registro?.foto_url ? [registro.foto_url] : [];
+};
+
 const fmtData = (d: string | null) => {
   if (!d) return '-';
   const dt = new Date(d);
@@ -1503,8 +1513,9 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
   const [cancelandoEmprestimo, setCancelandoEmprestimo] = useState<any | null>(null);
   const [motivoCancelamento, setMotivoCancelamento] = useState('');
   const [confirmandoCancelamento, setConfirmandoCancelamento] = useState(false);
-  // ⭐ Modal de visualização de comprovante (foto)
-  const [fotoVisualizacaoUrl, setFotoVisualizacaoUrl] = useState<string | null>(null);
+  // ⭐ Modal de visualização de comprovantes — um lançamento pode ter até 5.
+  const [comprovantesAbertos, setComprovantesAbertos] = useState<string[] | null>(null);
+  const [comprovanteIdx, setComprovanteIdx] = useState(0);
   // Microseguro vinculado ao empréstimo (se houver) — null = ainda buscando, undefined = não tem
   const [microseguroVinculado, setMicroseguroVinculado] = useState<number | null | undefined>(undefined);
 
@@ -1548,7 +1559,7 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
 
       let query = supabase
         .from('financeiro')
-        .select('id, tipo, categoria, descricao, valor, created_at, forma_pagamento, cliente_nome, vendedor_nome, status, foto_url')
+        .select('id, tipo, categoria, descricao, valor, created_at, forma_pagamento, cliente_nome, vendedor_nome, status, foto_url, comprovantes_urls')
         .eq('liquidacao_id', liquidacaoId)
         .in('status', ['PAGO', 'ANULADO'])  // Inclui anulados para mostrar riscados
         .order('created_at', { ascending: false });
@@ -1803,14 +1814,18 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
         <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}>
           <Text style={dStyles.finItemHora}>{fmtHora(item.created_at)}</Text>
           {item.forma_pagamento && <Text style={dStyles.finItemForma}>{item.forma_pagamento}</Text>}
-          {item.foto_url && (
+          {comprovantesDe(item).length > 0 && (
             <TouchableOpacity
-              onPress={() => setFotoVisualizacaoUrl(item.foto_url)}
+              onPress={() => {
+                setComprovanteIdx(0);
+                setComprovantesAbertos(comprovantesDe(item));
+              }}
               style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}
             >
               <Ionicons name="image-outline" size={14} color="#3B82F6" />
               <Text style={{ fontSize: 11, fontWeight: '600', color: '#3B82F6' }}>
                 {lang === 'es' ? 'Comprobante' : 'Comprovante'}
+                {comprovantesDe(item).length > 1 ? ` (${comprovantesDe(item).length})` : ''}
               </Text>
             </TouchableOpacity>
           )}
@@ -1899,27 +1914,54 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
         )}
       </View>
 
-      {/* ⭐ MODAL VISUALIZAÇÃO DE COMPROVANTE (foto) */}
+      {/* ⭐ MODAL VISUALIZAÇÃO DE COMPROVANTES — galeria de até 5 fotos.
+          O fundo fecha ao toque, mas a FlatList intercepta os toques sobre a
+          imagem para o swipe funcionar. */}
       <Modal
-        visible={!!fotoVisualizacaoUrl}
+        visible={!!comprovantesAbertos}
         transparent
         animationType="fade"
-        onRequestClose={() => setFotoVisualizacaoUrl(null)}
+        onRequestClose={() => setComprovantesAbertos(null)}
       >
-        <TouchableOpacity
-          activeOpacity={1}
-          onPress={() => setFotoVisualizacaoUrl(null)}
-          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center', padding: 20 }}
-        >
-          {fotoVisualizacaoUrl && (
-            <Image
-              source={{ uri: fotoVisualizacaoUrl }}
-              style={{ width: '100%', height: '80%' }}
-              resizeMode="contain"
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.9)' }}>
+          <TouchableOpacity
+            activeOpacity={1}
+            onPress={() => setComprovantesAbertos(null)}
+            style={{ ...StyleSheet.absoluteFillObject }}
+          />
+
+          {comprovantesAbertos && (
+            <FlatList
+              data={comprovantesAbertos}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              keyExtractor={(u, i) => `${i}-${u}`}
+              style={{ flexGrow: 0, marginTop: height * 0.1 }}
+              onMomentumScrollEnd={(e) => {
+                setComprovanteIdx(Math.round(e.nativeEvent.contentOffset.x / width));
+              }}
+              renderItem={({ item: uri }) => (
+                <View style={{ width, height: height * 0.75, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 }}>
+                  <Image source={{ uri }} style={{ width: '100%', height: '100%' }} resizeMode="contain" />
+                </View>
+              )}
             />
           )}
+
+          {/* Contador — só quando há mais de um comprovante */}
+          {comprovantesAbertos && comprovantesAbertos.length > 1 && (
+            <View style={{ position: 'absolute', bottom: 48, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View style={{ backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14 }}>
+                <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>
+                  {comprovanteIdx + 1} / {comprovantesAbertos.length}
+                </Text>
+              </View>
+            </View>
+          )}
+
           <TouchableOpacity
-            onPress={() => setFotoVisualizacaoUrl(null)}
+            onPress={() => setComprovantesAbertos(null)}
             style={{
               position: 'absolute', top: 40, right: 20,
               backgroundColor: 'rgba(255,255,255,0.2)',
@@ -1929,7 +1971,7 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
           >
             <Ionicons name="close" size={24} color="#fff" />
           </TouchableOpacity>
-        </TouchableOpacity>
+        </View>
       </Modal>
 
       {/* ⭐ MODAL DE CONFIRMAÇÃO DE CANCELAMENTO DE EMPRÉSTIMO */}

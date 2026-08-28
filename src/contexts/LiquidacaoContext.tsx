@@ -123,6 +123,14 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
   // Chave `liqId|data_liquidacao` da última carga concluída — evita que o
   // useEffect refaça o trabalho que recarregarTudo acabou de executar.
   const chaveCarregadaRef = useRef<string | null>(null);
+  // Pedido de recarga chegado enquanto outra estava em voo. Atendido uma vez
+  // ao final, em vez de abrir uma segunda requisição em paralelo.
+  const recargaPendenteRef = useRef(false);
+  // Auto-referência: o `finally` precisa reinvocar a própria função.
+  const recarregarClientesRef = useRef<((force?: boolean) => Promise<void>) | null>(null);
+  // Quando a própria app iniciou/terminou uma recarga. Base da janela de eco
+  // do Realtime (ver bloco REALTIME).
+  const ultimaRecargaLocalRef = useRef(0);
 
   // Modo visualização (existente)
   const [modoVisualizacao, setModoVisualizacao] = useState(false);
@@ -203,8 +211,19 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (recarregandoClientesRef.current && !force) {
-      console.log('⏭️ [Ctx] recarregarClientes: já em andamento, ignorando');
+    // Uma carga já em voo vai trazer o estado atual de qualquer forma. Abrir
+    // outra em paralelo apenas duplica o payload mais pesado do app — era
+    // exatamente o que o `force` fazia, e a origem da lentidão pós-pagamento:
+    // o `reqId` descartava a resposta obsoleta, mas só depois de baixá-la.
+    // Em vez de furar o guard, agendamos a repetição para o fim. O frescor que
+    // o `force` garantia continua garantido, sem a requisição dobrada.
+    if (recarregandoClientesRef.current) {
+      if (force) {
+        console.log('⏳ [Ctx] recarregarClientes: carga em voo, repetição agendada');
+        recargaPendenteRef.current = true;
+      } else {
+        console.log('⏭️ [Ctx] recarregarClientes: já em andamento, ignorando');
+      }
       return;
     }
 
@@ -235,9 +254,20 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
       if (reqId === reqIdRef.current) {
         setCarregandoClientes(false);
         recarregandoClientesRef.current = false;
+        ultimaRecargaLocalRef.current = Date.now();
+        // Alguém pediu recarga enquanto esta rodava — atende agora, uma vez.
+        // A flag é limpa ANTES de reinvocar: no máximo uma repetição por rajada.
+        if (recargaPendenteRef.current) {
+          recargaPendenteRef.current = false;
+          // Sem `liqOverride`: a esta altura o setState já propagou e
+          // `liquidacaoAtualRef` está atualizado.
+          recarregarClientesRef.current?.(true);
+        }
       }
     }
   }, [vendedor?.rota_id, limparCacheClientes]);
+
+  recarregarClientesRef.current = recarregarClientes;
 
   // ─── Recarrega liquidação + clientes ──────────────────────────────────────
   // A liquidação recém-buscada é repassada DIRETO para recarregarClientes.
@@ -245,6 +275,9 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
   // antiga: ao ABRIR uma liquidação, a closure ainda tinha `null`, o early
   // return limpava o cache e a lista piscava vazia até o useEffect consertar.
   const recarregarTudo = useCallback(async () => {
+    // Marca no início E no fim (o `finally` de recarregarClientes): a janela de
+    // eco do Realtime precisa cobrir tanto a carga em voo quanto a recém-concluída.
+    ultimaRecargaLocalRef.current = Date.now();
     const liq = await recarregarLiquidacao();
     await recarregarClientes(true, liq);
   }, [recarregarLiquidacao, recarregarClientes]);
@@ -261,12 +294,35 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
   // Por isso, ao (re)assinar, disparamos uma recarga completa antes de confiar
   // nos eventos incrementais — é o "catch-up" da reconexão.
   // ═══════════════════════════════════════════════════════════════════════
+  //
+  // ⚠️ NEM TODO EVENTO MERECE UMA RECARGA COMPLETA.
+  //
+  // `liquidacoes_diarias` é escrita por praticamente toda operação do dia:
+  // cada pagamento atualiza valor_recebido_dia / valor_dinheiro / caixa_final,
+  // e o fechamento grava várias vezes. O canal não distingue quem escreveu,
+  // então o próprio aparelho recebe de volta o eco do que acabou de gravar —
+  // e disparava uma segunda `fn_liquidacao_dia_completa` em cima da que a tela
+  // já havia pedido. Era a lentidão pós-pagamento e no fechamento.
+  //
+  // A separação que importa:
+  //   • mudou o STATUS (admin fechou, reabriu, abriu outro dia) → recarrega já,
+  //     sem debounce nem janela: é o evento que não pode atrasar.
+  //   • mudaram só os TOTAIS → debounce (rajada vira uma recarga) + janela de
+  //     eco (se acabamos de recarregar, esse estado já está na tela).
+  //
   const recarregarTudoRef = useRef(recarregarTudo);
   recarregarTudoRef.current = recarregarTudo;
+
+  // Rajada de UPDATEs (fechamento grava mais de uma vez) vira uma recarga só.
+  const DEBOUNCE_REALTIME_MS = 1200;
+  // Evento que chega até 4s de uma recarga nossa é tratado como eco dela.
+  const JANELA_ECO_MS = 4000;
 
   useEffect(() => {
     const rotaId = vendedor?.rota_id;
     if (!rotaId) return;
+
+    let debounceId: ReturnType<typeof setTimeout> | null = null;
 
     const canal = supabase
       .channel(`rota-${rotaId}`)
@@ -274,8 +330,29 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'liquidacoes_diarias', filter: `rota_id=eq.${rotaId}` },
         (payload) => {
-          console.log('📡 [Realtime] liquidacoes_diarias:', payload.eventType);
-          recarregarTudoRef.current();
+          const statusNovo = (payload.new as any)?.status;
+          const statusAtual = liquidacaoAtualRef.current?.status;
+          const mudouStatus =
+            payload.eventType !== 'UPDATE' || (!!statusNovo && statusNovo !== statusAtual);
+
+          if (mudouStatus) {
+            console.log('📡 [Realtime] liquidacoes_diarias: status →', statusNovo ?? payload.eventType);
+            if (debounceId) { clearTimeout(debounceId); debounceId = null; }
+            recarregarTudoRef.current();
+            return;
+          }
+
+          if (debounceId) clearTimeout(debounceId);
+          debounceId = setTimeout(() => {
+            debounceId = null;
+            const desdeRecargaLocal = Date.now() - ultimaRecargaLocalRef.current;
+            if (desdeRecargaLocal < JANELA_ECO_MS) {
+              console.log('🔇 [Realtime] eco da própria gravação, ignorado');
+              return;
+            }
+            console.log('📡 [Realtime] liquidacoes_diarias: totais, recarregando');
+            recarregarTudoRef.current();
+          }, DEBOUNCE_REALTIME_MS);
         },
       )
       .on(
@@ -294,7 +371,10 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
         }
       });
 
-    return () => { supabase.removeChannel(canal); };
+    return () => {
+      if (debounceId) clearTimeout(debounceId);
+      supabase.removeChannel(canal);
+    };
   }, [vendedor?.rota_id]);
 
   // Carregar liquidação ao montar e quando vendedor mudar

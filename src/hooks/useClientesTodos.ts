@@ -13,7 +13,8 @@ export interface EmprestimoTodos {
 
 export interface ClienteTodos {
   id: string; codigo_cliente: number | null; nome: string;
-  telefone_celular: string | null; status: string; tem_atraso: boolean;
+  telefone_celular: string | null; foto_url: string | null;
+  status: string; tem_atraso: boolean;
   permite_renegociacao: boolean; permite_emprestimo_adicional: boolean;
   cliente_created_at?: string;
   emprestimos: EmprestimoTodos[];
@@ -69,7 +70,7 @@ export default function useClientesTodos({ rotaId, setOrdemRotaMap, setRefreshin
       // Query 1: Todos os empréstimos da rota com dados do cliente
       const { data: emps } = await supabase
         .from('emprestimos')
-        .select(`id, valor_principal, valor_total, valor_saldo, valor_parcela, numero_parcelas, status, frequencia_pagamento, tipo_emprestimo, data_emprestimo, clientes!inner(id, nome, telefone_celular, status, codigo_cliente, permite_renegociacao, permite_emprestimo_adicional, created_at)`)
+        .select(`id, valor_principal, valor_total, valor_saldo, valor_parcela, numero_parcelas, status, frequencia_pagamento, tipo_emprestimo, data_emprestimo, clientes!inner(id, nome, foto_url, telefone_celular, status, codigo_cliente, permite_renegociacao, permite_emprestimo_adicional, created_at)`)
         .eq('rota_id', rotaId)
         .in('status', ['ATIVO', 'VENCIDO', 'QUITADO', 'RENEGOCIADO']);
 
@@ -106,6 +107,7 @@ export default function useClientesTodos({ rotaId, setOrdemRotaMap, setRefreshin
             codigo_cliente: c.codigo_cliente,
             nome: c.nome,
             telefone_celular: c.telefone_celular,
+            foto_url: c.foto_url ?? null,
             status: c.status,
             tem_atraso: false,
             permite_renegociacao: c.permite_renegociacao || false,

@@ -101,7 +101,8 @@ interface ItemLista {
 
 interface ClienteTodos {
   id: string; codigo_cliente: number | null; nome: string;
-  telefone_celular: string | null; status: string; tem_atraso: boolean;
+  telefone_celular: string | null; foto_url: string | null;
+  status: string; tem_atraso: boolean;
   permite_renegociacao: boolean; permite_emprestimo_adicional: boolean;
   cliente_created_at?: string;
   emprestimos: EmprestimoTodos[];

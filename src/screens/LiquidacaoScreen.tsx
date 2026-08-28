@@ -256,6 +256,12 @@ export default function LiquidacaoScreen({ navigation }: any) {
   // Solicitações de abertura da rota (YYYY-MM-DD → status). Servem para
   // destacar no calendário o dia que o vendedor pediu para abrir — sem isso
   // ele não consegue distinguir os pedidos quando há vários.
+  // Estado por dia: 'PENDENTE' | 'APROVADO' (válido) | 'EXPIRADO' | 'REJEITADO'.
+  // 'EXPIRADO' é derivado — a coluna `status` continua 'APROVADO' no banco, mas
+  // a autorização só vale enquanto `expira_em > NOW()` (regra da seção 6 de
+  // fn_validar_abertura_liquidacao). Sem essa distinção o calendário anunciava
+  // "pode abrir" para autorização vencida, e o vendedor batia no pedido de
+  // nova autorização sem entender por quê.
   const [solicAberturaPorDia, setSolicAberturaPorDia] = useState<Map<string, string>>(new Map());
   // Pulso do alerta no calendário. Um único valor animado serve todos os dias
   // — criar um por célula seria desperdício e eles piscariam fora de sincronia.
@@ -527,20 +533,32 @@ export default function LiquidacaoScreen({ navigation }: any) {
     desde.setDate(desde.getDate() - 60);
     const { data, error } = await supabase
       .from('solicitacoes_autorizacao')
-      .select('data_solicitada, status, created_at')
+      .select('data_solicitada, status, created_at, expira_em')
       .eq('rota_id', vendedor.rota_id)
       .in('tipo_solicitacao', ['ABERTURA_RETROATIVA', 'ABERTURA_DIAS_FALTANTES'])
       .not('data_solicitada', 'is', null)
       .gte('created_at', desde.toISOString())
       .order('created_at', { ascending: true });
     if (error) { console.error('Erro ao carregar solicitações de abertura:', error); return; }
+
+    const agora = Date.now();
     const m = new Map<string, string>();
+    // Prioridade por dia: aprovação VÁLIDA > pedido pendente > aprovação
+    // expirada > rejeitado. Antes vencia o primeiro registro aprovado da lista,
+    // que é o mais ANTIGO — com três aprovações para o mesmo dia, o calendário
+    // se guiava pela mais vencida e ignorava as posteriores.
+    const PESO: Record<string, number> = { APROVADO: 4, PENDENTE: 3, EXPIRADO: 2, REJEITADO: 1 };
     for (const r of (data || [])) {
       const k = String((r as any).data_solicitada).substring(0, 10);
-      // Havendo mais de um pedido para o mesmo dia, o resolvido prevalece
-      // sobre o pendente — é o desfecho que interessa ao vendedor.
+      let estado = String((r as any).status || '');
+      if (estado === 'APROVADO') {
+        const expira = (r as any).expira_em ? new Date((r as any).expira_em).getTime() : null;
+        // Sem expira_em tratamos como válida — é o comportamento antigo, e a
+        // RPC decide de qualquer forma no momento do toque.
+        if (expira !== null && expira <= agora) estado = 'EXPIRADO';
+      }
       const atual = m.get(k);
-      if (!atual || atual === 'PENDENTE') m.set(k, (r as any).status);
+      if (!atual || (PESO[estado] ?? 0) > (PESO[atual] ?? 0)) m.set(k, estado);
     }
     setSolicAberturaPorDia(m);
   }, [vendedor?.rota_id]);
@@ -1213,7 +1231,10 @@ export default function LiquidacaoScreen({ navigation }: any) {
     const candidatos: { data: string; status: string }[] = [];
     solicAberturaPorDia.forEach((status, data) => {
       if (abertos.has(data)) return;
-      if (status !== 'PENDENTE' && status !== 'APROVADO') return;  // negado não alerta
+      // Negado não alerta. Expirado alerta: o vendedor precisa saber que a
+      // autorização caducou, senão toca no dia e leva o pedido de nova
+      // autorização sem explicação.
+      if (status !== 'PENDENTE' && status !== 'APROVADO' && status !== 'EXPIRADO') return;
       candidatos.push({ data, status });
     });
     candidatos.sort((a, b) => a.data.localeCompare(b.data));
@@ -1224,7 +1245,9 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const corPulso = (dia: DiaCalendario): string | null => {
     if (!dia.mesAtual || dia.liquidacao || !alertaSolic) return null;
     if (chaveDia(dia.data) !== alertaSolic.data) return null;
-    return alertaSolic.status === 'APROVADO' ? '#10B981' : '#F59E0B';
+    if (alertaSolic.status === 'APROVADO') return '#10B981';   // verde: pode abrir
+    if (alertaSolic.status === 'EXPIRADO') return '#EF4444';   // vermelho: caducou
+    return '#F59E0B';                                          // âmbar: aguardando
   };
 
   // Texto abaixo do calendário: o piscar sozinho não diz o que fazer.
@@ -1238,6 +1261,16 @@ export default function LiquidacaoScreen({ navigation }: any) {
         texto: language === 'pt-BR'
           ? `Dia ${dm} autorizado — toque no dia para abrir.`
           : `Día ${dm} autorizado — toque el día para abrir.`,
+      };
+    }
+    // A autorização vale 24h a partir da aprovação. Dizer só "não autorizado"
+    // faria o vendedor pedir de novo sem entender que já havia sido liberado.
+    if (alertaSolic.status === 'EXPIRADO') {
+      return {
+        cor: '#EF4444',
+        texto: language === 'pt-BR'
+          ? `Autorização do dia ${dm} expirou — toque no dia para solicitar de novo.`
+          : `La autorización del día ${dm} expiró — toque el día para solicitar de nuevo.`,
       };
     }
     return {
