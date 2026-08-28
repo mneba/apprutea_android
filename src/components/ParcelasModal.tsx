@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
+import { diasCobrancaEntre } from '../utils/diasCobranca';
 import AnexosLista from './AnexosLista';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -88,34 +89,9 @@ const fmtTs = (ts: string) => {
   }
 };
 
-const calcularDiasAtraso = (
-  dataVencimento: string | null | undefined,
-  dataPagamento: string | null | undefined,
-  trabalhaDomingo: boolean = true
-): number => {
-  if (!dataVencimento || !dataPagamento) return 0;
-  const vencStr = dataVencimento.substring(0, 10);
-  const pagStr = dataPagamento.substring(0, 10);
-  const [vY, vM, vD] = vencStr.split('-').map(Number);
-  const [pY, pM, pD] = pagStr.split('-').map(Number);
-  const vencDate = new Date(vY, vM - 1, vD);
-  const pagDate = new Date(pY, pM - 1, pD);
-  let dias = Math.round((pagDate.getTime() - vencDate.getTime()) / (1000 * 60 * 60 * 24));
-  if (dias <= 0) return dias;
-  // Se a rota NÃO trabalha aos domingos, os domingos no intervalo não contam
-  // como atraso (a rota não passa nesse dia). Conta os domingos entre o dia
-  // seguinte ao vencimento e o dia do pagamento (inclusive) e subtrai.
-  if (!trabalhaDomingo) {
-    let domingos = 0;
-    const cursor = new Date(vencDate);
-    for (let i = 0; i < dias; i++) {
-      cursor.setDate(cursor.getDate() + 1); // dia seguinte ao vencimento até o pagamento
-      if (cursor.getDay() === 0) domingos++;  // 0 = domingo
-    }
-    dias -= domingos;
-  }
-  return dias;
-};
+// Atraso: regra única em src/utils/diasCobranca. A implementação que morava
+// aqui excluía domingo corretamente, mas ignorava feriados — e era a única do
+// app que acertava o domingo, o que mascarou o bug nas outras telas.
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -131,6 +107,7 @@ interface ParcelasModalProps {
   isClientePago?: boolean;
   lang?: 'pt-BR' | 'es';
   trabalhaDomingo?: boolean;   // se a rota não trabalha domingo, domingos não contam atraso
+  feriados?: Set<string> | null;  // 'YYYY-MM-DD' de feriados_rota — também não contam
   onPagar: (parcela: ParcelaModal) => void;
   onPagarMultiplo?: (parcelas: ParcelaModal[], totalValor: number, creditoUsado: number) => void;
   onEstornar: (parcela: ParcelaModal) => void;
@@ -571,6 +548,7 @@ export default function ParcelasModal({
   visible, onClose, clienteModal, parcelasModal, loadingParcelas,
   creditoDisponivel, liqId, isViz, isClientePago = false, lang = 'pt-BR',
   trabalhaDomingo = true,
+  feriados,
   onPagar, onPagarMultiplo, onEstornar, pagamentosDetalhados, t,
 }: ParcelasModalProps) {
   const { vendedor } = useAuth();
@@ -699,7 +677,9 @@ export default function ParcelasModal({
     // 05/08 → EM DIA, não "1 dia de atraso". Fallback para data_pagamento se a
     // liquidação não tiver data (segurança).
     const dataRefAtraso = p.data_liquidacao || p.data_pagamento;
-    const diasAtraso = isPago ? calcularDiasAtraso(p.data_vencimento, dataRefAtraso, trabalhaDomingo) : 0;
+    const diasAtraso = isPago
+      ? diasCobrancaEntre(p.data_vencimento, dataRefAtraso, { trabalhaDomingo, feriados })
+      : 0;
     const pagoComAtraso = isPago && diasAtraso > 0;
     const pagoAdiantado = isPago && diasAtraso < 0;
 

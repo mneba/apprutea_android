@@ -18,6 +18,7 @@ import {
 import { supabase } from '../services/supabase';
 import AnexosLista from './AnexosLista';
 import { useAuth } from '../contexts/AuthContext';
+import { diasAtraso as calcAtraso, diasCobrancaEntre, type ConfigCobranca } from '../utils/diasCobranca';
 
 // ==================== TIPOS ====================
 interface ClienteInfo {
@@ -187,6 +188,32 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
   const [parcelas, setParcelas] = useState<Map<string, Parcela[]>>(new Map());
   const [loadingParcelas, setLoadingParcelas] = useState<string | null>(null);
   const [clienteCompleto, setClienteCompleto] = useState<any>(null);
+
+  // ─── Regras de cobrança da rota ─────────────────────────────────────────
+  // Atraso conta DIAS DE COBRANÇA, não dias de calendário: domingo (quando a
+  // rota não trabalha) e feriado de `feriados_rota` não são atraso do cliente.
+  // Ver src/utils/diasCobranca.ts.
+  const [configCobranca, setConfigCobranca] = useState<ConfigCobranca>({ trabalhaDomingo: true });
+  // "Hoje" da rota vem do servidor (a empresa tem timezone próprio); o relógio
+  // do aparelho é só fallback.
+  const [hojeRota, setHojeRota] = useState<string>(() => new Date().toISOString().substring(0, 10));
+
+  useEffect(() => {
+    const rotaId = vendedor?.rota_id;
+    if (!visible || !rotaId) return;
+    (async () => {
+      const [rotaRes, feriadosRes, hojeRes] = await Promise.all([
+        supabase.from('rotas').select('trabalha_domingo').eq('id', rotaId).single(),
+        supabase.from('feriados_rota').select('data').eq('rota_id', rotaId),
+        supabase.rpc('fn_data_hoje_rota', { p_rota_id: rotaId }),
+      ]);
+      setConfigCobranca({
+        trabalhaDomingo: rotaRes.data?.trabalha_domingo !== false,
+        feriados: new Set((feriadosRes.data || []).map((f: any) => String(f.data).substring(0, 10))),
+      });
+      if (hojeRes.data) setHojeRota(String(hojeRes.data).substring(0, 10));
+    })().catch(e => console.error('Erro ao carregar regras de cobrança:', e));
+  }, [visible, vendedor?.rota_id]);
   
   // ⭐ Solicitações pendentes/aprovadas do cliente (granular por empréstimo)
   const [solicitacoesPendentes, setSolicitacoesPendentes] = useState<{
@@ -1090,29 +1117,20 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                   let quitouAntecipado = false;
                   const refPontualidade = (p as any).liquidacao_data || p.data_pagamento;
                   if ((isPago || isParcial) && refPontualidade && p.data_vencimento) {
-                    const dataRefStr = refPontualidade.substring(0, 10);
-                    const [vy, vm, vd] = p.data_vencimento.split('-').map(Number);
-                    const [py, pm, pd] = dataRefStr.split('-').map(Number);
-                    if (vy && vm && vd && py && pm && pd) {
-                      const dtVenc = new Date(vy, vm - 1, vd);
-                      const dtPag = new Date(py, pm - 1, pd);
-                      diasDiferenca = Math.round((dtPag.getTime() - dtVenc.getTime()) / (1000 * 60 * 60 * 24));
-                      if (diasDiferenca < 0) quitouAntecipado = true;
-                    }
+                    diasDiferenca = diasCobrancaEntre(p.data_vencimento, refPontualidade, configCobranca);
+                    if (diasDiferenca < 0) quitouAntecipado = true;
                   }
                   
-                  // ⭐ Atraso ao vivo para PENDENTE com data passada
-                  let atrasoAoVivo: number | null = null;
-                  if (isPendente && p.data_vencimento) {
-                    const hoje = new Date();
-                    hoje.setHours(0, 0, 0, 0);
-                    const [vy, vm, vd] = p.data_vencimento.split('-').map(Number);
-                    if (vy && vm && vd) {
-                      const dtVenc = new Date(vy, vm - 1, vd);
-                      const diff = Math.round((hoje.getTime() - dtVenc.getTime()) / (1000 * 60 * 60 * 24));
-                      if (diff > 0) atrasoAoVivo = diff;
-                    }
-                  }
+                  // ⭐ Atraso corrente de parcela não paga, em dias de cobrança.
+                  // Serve às duas exibições: o aviso "ao vivo" da PENDENTE
+                  // vencida e o atraso da VENCIDA — que antes lia a coluna
+                  // `dias_atraso` do banco, persistida como (hoje − vencimento)
+                  // sem descontar domingo nem feriado.
+                  const atrasoHoje = (!isPago && !isParcial && p.data_vencimento)
+                    ? calcAtraso(p.data_vencimento, hojeRota, configCobranca)
+                    : 0;
+                  const atrasoAoVivo: number | null =
+                    isPendente && atrasoHoje > 0 ? atrasoHoje : null;
 
                   const fmtTs = (ts: string) => {
                     try {
@@ -1258,10 +1276,12 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                         </View>
                       )}
 
-                      {/* Linha extra: atraso oficial (status VENCIDO com dias_atraso do banco) */}
-                      {isVencida && p.dias_atraso > 0 && (
+                      {/* Atraso da parcela VENCIDA, em dias de cobrança.
+                          NÃO usar p.dias_atraso: o banco persiste essa coluna
+                          como (hoje − vencimento), contando domingo e feriado. */}
+                      {isVencida && atrasoHoje > 0 && (
                         <Text style={{ fontSize: 11, color: '#EF4444', marginTop: 4, fontWeight: '600' }}>
-                          ⚠ {p.dias_atraso} {lang === 'es' ? (p.dias_atraso === 1 ? 'día de atraso' : 'días de atraso') : (p.dias_atraso === 1 ? 'dia de atraso' : 'dias de atraso')}
+                          ⚠ {atrasoHoje} {lang === 'es' ? (atrasoHoje === 1 ? 'día de atraso' : 'días de atraso') : (atrasoHoje === 1 ? 'dia de atraso' : 'dias de atraso')}
                         </Text>
                       )}
 

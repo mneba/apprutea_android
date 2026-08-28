@@ -411,6 +411,25 @@ export default function ClientesScreen({ navigation, route }: any) {
       .then(({ data }) => { if (data) setTrabalhaDomingo(data.trabalha_domingo !== false); })
       .catch(() => {});
   }, [rotaId]);
+
+  // Feriados da rota: dia sem cobrança não é atraso do cliente — a rota não
+  // passou. Mesma regra do domingo. Sem esta carga o atraso volta a contar
+  // feriado, que foi metade do bug relatado pelo campo.
+  const [feriadosRota, setFeriadosRota] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!rotaId) { setFeriadosRota(new Set()); return; }
+    supabase.from('feriados_rota').select('data').eq('rota_id', rotaId)
+      .then(({ data, error }) => {
+        if (error) { console.error('Erro ao carregar feriados da rota:', error); return; }
+        setFeriadosRota(new Set((data || []).map((f: any) => String(f.data).substring(0, 10))));
+      });
+  }, [rotaId]);
+
+  // Objeto estável: recriá-lo a cada render remontaria o memo dos cards.
+  const configCobranca = React.useMemo(
+    () => ({ trabalhaDomingo, feriados: feriadosRota }),
+    [trabalhaDomingo, feriadosRota],
+  );
   // data_liquidacao = campo DATE puro sem timezone (adicionado na migration 09)
   // Fallback: data_abertura.substring(0,10) sem conversão UTC
   // Último fallback: data local do dispositivo
@@ -2363,6 +2382,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         resumoPago={resumoPago}
         resumoPorEmprestimo={resumoPorEmprestimo}
         dataReferencia={dataLiq}
+        configCobranca={configCobranca}
         lang={lang}
         notasCount={notasCountMap.get(c.cliente_id) || 0}
         t={t}
@@ -2889,6 +2909,7 @@ return (
         pagamentosDetalhados={pagamentosDetalhados}
         lang={lang}
         trabalhaDomingo={trabalhaDomingo}
+        feriados={feriadosRota}
         t={t}
       />
 

@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Language } from '../contexts/LiquidacaoContext';
+import { diasAtraso as calcAtraso, type ConfigCobranca } from '../utils/diasCobranca';
 
 // ─── Types (re-exportados para uso externo) ────────────────────────────────
 
@@ -105,14 +106,10 @@ const valorACobrar = (e: EmprestimoData, paga: boolean): number => {
   return saldo > 0 && base > saldo ? saldo : base;
 };
 
-// Diferença em dias entre duas datas YYYY-MM-DD (sem timezone).
-const diasEntre = (ref?: string | null, venc?: string | null): number => {
-  if (!ref || !venc) return 0;
-  const r = ref.substring(0, 10).split('-').map(Number);
-  const v = venc.substring(0, 10).split('-').map(Number);
-  if (r.length !== 3 || v.length !== 3) return 0;
-  return Math.round((Date.UTC(r[0], r[1] - 1, r[2]) - Date.UTC(v[0], v[1] - 1, v[2])) / 86400000);
-};
+// Atraso vem de src/utils/diasCobranca — ver o cabeçalho daquele arquivo.
+// Havia aqui duas cópias de um `diasEntre` que subtraía datas de calendário,
+// contando domingo e feriado como atraso. Era a origem do bug reportado pelo
+// campo entre 17/07 e 24/08 de 2026.
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -135,6 +132,10 @@ interface ClienteCardLiquidacaoProps {
   // emprestimo_id). Cada slide do carrossel mostra o seu.
   resumoPorEmprestimo?: Record<string, ResumoPago>;
   dataReferencia?: string | null; // dia da liquidação sendo vista (YYYY-MM-DD) — base dos dias de atraso
+  // Regras de cobrança da rota. Sem isto o atraso volta a contar domingo e
+  // feriado; o default abaixo é conservador (conta tudo) e serve só para o
+  // componente não quebrar se alguém esquecer de passar.
+  configCobranca?: ConfigCobranca;
   lang: Language;
   notasCount: number;
   t: {
@@ -174,6 +175,7 @@ export default function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps)
     isClientePago = false,
     resumoPago,
     dataReferencia,
+    configCobranca = { trabalhaDomingo: true },
     lang,
     notasCount,
     t,
@@ -284,18 +286,8 @@ export default function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps)
               Dias = dia da liquidação vista (dataReferencia) − vencimento da
               parcela exibida. Datas parseadas como string (sem timezone). */}
           {(() => {
-            // Diferença em dias entre duas datas YYYY-MM-DD (sem timezone).
-            const diasEntre = (ref?: string | null, venc?: string | null): number => {
-              if (!ref || !venc) return 0;
-              const r = ref.substring(0, 10).split('-').map(Number);
-              const v = venc.substring(0, 10).split('-').map(Number);
-              if (r.length !== 3 || v.length !== 3) return 0;
-              const dR = Date.UTC(r[0], r[1] - 1, r[2]);
-              const dV = Date.UTC(v[0], v[1] - 1, v[2]);
-              return Math.round((dR - dV) / 86400000);
-            };
             const refAtraso = (e as any).dia_referencia || dataReferencia;
-            const diasAtraso = Math.max(0, diasEntre(refAtraso, e.data_vencimento));
+            const diasAtraso = calcAtraso(e.data_vencimento, refAtraso, configCobranca);
             const emDia = diasAtraso <= 0;
             const cor = emDia ? '#10B981' : corAtraso(e.total_parcelas_vencidas || 1);
             const tipo = FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento;
@@ -444,6 +436,7 @@ function CardMultiplo({
   isClientePago = false,
   resumoPorEmprestimo,
   dataReferencia,
+  configCobranca = { trabalhaDomingo: true },
   lang,
   notasCount,
   t,
@@ -482,7 +475,11 @@ function CardMultiplo({
     const rp = resumoPorEmprestimo?.[e.emprestimo_id];
     const bloqueado = pago || np || !liqId || isViz || isClientePago;
     const valorAPagar = valorACobrar(e, pago);
-    const diasAtraso = Math.max(0, diasEntre((e as any).dia_referencia || dataReferencia, e.data_vencimento));
+    const diasAtraso = calcAtraso(
+      e.data_vencimento,
+      (e as any).dia_referencia || dataReferencia,
+      configCobranca,
+    );
     const emDia = diasAtraso <= 0;
     const corDias = emDia ? '#10B981' : corAtraso(e.total_parcelas_vencidas || 1);
     const tipo = FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento;
