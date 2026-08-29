@@ -18,6 +18,7 @@ import {
 import { supabase } from '../services/supabase';
 import AnexosLista from './AnexosLista';
 import { useAuth } from '../contexts/AuthContext';
+import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { diasAtraso as calcAtraso, diasCobrancaEntre, type ConfigCobranca } from '../utils/diasCobranca';
 
 // ==================== TIPOS ====================
@@ -194,9 +195,23 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
   // rota não trabalha) e feriado de `feriados_rota` não são atraso do cliente.
   // Ver src/utils/diasCobranca.ts.
   const [configCobranca, setConfigCobranca] = useState<ConfigCobranca>({ trabalhaDomingo: true });
-  // "Hoje" da rota vem do servidor (a empresa tem timezone próprio); o relógio
-  // do aparelho é só fallback.
+  // ─── Data de referência do atraso ───────────────────────────────────────
+  //
+  // REGRA DO NEGÓCIO: toda data mostrada ao usuário se apoia na liquidação —
+  // a liquidação ATUAL contra a liquidação em que o evento se originou. Nunca
+  // o relógio. Com a liquidação de 20/08 aberta e o dia real em 28/08, o
+  // cliente ainda não deve nada dos dias 21 a 28: a rota não passou.
+  //
+  // `fn_data_hoje_rota` só entra quando NÃO há liquidação aberta (consulta a
+  // partir de "Todos os clientes" com o dia fechado). Mesmo aí é a data do
+  // servidor no fuso da empresa, não o relógio do aparelho.
   const [hojeRota, setHojeRota] = useState<string>(() => new Date().toISOString().substring(0, 10));
+  const liqCtx = useLiquidacaoContext();
+  const dataLiqAberta: string | null =
+    (liqCtx.liquidacaoAtual as any)?.data_liquidacao ||
+    (liqCtx.liquidacaoAtual as any)?.data_abertura?.substring(0, 10) ||
+    null;
+  const dataRefAtraso = dataLiqAberta || hojeRota;
 
   useEffect(() => {
     const rotaId = vendedor?.rota_id;
@@ -1127,7 +1142,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                   // `dias_atraso` do banco, persistida como (hoje − vencimento)
                   // sem descontar domingo nem feriado.
                   const atrasoHoje = (!isPago && !isParcial && p.data_vencimento)
-                    ? calcAtraso(p.data_vencimento, hojeRota, configCobranca)
+                    ? calcAtraso(p.data_vencimento, dataRefAtraso, configCobranca)
                     : 0;
                   const atrasoAoVivo: number | null =
                     isPendente && atrasoHoje > 0 ? atrasoHoje : null;
