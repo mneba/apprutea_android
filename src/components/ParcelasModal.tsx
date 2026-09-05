@@ -108,6 +108,12 @@ interface ParcelasModalProps {
   lang?: 'pt-BR' | 'es';
   trabalhaDomingo?: boolean;   // se a rota não trabalha domingo, domingos não contam atraso
   feriados?: Set<string> | null;  // 'YYYY-MM-DD' de feriados_rota — também não contam
+  /**
+   * Data operacional da rota: a liquidação aberta, ou o hoje da rota quando
+   * não há dia aberto. É contra ela que se decide o que está vencido — nunca
+   * contra o relógio do aparelho.
+   */
+  dataOperacional: string;
   onPagar: (parcela: ParcelaModal) => void;
   onPagarMultiplo?: (parcelas: ParcelaModal[], totalValor: number, creditoUsado: number) => void;
   onEstornar: (parcela: ParcelaModal) => void;
@@ -156,12 +162,14 @@ interface DetalhesPopupProps {
   podeAnexar?: boolean;
   enviadoPor?: string | null;
   enviadoPorNome?: string | null;
+  /** Data operacional (YYYY-MM-DD) — base para decidir o que está vencido. */
+  dataOperacional: string;
   t: ParcelasModalProps['t'];
 }
 
 function DetalhesPopup({
   visible, onClose, parcela, pagamentos, clienteId, lang,
-  podeAnexar = true, enviadoPor, enviadoPorNome, t,
+  podeAnexar = true, enviadoPor, enviadoPorNome, dataOperacional, t,
 }: DetalhesPopupProps) {
   // Comprovantes abrem sob demanda, um pagamento por vez: a lista de anexos
   // consulta o banco ao montar, e renderizar todas de uma vez faria N buscas
@@ -189,7 +197,11 @@ function DetalhesPopup({
   const creditoUsadoFinal = pagsNaoEstornados.length > 0 ? creditoUsado : (parcela.credito_usado || 0);
   const isPago = parcela.status === 'PAGO';
   const isParcial = parcela.status === 'PARCIAL';
-  const isVencida = parcela.status === 'VENCIDO' || parcela.status === 'VENCIDA';
+  // Vencida se ficou para trás do DIA OPERACIONAL — não pelo status, que o
+  // trigger grava comparando com CURRENT_DATE. Ver a nota extensa na lista,
+  // mais abaixo.
+  const isVencida = !isPago && !isParcial && !!parcela.data_vencimento
+    && String(parcela.data_vencimento).substring(0, 10) < dataOperacional;
   const temPagamentoParcial = !isPago && valorPago > 0;
   const isAutoQuitacao = (parcela.observacoes || '').includes('[AUTO-QUITAÇÃO]');
 
@@ -549,6 +561,7 @@ export default function ParcelasModal({
   creditoDisponivel, liqId, isViz, isClientePago = false, lang = 'pt-BR',
   trabalhaDomingo = true,
   feriados,
+  dataOperacional,
   onPagar, onPagarMultiplo, onEstornar, pagamentosDetalhados, t,
 }: ParcelasModalProps) {
   const { vendedor } = useAuth();
@@ -644,7 +657,16 @@ export default function ParcelasModal({
   const renderParcelaItem = (p: ParcelaModal) => {
     const isPago = p.status === 'PAGO';
     const isParcial = p.status === 'PARCIAL';
-    const isVencida = p.status === 'VENCIDO' || p.status === 'VENCIDA';
+    // ⭐ VENCIDA vem da DATA OPERACIONAL, não do status persistido.
+    //
+    // `emprestimo_parcelas.status` é gravado pelo trigger atualizar_saldo_parcela
+    // comparando com CURRENT_DATE. Quem opera uma liquidação retroativa via
+    // parcelas marcadas VENCIDO que naquele dia nem tinham vencido: cliente de
+    // 22/08 com parcelas de 24 a 29/08 mostrava "5 vencidas" operando 25/08.
+    //
+    // `<` e não `<=`: parcela que vence no próprio dia ainda está no prazo.
+    const isVencida = !isPago && !isParcial && !!p.data_vencimento
+      && String(p.data_vencimento).substring(0, 10) < dataOperacional;
     const isCancelado = p.status === 'CANCELADO';
     const isAutoQuitacao = (p.observacoes || '').includes('[AUTO-QUITAÇÃO]');
 
@@ -962,6 +984,7 @@ export default function ParcelasModal({
             : []
         }
         clienteId={clienteModal?.id || null}
+        dataOperacional={dataOperacional}
         lang={lang}
         podeAnexar={!isViz}
         enviadoPor={vendedor?.user_id || null}

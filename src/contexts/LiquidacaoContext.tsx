@@ -35,6 +35,20 @@ interface LiquidacaoContextType {
    */
   solicitacoesUpdatedAt: number;
   /**
+   * Carimbo que muda a cada evento em `liquidacoes_diarias` da rota — o
+   * simétrico do de cima, que faltava.
+   *
+   * O contexto se recarregava sozinho no Realtime, mas a LiquidacaoScreen
+   * mantém a PRÓPRIA cópia da liquidação (`liquidacao`, `todasLiquidacoes`,
+   * carregadas por `carregarLiquidacoes`) e não tinha como saber que algo
+   * mudou. Uma reabertura feita pelo admin só aparecia quando a tela era
+   * remontada — o "entrar em Home e voltar" relatado pelo campo.
+   *
+   * Só o Realtime carimba. Recarga iniciada pela própria tela não precisa
+   * avisar a si mesma.
+   */
+  liquidacaoUpdatedAt: number;
+  /**
    * Momento em que os dados de cliente ficaram obsoletos por uma ação do
    * próprio app — venda, renegociação, renovação.
    *
@@ -85,6 +99,7 @@ const LiquidacaoContext = createContext<LiquidacaoContextType>({
   carregandoClientes: false,
   clientesUpdatedAt: 0,
   solicitacoesUpdatedAt: 0,
+  liquidacaoUpdatedAt: 0,
   clientesInvalidadosEm: 0,
   invalidarClientes: () => {},
   recarregarClientes: async () => {},
@@ -128,6 +143,7 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
   const [carregandoClientes, setCarregandoClientes] = useState(false);
   const [clientesUpdatedAt, setClientesUpdatedAt] = useState(0);
   const [solicitacoesUpdatedAt, setSolicitacoesUpdatedAt] = useState(0);
+  const [liquidacaoUpdatedAt, setLiquidacaoUpdatedAt] = useState(0);
   const [clientesInvalidadosEm, setClientesInvalidadosEm] = useState(0);
   const invalidarClientes = useCallback(() => setClientesInvalidadosEm(Date.now()), []);
 
@@ -358,6 +374,11 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
             console.log('📡 [Realtime] liquidacoes_diarias: status →', statusNovo ?? payload.eventType);
             if (debounceId) { clearTimeout(debounceId); debounceId = null; }
             recarregarTudoRef.current();
+            // ⭐ Carimba para as telas que mantêm cópia própria da liquidação.
+            //    `recarregarTudo` atualiza só o contexto; a LiquidacaoScreen tem
+            //    o próprio `carregarLiquidacoes` e ficava com a versão antiga até
+            //    ser remontada — o "entrar em Home e voltar" do campo.
+            setLiquidacaoUpdatedAt(Date.now());
             return;
           }
 
@@ -371,6 +392,7 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
             }
             console.log('📡 [Realtime] liquidacoes_diarias: totais, recarregando');
             recarregarTudoRef.current();
+            setLiquidacaoUpdatedAt(Date.now());
           }, DEBOUNCE_REALTIME_MS);
         },
       )
@@ -445,6 +467,7 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
     carregandoClientes,
     clientesUpdatedAt,
     solicitacoesUpdatedAt,
+    liquidacaoUpdatedAt,
     clientesInvalidadosEm,
     invalidarClientes,
     recarregarClientes,
@@ -476,6 +499,7 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
     carregandoClientes,
     clientesUpdatedAt,
     solicitacoesUpdatedAt,
+    liquidacaoUpdatedAt,
     clientesInvalidadosEm,
     invalidarClientes,
     recarregarClientes,

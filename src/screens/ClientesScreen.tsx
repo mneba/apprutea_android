@@ -482,6 +482,12 @@ export default function ClientesScreen({ navigation, route }: any) {
     dataLiq = hojeStr();
   }
 
+  // Dia operacional da tela: a liquidação em foco. É contra ela que se decide
+  // o que está vencido — não contra o status do banco, que o trigger
+  // atualizar_saldo_parcela grava comparando com CURRENT_DATE. Numa liquidação
+  // retroativa aquele status marca como vencida parcela que ainda nem venceu.
+  const dataOperacionalTela = dataLiq || new Date().toISOString().substring(0, 10);
+
   const isViz = vizCoerente || route?.params?.isVisualizacao || false;
 
   // FASE 2.1 — quando a tela está na liquidação ABERTA, o CONTEXTO é a fonte
@@ -563,7 +569,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     todosUpdatedAt,
     loadTodosClientes,
     atualizarSaldoLocalTodos,
-  } = useClientesTodos({ rotaId, setOrdemRotaMap, setRefreshing });
+  } = useClientesTodos({ rotaId, dataOperacional: dataOperacionalTela, setOrdemRotaMap, setRefreshing });
   const [modalLegendaVisible, setModalLegendaVisible] = useState(false);
   const [busca, setBusca] = useState('');
 
@@ -2275,7 +2281,20 @@ export default function ClientesScreen({ navigation, route }: any) {
     if (tab === 'liquidacao' && filtroVencimento === 'dia') r = r.filter(ehDoDiaCli);
     else if (tab === 'liquidacao' && filtroVencimento === 'atrasados') r = r.filter(c => !ehDoDiaCli(c));
     if (busca.trim()) { const b = normalizarBusca(busca); r = r.filter(c => normalizarBusca(c.nome).includes(b) || (c.telefone_celular && c.telefone_celular.includes(b)) || (c.endereco && normalizarBusca(c.endereco).includes(b))); }
-    if (filtroFrequencia !== 'todos') r = r.filter(c => c.emprestimos.some(e => e.frequencia_pagamento === filtroFrequencia));
+    // ⭐ O filtro corta os EMPRÉSTIMOS, não só o cliente.
+    //
+    // Era `.some(...)`: decidia se o cliente entrava, mas entregava a lista de
+    // empréstimos intacta ao card. Um cliente com um diário e um semanal
+    // passava em "Diários" e o card renderizava OS DOIS — o semanal aparecendo
+    // dentro do filtro de diários, relatado pelo campo em 12/08 e 24/08.
+    //
+    // Cortando o array, o card também deixa de virar carrossel quando sobra um
+    // empréstimo só: ele decide isso por `emprestimos.length >= 2`.
+    if (filtroFrequencia !== 'todos') {
+      r = r
+        .map(c => ({ ...c, emprestimos: c.emprestimos.filter(e => e.frequencia_pagamento === filtroFrequencia) }))
+        .filter(c => c.emprestimos.length > 0);
+    }
 
     const itens = montarItens(r, filtro);
 
@@ -2416,10 +2435,22 @@ export default function ClientesScreen({ navigation, route }: any) {
     if (ocultarLiquidacao && clientesLiqIds.size > 0) { r = r.filter(c => !clientesLiqIds.has(c.id)); }
     // Busca por texto
     if (busca.trim()) { const b = normalizarBusca(busca); r = r.filter(c => normalizarBusca(c.nome).includes(b) || (c.telefone_celular && c.telefone_celular.includes(b))); }
-    // Filtro por tipo de empréstimo
-    if (filtroTipo !== 'todos') { r = r.filter(c => c.emprestimos.some(e => e.tipo_emprestimo === filtroTipo)); }
-    // Filtro por frequência
-    if (filtroFrequencia !== 'todos') { r = r.filter(c => c.emprestimos.some(e => e.frequencia_pagamento === filtroFrequencia)); }
+    // ⭐ Tipo e frequência cortam os EMPRÉSTIMOS, não só o cliente.
+    //
+    // Mesmo defeito da aba Liquidação (ver `filtered`): o `.some(...)` decidia
+    // se o cliente entrava e deixava a lista de empréstimos inteira. Esta aba
+    // renderiza um card POR EMPRÉSTIMO, então os de outra modalidade apareciam
+    // lado a lado com os filtrados.
+    if (filtroTipo !== 'todos') {
+      r = r
+        .map(c => ({ ...c, emprestimos: c.emprestimos.filter(e => e.tipo_emprestimo === filtroTipo) }))
+        .filter(c => c.emprestimos.length > 0);
+    }
+    if (filtroFrequencia !== 'todos') {
+      r = r
+        .map(c => ({ ...c, emprestimos: c.emprestimos.filter(e => e.frequencia_pagamento === filtroFrequencia) }))
+        .filter(c => c.emprestimos.length > 0);
+    }
     // Filtro por status do empréstimo
     if (filtroStatus !== 'todos') {
       if (filtroStatus === 'QUITADO') {
@@ -2924,6 +2955,7 @@ return (
         lang={lang}
         trabalhaDomingo={trabalhaDomingo}
         feriados={feriadosRota}
+        dataOperacional={dataOperacionalTela}
         t={t}
       />
 

@@ -43,11 +43,16 @@ interface UseClientesTodosParams {
   rotaId: string | null | undefined;
   /** @deprecated Não é lido. A carga é feita na montagem, não pela aba ativa. */
   tab?: 'liquidacao' | 'todos';
+  /**
+   * Data operacional (YYYY-MM-DD): a liquidação em foco, ou o hoje da rota.
+   * Base para decidir o que está vencido — ver a nota na montagem do parcMap.
+   */
+  dataOperacional: string;
   setOrdemRotaMap: (m: Map<string, number>) => void;
   setRefreshing: (v: boolean) => void;
 }
 
-export default function useClientesTodos({ rotaId, setOrdemRotaMap, setRefreshing }: UseClientesTodosParams) {
+export default function useClientesTodos({ rotaId, dataOperacional, setOrdemRotaMap, setRefreshing }: UseClientesTodosParams) {
   const [todosList, setTodosList] = useState<ClienteTodos[]>([]);
   const [loadTodos, setLoadTodos] = useState(false);
   const [todosCount, setTodosCount] = useState<number | null>(null);
@@ -80,16 +85,29 @@ export default function useClientesTodos({ rotaId, setOrdemRotaMap, setRefreshin
       const empIds = (emps as any[]).map(e => e.id);
       const { data: allParcs } = await supabase
         .from('emprestimo_parcelas')
-        .select('emprestimo_id, numero_parcela, valor_parcela, status')
+        .select('emprestimo_id, numero_parcela, valor_parcela, status, data_vencimento')
         .in('emprestimo_id', empIds);
 
       // Agrupa parcelas por empréstimo
+      //
+      // ⭐ VENCIDA é decidido pela DATA OPERACIONAL, não pelo `status`.
+      //
+      // O status é gravado pelo trigger atualizar_saldo_parcela comparando com
+      // CURRENT_DATE — o relógio real. Operando uma liquidação retroativa isso
+      // mente: cliente cadastrada em 22/08, parcelas de 24 a 29/08, aparecia
+      // com 5 vencidas enquanto se trabalhava o dia 25/08, sendo que quatro
+      // delas nem tinham chegado ao vencimento.
+      //
+      // `<` e não `<=`: parcela que vence no próprio dia ainda está no prazo.
       const parcMap = new Map<string, { maxParcela: number; vencidas: number; totalVencido: number }>();
       (allParcs || []).forEach((p: any) => {
         let info = parcMap.get(p.emprestimo_id);
         if (!info) { info = { maxParcela: 0, vencidas: 0, totalVencido: 0 }; parcMap.set(p.emprestimo_id, info); }
         if (p.numero_parcela > info.maxParcela) info.maxParcela = p.numero_parcela;
-        if (p.status === 'VENCIDO' || p.status === 'VENCIDA') {
+        const emAberto = p.status !== 'PAGO' && p.status !== 'CANCELADO';
+        const venceu = !!p.data_vencimento
+          && String(p.data_vencimento).substring(0, 10) < dataOperacional;
+        if (emAberto && venceu) {
           info.vencidas++;
           info.totalVencido += (p.valor_parcela || 0);
         }
@@ -170,7 +188,9 @@ export default function useClientesTodos({ rotaId, setOrdemRotaMap, setRefreshin
       setLoadTodos(false);
       setRefreshing(false);
     }
-  }, [rotaId, setOrdemRotaMap, setRefreshing]);
+    // `dataOperacional` entra nas dependências: mudar de liquidação muda o
+    // que conta como vencido, e sem isto o callback ficaria com a data antiga.
+  }, [rotaId, dataOperacional, setOrdemRotaMap, setRefreshing]);
 
   // Pré-carga: carregar assim que rotaId estiver disponível (não espera tab)
   useEffect(() => {

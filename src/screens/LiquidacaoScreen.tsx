@@ -583,6 +583,19 @@ export default function LiquidacaoScreen({ navigation }: any) {
     recarregarCalendarioRef.current();
   }, [liqCtx.solicitacoesUpdatedAt]);
 
+  // ⭐ O mesmo para a própria liquidação: reabertura, fechamento ou abertura
+  // feitas pelo admin no painel.
+  //
+  // Esta tela mantém cópia própria (`liquidacao`, `todasLiquidacoes`), e o
+  // Realtime do contexto só recarregava o contexto. A reabertura só aparecia
+  // quando a tela era remontada — o "entrar em Home e voltar" que o campo
+  // reportou duas vezes. Faltava este carimbo, simétrico ao de solicitações.
+  useEffect(() => {
+    if (!liqCtx.liquidacaoUpdatedAt) return;
+    console.log('🔄 [LiquidacaoScreen] liquidação mudou no servidor, recarregando');
+    recarregarCalendarioRef.current();
+  }, [liqCtx.liquidacaoUpdatedAt]);
+
   // Rede de segurança do Realtime, não o caminho principal: em 3G instável a
   // subscription cai sem avisar. Intervalo folgado justamente por ser fallback
   // — era 20s quando o polling era a única forma de saber.

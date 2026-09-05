@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -212,6 +212,11 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
     (liqCtx.liquidacaoAtual as any)?.data_abertura?.substring(0, 10) ||
     null;
   const dataRefAtraso = dataLiqAberta || hojeRota;
+  // Espelho em ref: `carregarDados` precisa da data operacional, mas colocá-la
+  // nas dependências do useCallback faria a função trocar de identidade e
+  // recarregar o modal a cada mudança de liquidação.
+  const dataRefAtrasoRef = useRef(dataRefAtraso);
+  dataRefAtrasoRef.current = dataRefAtraso;
 
   useEffect(() => {
     const rotaId = vendedor?.rota_id;
@@ -429,23 +434,36 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       const all = (emps || []) as any[];
       const ativos = all.filter(e => e.status === 'ATIVO' || e.status === 'VENCIDO');
       
-      // ⭐ Calcular atraso REAL para cada empréstimo ativo
-      // A view nem sempre retorna parcelas_vencidas correto (pode contar só status='VENCIDO',
-      // ignorando parcelas PENDENTE com data passada). Aqui buscamos a verdade.
+      // ⭐ Atraso REAL por empréstimo, contado contra a DATA OPERACIONAL.
+      //
+      // `parcelas_vencidas` da view conta status='VENCIDO', e esse status é
+      // gravado pelo trigger comparando com CURRENT_DATE. Numa liquidação
+      // retroativa isso mente: cliente cadastrada em 22/08, com parcelas de 24
+      // a 29/08, aparecia com "5 vencidas" enquanto se operava o dia 25/08 —
+      // sendo que quatro delas nem tinham chegado ao vencimento.
+      //
+      // Aqui a conta é refeita contra `dataRefAtraso` (liquidação aberta, ou o
+      // hoje da rota quando não há dia aberto). `lt` e não `lte`: parcela que
+      // vence no próprio dia operacional ainda está no prazo.
       if (ativos.length > 0) {
-        const hoje = new Date().toISOString().split('T')[0];
         const empIds = ativos.map(e => e.id);
         const { data: parcAtrasadas } = await supabase
           .from('emprestimo_parcelas')
           .select('emprestimo_id')
           .in('emprestimo_id', empIds)
-          .lt('data_vencimento', hoje)
+          .lt('data_vencimento', dataRefAtrasoRef.current)
           .neq('status', 'PAGO')
           .neq('status', 'CANCELADO');
-        
-        const empIdsComAtraso = new Set((parcAtrasadas || []).map(p => p.emprestimo_id));
+
+        const porEmp = new Map<string, number>();
+        (parcAtrasadas || []).forEach(p => {
+          porEmp.set(p.emprestimo_id, (porEmp.get(p.emprestimo_id) || 0) + 1);
+        });
         ativos.forEach(e => {
-          e._temAtraso = empIdsComAtraso.has(e.id) || e.status === 'VENCIDO';
+          // Sem ` || e.status === 'VENCIDO'`: o status do empréstimo vem da
+          // mesma régua de relógio e reintroduziria o erro pela porta dos fundos.
+          e._vencidasReais = porEmp.get(e.id) || 0;
+          e._temAtraso = e._vencidasReais > 0;
         });
       }
       
@@ -883,9 +901,12 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           <View style={S.empHeader}>
             <View style={S.empHeaderLeft}>
               <Text style={S.empValor}>{fmt(emp.valor_total)}</Text>
-              {emp.parcelas_vencidas > 0 && (
+              {/* `_vencidasReais` e não `parcelas_vencidas`: aquele vem da view
+                  contando status='VENCIDO', que o trigger grava pelo relógio.
+                  Ver a nota em carregarDados. */}
+              {((emp as any)._vencidasReais || 0) > 0 && (
                 <View style={S.empVencBadge}>
-                  <Text style={S.empVencText}>{emp.parcelas_vencidas} {t.vencidas.toLowerCase()}</Text>
+                  <Text style={S.empVencText}>{(emp as any)._vencidasReais} {t.vencidas.toLowerCase()}</Text>
                 </View>
               )}
             </View>
@@ -1099,8 +1120,24 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                 <Text style={S.parcelasTitle}>{t.parcelas} ({parcs.length})</Text>
                 {parcs.map(p => {
                   const isPago = p.status === 'PAGO';
-                  const isVencida = p.status === 'VENCIDO' || p.status === 'VENCIDA';
                   const isParcial = p.status === 'PARCIAL';
+                  // ⭐ VENCIDA é derivado da DATA OPERACIONAL, não do status.
+                  //
+                  // `emprestimo_parcelas.status` é gravado pelo trigger
+                  // atualizar_saldo_parcela comparando com CURRENT_DATE — o
+                  // relógio real. Quem opera uma liquidação retroativa via
+                  // parcelas marcadas VENCIDO que, naquele dia, nem tinham
+                  // vencido ainda: cliente cadastrada em 22/08 com parcelas de
+                  // 24 a 29/08 aparecia com "5 vencidas" na liquidação de 25/08.
+                  //
+                  // O status persistido não pode servir aos dois — o vendedor
+                  // operando 25/08 e o admin olhando hoje precisam de respostas
+                  // diferentes sobre a mesma linha. Quem diferencia é a tela.
+                  //
+                  // `<` e não `<=`: parcela que vence no próprio dia operacional
+                  // ainda está no prazo.
+                  const isVencida = !isPago && !isParcial && !!p.data_vencimento
+                    && p.data_vencimento.substring(0, 10) < dataRefAtraso;
                   const isPendente = !isPago && !isVencida && !isParcial;
                   const corP = corStatus[isPago ? 'PAGO' : isVencida ? 'VENCIDO' : isParcial ? 'PARCIAL' : 'PENDENTE'];
                   // ⭐ Dinheiro real recebido = valor_pago da parcela MENOS o
@@ -1341,13 +1378,14 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
     );
   };
   const renderEmprestimo = () => {
-    // ⭐ Cliente está em dia se nenhum empréstimo ativo tem atraso (parcelas vencidas)
-    // Usa _temAtraso (calculado em carregarDados) que detecta atraso real, não só status='VENCIDO'
-    const temAlgumAtraso = empAtivos.some(e => 
-      (e as any)._temAtraso === true 
-      || (e.parcelas_vencidas || 0) > 0 
-      || e.status === 'VENCIDO'
-    );
+    // ⭐ Cliente está em dia se nenhum empréstimo ativo tem parcela vencida.
+    //
+    // Só `_temAtraso`, que carregarDados calcula contra a data operacional.
+    // As duas outras condições que havia aqui — `parcelas_vencidas` da view e
+    // `status === 'VENCIDO'` — derivam do CURRENT_DATE do trigger, e bastava
+    // uma delas para o cliente aparecer em atraso numa liquidação retroativa
+    // mesmo sem nenhuma parcela vencida no dia que se está operando.
+    const temAlgumAtraso = empAtivos.some(e => (e as any)._temAtraso === true);
     const clienteEmDia = !temAlgumAtraso;
     const temEmprestimoAtivo = empAtivos.length > 0;
     

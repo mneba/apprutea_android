@@ -91,11 +91,19 @@ const fmtData = (d: string | null | undefined) => {
   return dt.toLocaleDateString('pt-BR');
 };
 
+/**
+ * Escala de atraso — a MESMA do ClienteCardLiquidacao.
+ *
+ * O nível médio era laranja (#F97316) aqui. No card da Liquidação ele virou
+ * ROXO por pedido do cliente (item #39): laranja e amarelo ficavam quase
+ * indistinguíveis na tela do celular. Este card não acompanhou, e as duas
+ * listas mostravam cores diferentes para o mesmo cliente.
+ */
 const corAtraso = (vencidas: number): string => {
-  if (vencidas <= 0) return '#10B981';
-  if (vencidas <= 3) return '#F59E0B';
-  if (vencidas <= 7) return '#F97316';
-  return '#EF4444';
+  if (vencidas <= 0) return '#10B981';  // verde — em dia
+  if (vencidas <= 3) return '#F59E0B';  // amarelo — atraso leve
+  if (vencidas <= 7) return '#9333EA';  // roxo — atraso médio
+  return '#EF4444';                     // vermelho — atraso crítico
 };
 
 // ─── Props ──────────────────────────────────────────────────────────────────
@@ -166,9 +174,20 @@ export default function ClienteCardTodos({
   // empréstimo novo. Antes só era barrado no "Confirmar venda", depois de o
   // cobrador já ter preenchido tudo — e às vezes já ter combinado com o cliente.
   const suspenso = String(c.status || '').toUpperCase() === 'SUSPENSO';
+  // Cor da borda — mesma regra do borderOf no ClienteCardLiquidacao.
+  //
+  // Dois mundos, sem meio-termo: em dia é VERDE, atraso é a escala de cores.
+  // Aqui o em-dia era cinza (#D1D5DB), resquício do antigo estado "pendente"
+  // que o cliente pediu para eliminar — o mesmo cliente aparecia cinza numa
+  // lista e verde na outra.
+  //
+  // `|| 1` porque `tem_atraso` é do CLIENTE e `total_parcelas_vencidas` é do
+  // empréstimo exibido: com o atraso vindo de um segundo empréstimo, o valor
+  // chegava zerado e `corAtraso(0)` devolvia verde, contradizendo o próprio
+  // `tem_atraso`. Um vencido é atraso leve — mesmo piso do outro card.
   const a = c.tem_atraso;
   const vencidas = emp?.total_parcelas_vencidas || 0;
-  const cor = a ? corAtraso(vencidas) : '#D1D5DB';
+  const cor = a ? corAtraso(vencidas || 1) : '#10B981';
 
   return (
     <TouchableOpacity
