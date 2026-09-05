@@ -443,6 +443,12 @@ export function useNovaVendaSubmit(ctx: SubmitContext) {
       }
 
       ctx.liqCtx.recarregarLiquidacao();
+      // `recarregarLiquidacao` relê só a linha de liquidacoes_diarias. A lista
+      // de clientes e a aba "Todos" ficavam com o empréstimo velho: a
+      // ClientesScreen só recarrega ao ganhar foco se os dados tiverem mais de
+      // 30s, e quem acabou de vender volta antes disso. Este sinal fura a
+      // janela para este caso específico.
+      ctx.liqCtx.invalidarClientes();
       setResultado(res);
       setShowResultado(true);
     } catch (err: any) {

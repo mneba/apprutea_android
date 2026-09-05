@@ -34,6 +34,21 @@ interface LiquidacaoContextType {
    * admin aprova algo — sem cada uma abrir a própria subscription.
    */
   solicitacoesUpdatedAt: number;
+  /**
+   * Momento em que os dados de cliente ficaram obsoletos por uma ação do
+   * próprio app — venda, renegociação, renovação.
+   *
+   * A ClientesScreen só recarrega ao ganhar foco se os dados tiverem mais de
+   * 30s, para não refazer a consulta a cada ida e volta de tela. Mas quem
+   * acabou de criar um empréstimo volta em menos de 30s, cai dentro da janela
+   * e vê a lista velha — foi o "demorou para atualizar" relatado no campo.
+   *
+   * Este carimbo é o furo controlado nessa regra: se a invalidação for mais
+   * recente que a última carga, recarrega mesmo dentro dos 30s.
+   */
+  clientesInvalidadosEm: number;
+  /** Marca os dados de cliente como obsoletos. Chame após criar/alterar empréstimo. */
+  invalidarClientes: () => void;
   /** `liqOverride` evita depender do state já ter propagado (ver recarregarTudo). */
   recarregarClientes: (force?: boolean, liqOverride?: LiquidacaoDiaria | null) => Promise<void>;
   recarregarTudo: () => Promise<void>;
@@ -70,6 +85,8 @@ const LiquidacaoContext = createContext<LiquidacaoContextType>({
   carregandoClientes: false,
   clientesUpdatedAt: 0,
   solicitacoesUpdatedAt: 0,
+  clientesInvalidadosEm: 0,
+  invalidarClientes: () => {},
   recarregarClientes: async () => {},
   recarregarTudo: async () => {},
 
@@ -111,6 +128,8 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
   const [carregandoClientes, setCarregandoClientes] = useState(false);
   const [clientesUpdatedAt, setClientesUpdatedAt] = useState(0);
   const [solicitacoesUpdatedAt, setSolicitacoesUpdatedAt] = useState(0);
+  const [clientesInvalidadosEm, setClientesInvalidadosEm] = useState(0);
+  const invalidarClientes = useCallback(() => setClientesInvalidadosEm(Date.now()), []);
 
   // Dedupe de chamadas NÃO forçadas (evita rajada de requisições iguais)
   const recarregandoClientesRef = useRef(false);
@@ -426,6 +445,8 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
     carregandoClientes,
     clientesUpdatedAt,
     solicitacoesUpdatedAt,
+    clientesInvalidadosEm,
+    invalidarClientes,
     recarregarClientes,
     recarregarTudo,
 
@@ -455,6 +476,8 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
     carregandoClientes,
     clientesUpdatedAt,
     solicitacoesUpdatedAt,
+    clientesInvalidadosEm,
+    invalidarClientes,
     recarregarClientes,
     recarregarTudo,
     modoVisualizacao,

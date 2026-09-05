@@ -37,6 +37,46 @@ const FREQ: Record<Language, Record<string, string>> = {
   'es': { DIARIO: 'Diario', SEMANAL: 'Semanal', QUINZENAL: 'Quincenal', MENSAL: 'Mensual', FLEXIVEL: 'Flexible' },
 };
 
+/**
+ * Empréstimo encerrado — não recebe mais parcela.
+ *
+ * RENEGOCIADO e CANCELADO caíam no layout de empréstimo ativo e exibiam
+ * "Parcela 5/5" com saldo zero, indistinguível de um quitado. Numa
+ * renegociação todas as parcelas pendentes viram CANCELADO e a dívida migra
+ * para o empréstimo novo — o número da parcela ali é ficção.
+ */
+const ENCERRADO = new Set(['QUITADO', 'RENEGOCIADO', 'CANCELADO']);
+
+/** Badge de desfecho do empréstimo. `null` para ATIVO/VENCIDO. */
+const desfechoBadge = (status: string, lang: Language) => {
+  switch (status) {
+    case 'QUITADO':
+      return { texto: lang === 'es' ? '✓ Liquidado' : '✓ Quitado',
+               fundo: '#D1FAE5', borda: '#6EE7B7', cor: '#059669' };
+    case 'RENEGOCIADO':
+      return { texto: lang === 'es' ? '↻ Renegociado' : '↻ Renegociado',
+               fundo: '#EDE9FE', borda: '#C4B5FD', cor: '#7C3AED' };
+    case 'CANCELADO':
+      return { texto: lang === 'es' ? '✕ Cancelado' : '✕ Cancelado',
+               fundo: '#F3F4F6', borda: '#D1D5DB', cor: '#6B7280' };
+    default:
+      return null;
+  }
+};
+
+/**
+ * Origem do empréstimo, quando não é uma venda comum.
+ *
+ * Sem isto, na lista não dá para distinguir um empréstimo novo de um que
+ * nasceu renegociando dívida — e a diferença importa para avaliar o cliente.
+ */
+const ORIGEM: Record<Language, Record<string, string>> = {
+  'pt-BR': { RENEGOCIACAO: 'Renegociação', RENOVACAO: 'Renovação', ADICIONAL: 'Adicional' },
+  'es': { RENEGOCIACAO: 'Renegociación', RENOVACAO: 'Renovación', ADICIONAL: 'Adicional' },
+};
+const origemLabel = (tipo: string | undefined, lang: Language): string | null =>
+  (tipo && ORIGEM[lang][tipo]) || null;
+
 const getIni = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase() || '').join('');
 const fmt = (v: number) => '$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtTel = (t: string) => t.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
@@ -166,20 +206,28 @@ export default function ClienteCardTodos({
       {/* === LINHA 2: Info empréstimo === */}
       {emp && (
         <View style={S.pRow}>
-          {emp.status === 'QUITADO' ? (
-            // Empréstimo quitado — mini resumo
+          {ENCERRADO.has(emp.status) ? (
+            // Empréstimo encerrado (quitado, renegociado ou cancelado) — resumo
             <>
               <View>
                 <View style={S.pLblR}>
-                  <View style={S.badgeQuitado}>
-                    <Text style={S.badgeQuitadoTx}>{lang === 'es' ? '✓ Liquidado' : '✓ Quitado'}</Text>
-                  </View>
+                  {(() => {
+                    const b = desfechoBadge(emp.status, lang);
+                    return b ? (
+                      <View style={[S.badgeDesfecho, { backgroundColor: b.fundo, borderColor: b.borda }]}>
+                        <Text style={[S.badgeDesfechoTx, { color: b.cor }]}>{b.texto}</Text>
+                      </View>
+                    ) : null;
+                  })()}
                   <View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[lang][emp.frequencia_pagamento] || emp.frequencia_pagamento}</Text></View>
                 </View>
+                {origemLabel(emp.tipo_emprestimo, lang) ? (
+                  <Text style={S.origemLbl}>{origemLabel(emp.tipo_emprestimo, lang)}</Text>
+                ) : null}
                 {emp.data_emprestimo ? <Text style={S.dataEmpLbl}>{lang === 'es' ? 'Préstamo:' : 'Empréstimo:'} {fmtData(emp.data_emprestimo)}</Text> : null}
               </View>
               <View style={S.sCol}>
-                <Text style={[S.pValBig, { color: '#10B981', fontSize: 15 }]}>
+                <Text style={[S.pValBig, { color: emp.status === 'QUITADO' ? '#10B981' : '#6B7280', fontSize: 15 }]}>
                   {emp.numero_parcelas}x {fmt(emp.valor_parcela)}
                 </Text>
                 <Text style={S.sLbl}>{lang === 'es' ? 'Total: ' : 'Total: '}{fmt(emp.valor_parcela * emp.numero_parcelas)}</Text>
@@ -197,6 +245,11 @@ export default function ClienteCardTodos({
                 <View style={S.pLblR}>
                   <Text style={S.pLbl}>{t.parcela} {emp.numero_parcela_atual}/{emp.numero_parcelas}</Text>
                   <View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[lang][emp.frequencia_pagamento] || emp.frequencia_pagamento}</Text></View>
+                  {origemLabel(emp.tipo_emprestimo, lang) ? (
+                    <View style={S.origemBdg}>
+                      <Text style={S.origemBdgT}>{origemLabel(emp.tipo_emprestimo, lang)}</Text>
+                    </View>
+                  ) : null}
                 </View>
                 {emp.data_emprestimo ? <Text style={S.dataEmpLbl}>{lang === 'es' ? 'Préstamo:' : 'Empréstimo:'} {fmtData(emp.data_emprestimo)}</Text> : null}
               </View>
@@ -429,8 +482,14 @@ const S = StyleSheet.create({
   linkDetalhes: { alignItems: 'center', paddingVertical: 4 },
   linkDetalhesTx: { fontSize: 12, color: '#9CA3AF' },
   // ⭐ Botão Novo Empréstimo
-  badgeQuitado: { backgroundColor: '#D1FAE5', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, borderWidth: 1, borderColor: '#6EE7B7' },
-  badgeQuitadoTx: { fontSize: 11, fontWeight: '700' as const, color: '#059669' },
+  // Cores vêm de desfechoBadge(): verde quitado, roxo renegociado, cinza cancelado.
+  badgeDesfecho: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
+  badgeDesfechoTx: { fontSize: 11, fontWeight: '700' as const },
+  // Origem do empréstimo (renegociação/renovação/adicional). Discreta: é
+  // contexto, não estado — não deve competir com o badge de desfecho.
+  origemBdg: { backgroundColor: '#EDE9FE', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 },
+  origemBdgT: { fontSize: 10, fontWeight: '600' as const, color: '#7C3AED' },
+  origemLbl: { fontSize: 11, fontWeight: '600' as const, color: '#7C3AED', marginTop: 2 },
   tAddRowActive: { 
     flexDirection: 'row', 
     alignItems: 'center', 

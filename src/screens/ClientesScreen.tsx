@@ -959,6 +959,12 @@ export default function ClientesScreen({ navigation, route }: any) {
   const todosUpdatedAtRef = useRef(0);
   useEffect(() => { todosUpdatedAtRef.current = todosUpdatedAt || 0; }, [todosUpdatedAt]);
 
+  // Carimbo de invalidação vinda do contexto (venda/renegociação recém-criada).
+  // Em ref pelo mesmo motivo dos dois acima: o useFocusEffect tem lista de
+  // dependências vazia e leria uma closure velha.
+  const invalidadosEmRef = useRef(0);
+  useEffect(() => { invalidadosEmRef.current = liqCtx.clientesInvalidadosEm || 0; }, [liqCtx.clientesInvalidadosEm]);
+
   const loadLiqRef = useRef(loadLiq);
   useEffect(() => { loadLiqRef.current = loadLiq; }, [loadLiq]);
 
@@ -1002,8 +1008,16 @@ export default function ClientesScreen({ navigation, route }: any) {
         : todosUpdatedAtRef.current;
       const stale = agora - ultimaCarga > 30000;
 
-      if (stale) {
-        console.log('🔄 useFocusEffect: Dados stale, recarregando aba', tabAtual);
+      // Furo controlado na regra dos 30s: quando o próprio app criou ou alterou
+      // um empréstimo (venda, renegociação, renovação), os dados estão obsoletos
+      // por definição — não importa há quanto tempo foram carregados. Sem isto,
+      // quem voltava da NovaVenda em menos de 30s via o card velho e achava que
+      // o sistema tinha demorado a atualizar.
+      const invalidado = invalidadosEmRef.current > ultimaCarga;
+
+      if (stale || invalidado) {
+        console.log('🔄 useFocusEffect: recarregando aba', tabAtual,
+          invalidado ? '(dados invalidados por ação do app)' : '(stale)');
         if (tabAtual === 'liquidacao') loadLiqRef.current();
         else loadTodosClientesRef.current(true);
       } else {
