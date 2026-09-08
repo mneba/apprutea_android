@@ -718,43 +718,62 @@ export default function ClientesScreen({ navigation, route }: any) {
 
 
   // Carregar configurações do vendedor (permitir_exclusao_parcelas)
-  useEffect(() => {
-    const carregarConfigVendedor = async () => {
-      if (!vendedor?.id) {
-        console.log('[CONFIG] Vendedor não disponível ainda');
-        return;
-      }
-      console.log('[CONFIG] Carregando config para vendedor:', vendedor.id);
-      try {
-        const { data, error } = await supabase
-          .from('configuracoes_vendedor')
-          .select('permitir_exclusao_parcelas')
-          .eq('vendedor_id', vendedor.id)
-          .maybeSingle();
-        
-        console.log('[CONFIG] Resposta:', { data, error });
-        
-        if (!error && data) {
-          const raw = data.permitir_exclusao_parcelas;
-          // Normaliza para boolean: aceita true, "true", 1, "1".
-          // Só é false se explicitamente false/"false"/0. Ausente (null) → true.
-          const permite = raw == null
-            ? true
-            : (raw === true || String(raw).toLowerCase() === 'true' || String(raw) === '1');
-          console.log('[CONFIG] permitir_exclusao_parcelas raw =', raw, '→', permite);
-          setConfigVendedor({ permitir_exclusao_parcelas: permite });
-        } else {
-          // Se não existir configuração, permitir por padrão
-          console.log('[CONFIG] Sem config, usando default true');
-          setConfigVendedor({ permitir_exclusao_parcelas: true });
-        }
-      } catch (e) {
-        console.log('[CONFIG] Erro ao carregar config vendedor:', e);
+  //
+  // ⚠️ RELIDA A CADA FOCO DA TELA, não só na montagem.
+  //
+  // Esta é uma aba: fica montada a sessão inteira. Com a carga só na montagem,
+  // o vendedor guardava a configuração de quando entrou no app e o admin
+  // ativar a restrição hoje não o alcançava — ele seguia estornando sem
+  // autorização até fechar e reabrir o app.
+  //
+  // Como isso costumava acontecer no dia seguinte, parecia que a restrição só
+  // valia "ao chegar na data atual" e não nos dias retroativos. Não há regra
+  // de data em lugar nenhum: era cache de sessão.
+  //
+  // As restrições de venda e de movimentação não têm esse problema — as telas
+  // delas são criadas a cada uso e releem `restricoes_vendedor` ao montar.
+  const carregarConfigVendedor = useCallback(async () => {
+    if (!vendedor?.id) {
+      console.log('[CONFIG] Vendedor não disponível ainda');
+      return;
+    }
+    console.log('[CONFIG] Carregando config para vendedor:', vendedor.id);
+    try {
+      const { data, error } = await supabase
+        .from('configuracoes_vendedor')
+        .select('permitir_exclusao_parcelas')
+        .eq('vendedor_id', vendedor.id)
+        .maybeSingle();
+      
+      console.log('[CONFIG] Resposta:', { data, error });
+      
+      if (!error && data) {
+        const raw = data.permitir_exclusao_parcelas;
+        // Normaliza para boolean: aceita true, "true", 1, "1".
+        // Só é false se explicitamente false/"false"/0. Ausente (null) → true.
+        const permite = raw == null
+          ? true
+          : (raw === true || String(raw).toLowerCase() === 'true' || String(raw) === '1');
+        console.log('[CONFIG] permitir_exclusao_parcelas raw =', raw, '→', permite);
+        setConfigVendedor({ permitir_exclusao_parcelas: permite });
+      } else {
+        // Se não existir configuração, permitir por padrão
+        console.log('[CONFIG] Sem config, usando default true');
         setConfigVendedor({ permitir_exclusao_parcelas: true });
       }
-    };
-    carregarConfigVendedor();
+    } catch (e) {
+      console.log('[CONFIG] Erro ao carregar config vendedor:', e);
+      setConfigVendedor({ permitir_exclusao_parcelas: true });
+    }
   }, [vendedor?.id]);
+
+  // Carga inicial. A releitura ao voltar para a tela fica no useFocusEffect.
+  useEffect(() => { carregarConfigVendedor(); }, [carregarConfigVendedor]);
+
+  // Ref porque o useFocusEffect tem lista de dependências vazia e leria uma
+  // closure velha — mesmo padrão dos outros loaders desta tela.
+  const carregarConfigVendedorRef = useRef(carregarConfigVendedor);
+  useEffect(() => { carregarConfigVendedorRef.current = carregarConfigVendedor; }, [carregarConfigVendedor]);
 
   // Iniciar GPS ao montar a tela (não esperar abrir modal)
   
@@ -1032,6 +1051,11 @@ export default function ClientesScreen({ navigation, route }: any) {
 
       // Solicitações podem ter mudado ao voltar de NovaVenda
       carregarSolicitacoesRef.current();
+
+      // ⭐ E as restrições do vendedor: o admin pode tê-las alterado no painel
+      // enquanto o app estava aberto. Sem esta releitura, a trava de estorno
+      // valia só a partir do próximo login. Consulta de uma linha, sem peso.
+      carregarConfigVendedorRef.current();
     }, [])
   );
 

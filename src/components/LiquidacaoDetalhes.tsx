@@ -218,8 +218,17 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const extratoViewRef = useRef<View>(null);
   const [modalResetVisible, setModalResetVisible] = useState(false);
   const handleResetSuccess = () => {
-    setModalResetVisible(false);
-    onClose(); // Fecha o extrato também
+    // Mantém o modal de reset E o extrato abertos.
+    //
+    // Antes fechava os dois (`setModalResetVisible(false)` + `onClose()`), o
+    // que devolvia o usuário à Home. Resetar mais de um cliente é o caso
+    // comum, e obrigava a refazer Home → Caixa → Extrato → Resetar a cada um.
+    //
+    // O extrato é recarregado porque os totais mudaram. A lista do modal de
+    // reset já se atualiza sozinha — quem acabou de ser resetado sai dela.
+    // A tela por trás é recarregada pelo `onClose` do extrato, quando o
+    // usuário de fato terminar.
+    carregarExtrato();
   };
 
   useEffect(() => {
