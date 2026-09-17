@@ -4,6 +4,7 @@
 // =====================================================
 
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import React, { useEffect, useRef, useState } from 'react';
@@ -203,6 +204,7 @@ interface ExtratoProps {
 }
 
 export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, caixaFinal, rotaNome, vendedorNomeExterno, lang = 'pt-BR', isLiquidacaoAberta = false }: ExtratoProps) {
+  const nav = useNavigation<any>();
   const t = i18n[lang];
   const [registros, setRegistros] = useState<any[]>([]);
   const [pagamentos, setPagamentos] = useState<any[]>([]);
@@ -377,24 +379,60 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   // $504 e a auto-quitação come tudo no mesmo instante — o extrato dizia
   // "Crédito gerado: $504" como se o cliente tivesse ficado com esse valor,
   // sem mencionar que 7 parcelas foram quitadas ali.
-  const creditoDoDiaPorEmprestimo = new Map<string, { consumido: number; parcelas: number }>();
+  const creditoDoDiaPorEmprestimo = new Map<string, { consumido: number; oculto: number; parcelas: number }>();
   for (const p of pagamentos) {
     const eid = (p as any).emprestimo_id;
     if (!eid) continue;
-    const a = creditoDoDiaPorEmprestimo.get(eid) || { consumido: 0, parcelas: 0 };
-    a.consumido += parseFloat((p as any).valor_credito_usado || 0);
-    if (p.forma_pagamento === 'CREDITO') a.parcelas += 1;
+    const a = creditoDoDiaPorEmprestimo.get(eid) || { consumido: 0, oculto: 0, parcelas: 0 };
+    const usado = parseFloat((p as any).valor_credito_usado || 0);
+    a.consumido += usado;
+    // `oculto`: crédito consumido por linhas CREDITO, que não aparecem na
+    // lista (o filtro acima as remove, e com razão — não são caixa). Sem
+    // anunciá-lo o extrato fecha 8 parcelas mostrando só o dinheiro de 6, e o
+    // operador não tem de onde tirar a diferença. Foi a reclamação da Paloma
+    // Unhas em 12/09/2026: $360 em dinheiro + $120 de crédito quitaram o
+    // empréstimo, e os $120 não apareciam em lugar nenhum.
+    if (p.forma_pagamento === 'CREDITO') {
+      a.parcelas += 1;
+      a.oculto += usado;
+    }
     creditoDoDiaPorEmprestimo.set(eid, a);
   }
 
-  /** Excedente que REALMENTE sobrou, e quantas parcelas o crédito fechou. */
+  // Última linha visível de cada empréstimo. O resumo do crédito é do
+  // empréstimo, não do pagamento: repetido em todas as linhas ele multiplica o
+  // que houve — seis linhas dizendo "quitou +2 parcelas" viram doze.
+  const ultimaLinhaDoEmprestimo = new Map<string, string>();
+  for (const p of pagamentosDinheiro) {
+    const eid = (p as any).emprestimo_id;
+    if (eid) ultimaLinhaDoEmprestimo.set(eid, p.id);
+  }
+
+  /** Excedente que REALMENTE sobrou, e o resumo do crédito do empréstimo. */
   const creditoLiquido = (p: any) => {
     const gerado = parseFloat(p.valor_credito_gerado || 0);
-    const doDia = creditoDoDiaPorEmprestimo.get(p.emprestimo_id) || { consumido: 0, parcelas: 0 };
+    const doDia = creditoDoDiaPorEmprestimo.get(p.emprestimo_id) || { consumido: 0, oculto: 0, parcelas: 0 };
+    const ehUltima = ultimaLinhaDoEmprestimo.get(p.emprestimo_id) === p.id;
     return {
       excedente: Math.max(0, gerado - doDia.consumido),
-      parcelasQuitadas: doDia.parcelas,
+      parcelasQuitadas: ehUltima ? doDia.parcelas : 0,
+      creditoOculto: ehUltima ? doDia.oculto : 0,
     };
+  };
+
+  /** Fragmento que declara o crédito aplicado pelo empréstimo (uma vez só). */
+  const fraseCredito = (liq: { parcelasQuitadas: number; creditoOculto: number }) => {
+    const qtd = liq.parcelasQuitadas;
+    if (liq.creditoOculto > 0) {
+      const un = lang === 'es'
+        ? (qtd === 1 ? 'cuota' : 'cuotas')
+        : (qtd === 1 ? 'parcela' : 'parcelas');
+      return ` · crédito aplicado: ${fmt(liq.creditoOculto)}${qtd > 0 ? ` (${qtd} ${un})` : ''}`;
+    }
+    if (qtd > 0) {
+      return ` · ${lang === 'es' ? 'liquidó' : 'quitou'} +${qtd} ${lang === 'es' ? 'cuotas' : 'parcelas'}`;
+    }
+    return '';
   };
   const totalPagamentos = pagamentosDinheiro.reduce((s, p) => {
     // valor_pago_atual = dinheiro + crédito usado neste pagamento
@@ -499,7 +537,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         const liqH = creditoLiquido(p);
         return `<div class="mov">
           <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${nomeCliente}</span><span class="mov-val verde">+${fmt(dinheiroRecebido)}</span></div>
-          <div class="mov-sub" style="color:#6B7280">${lang === 'es' ? 'Cuota' : 'Parcela'} ${p.numero_parcela}: ${fmt(parseFloat(p.valor_parcela || 0))}${creditoUsado > 0 ? ` · ${fmt(creditoUsado)} ${lang === 'es' ? 'con crédito' : 'com crédito'}` : ''}${liqH.parcelasQuitadas > 0 ? ` · ${lang === 'es' ? 'liquidó' : 'quitou'} +${liqH.parcelasQuitadas} ${lang === 'es' ? 'cuotas' : 'parcelas'}` : ''}${liqH.excedente > 0 ? ` · ${lang === 'es' ? 'Crédito generado' : 'Crédito gerado'}: ${fmt(liqH.excedente)}` : ''}</div>
+          <div class="mov-sub" style="color:#6B7280">${lang === 'es' ? 'Cuota' : 'Parcela'} ${p.numero_parcela}: ${fmt(parseFloat(p.valor_parcela || 0))}${creditoUsado > 0 ? ` · ${fmt(creditoUsado)} ${lang === 'es' ? 'con crédito' : 'com crédito'}` : ''}${fraseCredito(liqH)}${liqH.excedente > 0 ? ` · ${lang === 'es' ? 'Crédito generado' : 'Crédito gerado'}: ${fmt(liqH.excedente)}` : ''}</div>
           <div class="mov-meta"><span>${fmtHora(p.created_at)}</span>${p.forma_pagamento ? `<span>${p.forma_pagamento}</span>` : ''}</div>
         </div>`;
       }).join('')}
@@ -864,7 +902,14 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                           const dinheiroRecebido = valorPagoAtual - creditoUsado;
                           const liq = creditoLiquido(p);
                           return (
-                            <View key={p.id}>
+                            <TouchableOpacity
+                              key={p.id}
+                              disabled={!(p as any).emprestimo_id}
+                              onPress={() => {
+                                onClose();
+                                setTimeout(() => nav.navigate('FichaEmprestimo', { emprestimoId: (p as any).emprestimo_id }), 250);
+                              }}
+                            >
                               <View style={cupom.itemRow}>
                                 <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
                                 <Text style={cupom.itemCat} numberOfLines={1}>{nomeCliente}</Text>
@@ -874,7 +919,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                                 {'   '}
                                 {lang === 'es' ? 'Cuota' : 'Parcela'} {p.numero_parcela}: {fmt(parseFloat(p.valor_parcela || 0))}
                                 {creditoUsado > 0 && ` · ${fmt(creditoUsado)} ${lang === 'es' ? 'con crédito' : 'com crédito'}`}
-                                {liq.parcelasQuitadas > 0 && ` · ${lang === 'es' ? 'liquidó' : 'quitou'} +${liq.parcelasQuitadas} ${lang === 'es' ? 'cuotas' : 'parcelas'}`}
+                                {fraseCredito(liq)}
                                 {liq.excedente > 0 && ` · ${lang === 'es' ? 'Crédito generado' : 'Crédito gerado'}: ${fmt(liq.excedente)}`}
                               </Text>
                               <View style={cupom.itemMeta}>
@@ -882,7 +927,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                                 {p.forma_pagamento && <Text style={cupom.itemHora}>{p.forma_pagamento}</Text>}
                               </View>
                               {idx < pagamentosDinheiro.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
-                            </View>
+                            </TouchableOpacity>
                           );
                         })}
                         <View style={cupom.linha}>

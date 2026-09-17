@@ -1,3 +1,4 @@
+import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -68,6 +69,13 @@ interface Parcela {
 }
 
 type Aba = 'pessoais' | 'emprestimo' | 'historico' | 'documentos';
+
+// Empréstimo e Histórico saem daqui (setembro/2026): a Ficha do Empréstimo
+// mostra a mesma coisa e mais — ordena por tempo, agrupa por operação e
+// confere as contas. Este modal volta a ser o que o nome diz: o cadastro do
+// cliente. Em avaliação com o Julio; por isso a lista é constante e o
+// renderEmprestimo/renderHistorico continuam no arquivo.
+const ABAS_VISIVEIS: Aba[] = ['pessoais', 'documentos'];
 type Language = 'pt-BR' | 'es';
 
 // ==================== TEXTOS ====================
@@ -180,6 +188,7 @@ interface Props {
 // ==================== COMPONENTE ====================
 export default function ClienteDetalhesModal({ visible, onClose, cliente, lang = 'pt-BR', onNovoEmprestimo, onRenegociar, onAlterarSolicitacaoRenovacao, onCancelarSolicitacaoRenovacao }: Props) {
   const t = T[lang];
+  const navigation = useNavigation<any>();
   const { vendedor } = useAuth();
   const [aba, setAba] = useState<Aba>('pessoais');
   const [loading, setLoading] = useState(false);
@@ -189,6 +198,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
   const [parcelas, setParcelas] = useState<Map<string, Parcela[]>>(new Map());
   const [loadingParcelas, setLoadingParcelas] = useState<string | null>(null);
   const [clienteCompleto, setClienteCompleto] = useState<any>(null);
+  const [obsSalva, setObsSalva] = useState(false);
 
   // ─── Regras de cobrança da rota ─────────────────────────────────────────
   // Atraso conta DIAS DE COBRANÇA, não dias de calendário: domingo (quando a
@@ -762,119 +772,164 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
   };
 
   // ==================== ABA PESSOAIS ====================
-  const renderPessoais = () => (
-    <ScrollView style={S.abaContent} showsVerticalScrollIndicator={false}>
-      {/* Avatar + Nome */}
-      <View style={S.perfilHeader}>
-        <TouchableOpacity onPress={handleFotoCliente} activeOpacity={0.7} style={{ position: 'relative' }}>
-          {clienteCompleto?.foto_url ? (
-            <Image source={{ uri: clienteCompleto.foto_url }} style={S.avatarGrandeImg} />
-          ) : (
-            <View style={S.avatarGrande}>
-              <Text style={S.avatarGrandeText}>{getIni(cli.nome || cliente.nome).toUpperCase()}</Text>
-            </View>
-          )}
-          {uploadingFoto ? (
-            <View style={S.avatarGrandeCamBadge}>
-              <ActivityIndicator size={12} color="#fff" />
-            </View>
-          ) : (
-            <View style={S.avatarGrandeCamBadge}>
-              <Ionicons name="camera" size={14} color="#fff" />
-            </View>
-          )}
-        </TouchableOpacity>
-        <Text style={S.perfilNome}>{(cli.nome || cliente.nome).toLowerCase()}</Text>
-        {cli.status && (
-          <View style={[S.statusBadge, { backgroundColor: (corStatus[cli.status] || corStatus.PENDENTE).bg }]}>
-            <Text style={[S.statusBadgeText, { color: (corStatus[cli.status] || corStatus.PENDENTE).text }]}>
-              {cli.status}
-            </Text>
-          </View>
-        )}
-      </View>
+  const renderPessoais = () => {
+    const tel = cli.telefone_celular || cliente.telefone || '';
+    const end = cli.endereco || cliente.endereco || '';
+    const endCom = cli.endereco_comercial || '';
+    const doc = cli.documento || cliente.documento || '';
+    const es = lang === 'es';
 
-      {/* Dados */}
-      <View style={S.dadosCard}>
-        {cli.codigo_cliente && (
-          <View style={S.dadoRow}>
-            <Text style={S.dadoLabel}><Ionicons name="pricetag-outline" size={12} color="#6B7280" /> {t.codigo}</Text>
-            <Text style={S.dadoValue}>{cli.codigo_cliente}</Text>
-          </View>
-        )}
-        {(cli.documento || cliente.documento) && (
-          <View style={S.dadoRow}>
-            <Text style={S.dadoLabel}><Ionicons name="document-text-outline" size={12} color="#6B7280" /> {t.documento}</Text>
-            <Text style={S.dadoValue}>{cli.documento || cliente.documento}</Text>
-          </View>
-        )}
-        {(cli.telefone_celular || cliente.telefone) && (() => {
-          const tel = cli.telefone_celular || cliente.telefone || '';
-          return (
-            <View style={S.dadoRow}>
-              <Text style={S.dadoLabel}><Ionicons name="call-outline" size={12} color="#6B7280" /> {t.telefone}</Text>
-              <View style={S.dadoActions}>
-                <TouchableOpacity onPress={() => Linking.openURL(`tel:${tel.replace(/\D/g, '')}`)}>
-                  <Text style={[S.dadoValue, { color: '#2563EB' }]}>{tel}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={S.whatsappBtn} onPress={() => {
-                  const num = fmtWhatsApp(tel);
-                  Linking.openURL(`https://wa.me/${num}`);
-                }}>
-                  <Ionicons name="logo-whatsapp" size={16} color="#25D366" />
-                </TouchableOpacity>
-              </View>
-            </View>
-          );
-        })()}
-        {(cli.endereco || cliente.endereco) && (() => {
-          const end = cli.endereco || cliente.endereco || '';
-          return (
-            <View style={S.dadoRow}>
-              <Text style={S.dadoLabel}><Ionicons name="location-outline" size={12} color="#6B7280" /> {t.endereco}</Text>
-              <View style={S.dadoActions}>
-                <Text style={S.dadoValue} numberOfLines={2}>{end}</Text>
-                <TouchableOpacity style={S.mapaBtn} onPress={() => abrirMapa(end)}>
-                  <Ionicons name="navigate-outline" size={16} color="#3B82F6" />
-                </TouchableOpacity>
-              </View>
-            </View>
-          );
-        })()}
-        {cli.endereco_comercial && (
-          <View style={S.dadoRow}>
-            <Text style={S.dadoLabel}><Ionicons name="business-outline" size={12} color="#6B7280" /> {lang === 'es' ? 'Dir. Comercial' : 'End. Comercial'}</Text>
-            <View style={S.dadoActions}>
-              <Text style={S.dadoValue} numberOfLines={2}>{cli.endereco_comercial}</Text>
-              <TouchableOpacity style={S.mapaBtn} onPress={() => abrirMapa(cli.endereco_comercial)}>
-                <Ionicons name="navigate-outline" size={16} color="#3B82F6" />
+    return (
+      <ScrollView style={S.abaContent} showsVerticalScrollIndicator={false}>
+
+        {/* ── Ações rápidas ──
+            Ligar, WhatsApp e rota eram ícones de 16px encostados no texto do
+            dado. São as três coisas que o vendedor faz na rua, muitas vezes
+            com o celular numa mão e o dinheiro na outra: merecem alvo grande
+            e rótulo. Os dados continuam abaixo, para consulta. */}
+        {(!!tel || !!end) && (
+          <View style={S.acoes}>
+            {!!tel && (
+              <TouchableOpacity
+                style={S.acaoBt}
+                activeOpacity={0.7}
+                onPress={() => Linking.openURL(`tel:${tel.replace(/\D/g, '')}`)}
+              >
+                <View style={[S.acaoIcone, { backgroundColor: '#DBEAFE' }]}>
+                  <Ionicons name="call" size={19} color="#2563EB" />
+                </View>
+                <Text style={S.acaoTx}>{es ? 'Llamar' : 'Ligar'}</Text>
               </TouchableOpacity>
-            </View>
+            )}
+            {!!tel && (
+              <TouchableOpacity
+                style={S.acaoBt}
+                activeOpacity={0.7}
+                onPress={() => Linking.openURL(`https://wa.me/${fmtWhatsApp(tel)}`)}
+              >
+                <View style={[S.acaoIcone, { backgroundColor: '#DCFCE7' }]}>
+                  <Ionicons name="logo-whatsapp" size={19} color="#16A34A" />
+                </View>
+                <Text style={S.acaoTx}>WhatsApp</Text>
+              </TouchableOpacity>
+            )}
+            {!!end && (
+              <TouchableOpacity style={S.acaoBt} activeOpacity={0.7} onPress={() => abrirMapa(end)}>
+                <View style={[S.acaoIcone, { backgroundColor: '#EDE9FE' }]}>
+                  <Ionicons name="navigate" size={19} color="#7C3AED" />
+                </View>
+                <Text style={S.acaoTx}>{es ? 'Ruta' : 'Rota'}</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
-      </View>
 
-      {/* Observações */}
-      <View style={S.obsCard}>
-        <View style={S.obsHeader}>
-          <Ionicons name="chatbubble-outline" size={13} color="#6B7280" />
-          <Text style={S.obsLabel}>{lang === 'es' ? 'Observaciones' : 'Observações'}</Text>
-          {salvandoObs && <ActivityIndicator size={12} color="#3B82F6" style={{ marginLeft: 6 }} />}
+        {/* ── Identificação ──
+            Código e documento são curtos e ocupavam uma linha inteira cada.
+            Lado a lado, sobra tela para o que é longo (endereços). */}
+        <View style={S.bloco}>
+          <Text style={S.blocoTitulo}>{es ? 'Identificación' : 'Identificação'}</Text>
+          <View style={S.grade}>
+            {!!cli.codigo_cliente && (
+              <View style={S.gradeItem}>
+                <Text style={S.campoRot}>{t.codigo}</Text>
+                <Text style={S.campoVal}>{cli.codigo_cliente}</Text>
+              </View>
+            )}
+            {!!doc && (
+              <View style={S.gradeItem}>
+                <Text style={S.campoRot}>{t.documento}</Text>
+                <Text style={S.campoVal}>{doc}</Text>
+              </View>
+            )}
+            {!!tel && (
+              <View style={S.gradeItem}>
+                <Text style={S.campoRot}>{t.telefone}</Text>
+                <Text style={S.campoVal}>{tel}</Text>
+              </View>
+            )}
+            {!!cli.status && (
+              <View style={S.gradeItem}>
+                <Text style={S.campoRot}>Status</Text>
+                <View style={[S.statusPill, { backgroundColor: (corStatus[cli.status] || corStatus.PENDENTE).bg }]}>
+                  <Text style={[S.statusPillTx, { color: (corStatus[cli.status] || corStatus.PENDENTE).text }]}>
+                    {cli.status}
+                  </Text>
+                </View>
+              </View>
+            )}
+          </View>
         </View>
-        <TextInput
-          style={S.obsInput}
-          value={obsLocal}
-          onChangeText={setObsLocal}
-          onBlur={() => salvarObservacoes(obsLocal)}
-          placeholder={lang === 'es' ? 'Notas sobre el cliente...' : 'Anotações sobre o cliente...'}
-          placeholderTextColor="#9CA3AF"
-          multiline
-          numberOfLines={3}
-          textAlignVertical="top"
-        />
-      </View>
-    </ScrollView>
-  );
+
+        {/* ── Endereços ──
+            Os dois eram linhas de rótulo/valor idênticas, e só o ícone
+            distinguia casa de comércio. Agora cada um é uma linha própria,
+            nomeada, com o botão de rota ao lado. */}
+        {(!!end || !!endCom) && (
+          <View style={S.bloco}>
+            <Text style={S.blocoTitulo}>{es ? 'Direcciones' : 'Endereços'}</Text>
+            {!!end && (
+              <View style={S.endLinha}>
+                <View style={S.endIcone}>
+                  <Ionicons name="home-outline" size={15} color="#6B7280" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={S.campoRot}>{es ? 'Residencial' : 'Residencial'}</Text>
+                  <Text style={S.campoVal}>{end}</Text>
+                </View>
+                <TouchableOpacity style={S.irBt} onPress={() => abrirMapa(end)}>
+                  <Ionicons name="navigate-outline" size={13} color="#3B82F6" />
+                  <Text style={S.irTx}>Ir</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {!!endCom && (
+              <View style={S.endLinha}>
+                <View style={S.endIcone}>
+                  <Ionicons name="business-outline" size={15} color="#6B7280" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={S.campoRot}>{es ? 'Comercial' : 'Comercial'}</Text>
+                  <Text style={S.campoVal}>{endCom}</Text>
+                </View>
+                <TouchableOpacity style={S.irBt} onPress={() => abrirMapa(endCom)}>
+                  <Ionicons name="navigate-outline" size={13} color="#3B82F6" />
+                  <Text style={S.irTx}>Ir</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* ── Observações ──
+            Salva no blur, como antes. A diferença é dizer que salvou: sem
+            confirmação, o usuário não sabe se pode fechar a tela. */}
+        <View style={S.bloco}>
+          <View style={S.obsHead}>
+            <Text style={S.blocoTitulo}>{es ? 'Observaciones' : 'Observações'}</Text>
+            {salvandoObs ? (
+              <ActivityIndicator size={12} color="#3B82F6" />
+            ) : obsSalva ? (
+              <Text style={S.obsSalvaTx}>✓ {es ? 'guardado' : 'salvo'}</Text>
+            ) : null}
+          </View>
+          <TextInput
+            style={S.obsInput}
+            value={obsLocal}
+            onChangeText={txt => { setObsLocal(txt); setObsSalva(false); }}
+            onBlur={() => salvarObservacoes(obsLocal)}
+            placeholder={es ? 'Notas sobre el cliente...' : 'Anotações sobre o cliente...'}
+            placeholderTextColor="#9CA3AF"
+            multiline
+            numberOfLines={3}
+            textAlignVertical="top"
+          />
+        </View>
+
+        <View style={{ height: 24 }} />
+      </ScrollView>
+    );
+  };
   const renderEmprestimoCard = (emp: Emprestimo, somenteLeitura: boolean) => {
     const isExp = expandedEmp === emp.id;
     const cor = corStatus[emp.status] || corStatus.PENDENTE;
@@ -948,6 +1003,20 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
               {isExp ? t.fecharParcelas : `${t.verParcelas} (${emp.numero_parcelas})`}
             </Text>
           </View>
+        </TouchableOpacity>
+
+        {/* A ficha responde o que este card nao responde: a ordem dos fatos.
+            Fecha o modal antes de navegar - no Android a tela abriria atras
+            dele (mesma armadilha anotada no estorno, em ClientesScreen). */}
+        <TouchableOpacity
+          style={S.btnFicha}
+          onPress={() => {
+            onClose();
+            setTimeout(() => navigation.navigate('FichaEmprestimo', { emprestimoId: emp.id }), 250);
+          }}
+        >
+          <Ionicons name="document-text-outline" size={15} color="#4338CA" />
+          <Text style={S.btnFichaTx}>{lang === 'es' ? 'Ver ficha completa' : 'Ver ficha completa'}</Text>
         </TouchableOpacity>
 
         {/* ⭐ Botão Renegociar / Solicitar / Aguardando — granular por empréstimo */}
@@ -1583,7 +1652,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
 
           {/* Tabs */}
           <View style={S.tabs}>
-            {(['pessoais', 'emprestimo', 'historico', 'documentos'] as Aba[]).map(a => (
+            {ABAS_VISIVEIS.map(a => (
               <TouchableOpacity
                 key={a}
                 style={[S.tab, aba === a && S.tabAtivo]}
@@ -1864,6 +1933,12 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
 
 // ==================== ESTILOS ====================
 const S = StyleSheet.create({
+  btnFicha: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    marginTop: 8, paddingVertical: 9, borderRadius: 9,
+    backgroundColor: '#EEF2FF', borderWidth: 1, borderColor: '#C7D2FE',
+  },
+  btnFichaTx: { fontSize: 12, fontWeight: '700', color: '#4338CA' },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   container: { backgroundColor: '#FFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '95%', minHeight: '85%', flex: 1 },
 
@@ -1900,6 +1975,51 @@ const S = StyleSheet.create({
   avatarGrandeText: { fontSize: 22, fontWeight: '700', color: '#FFF' },
   avatarGrandeImg: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#E5E7EB', marginBottom: 8 },
   avatarGrandeCamBadge: { position: 'absolute', bottom: 6, right: -4, width: 24, height: 24, borderRadius: 12, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
+  acoes: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+  acaoBt: {
+    flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 12,
+    backgroundColor: '#fff', borderWidth: 1, borderColor: '#F3F4F6',
+  },
+  acaoIcone: {
+    width: 40, height: 40, borderRadius: 20,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 5,
+  },
+  acaoTx: { fontSize: 11, fontWeight: '700', color: '#374151' },
+
+  bloco: {
+    backgroundColor: '#fff', borderRadius: 14, padding: 14, marginBottom: 12,
+    borderWidth: 1, borderColor: '#F3F4F6',
+  },
+  blocoTitulo: {
+    fontSize: 11, fontWeight: '800', color: '#9CA3AF',
+    letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 10,
+  },
+  grade: { flexDirection: 'row', flexWrap: 'wrap' },
+  gradeItem: { width: '50%', marginBottom: 12, paddingRight: 8 },
+  campo: { marginBottom: 12 },
+  campoRot: { fontSize: 10, color: '#9CA3AF', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.3 },
+  campoVal: { fontSize: 14, fontWeight: '600', color: '#111827', marginTop: 2 },
+  statusPill: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, marginTop: 3 },
+  statusPillTx: { fontSize: 10, fontWeight: '800' },
+
+  endLinha: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 10,
+    paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#F9FAFB',
+  },
+  endIcone: {
+    width: 30, height: 30, borderRadius: 8, backgroundColor: '#F3F4F6',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  irBt: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    paddingHorizontal: 9, paddingVertical: 6, borderRadius: 8,
+    backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE',
+  },
+  irTx: { fontSize: 11, fontWeight: '700', color: '#3B82F6' },
+
+  obsHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  obsSalvaTx: { fontSize: 10, fontWeight: '700', color: '#059669' },
+
   perfilNome: { fontSize: 18, fontWeight: '700', color: '#1F2937', textTransform: 'capitalize' },
   statusBadge: { marginTop: 6, paddingHorizontal: 12, paddingVertical: 3, borderRadius: 12 },
   statusBadgeText: { fontSize: 11, fontWeight: '700' },

@@ -159,6 +159,12 @@ export default function MenuPagamento({
                 <Text style={S.cliente} numberOfLines={1}>{clienteNome}</Text>
                 <Text style={S.sub}>{t.parcela} {parcela.numero_parcela} · {parcela.numero_parcela}/{totalParcelas}</Text>
               </View>
+              {/* Fechar explícito. Tocar fora e arrastar a folha já fechavam,
+                  mas nenhum dos dois é visível — quem não conhece o gesto
+                  ficava preso numa tela de dinheiro. */}
+              <TouchableOpacity style={S.fechar} onPress={onClose} hitSlop={10}>
+                <Ionicons name="close" size={20} color="#6B7280" />
+              </TouchableOpacity>
             </View>
 
             {/* Histórico de parciais (só se parcial) */}
@@ -342,6 +348,10 @@ export default function MenuPagamento({
 // ─── Styles ─────────────────────────────────────────────────────────────────
 
 const S = StyleSheet.create({
+  fechar: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center',
+  },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   folha: { backgroundColor: '#fff', borderTopLeftRadius: 18, borderTopRightRadius: 18, paddingHorizontal: 18, paddingBottom: 24, maxHeight: '88%' },
   handle: { width: 40, height: 4, backgroundColor: '#D1D5DB', borderRadius: 99, alignSelf: 'center', marginTop: 10, marginBottom: 16 },

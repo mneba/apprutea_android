@@ -13,6 +13,7 @@ import { LiquidacaoProvider, useLiquidacaoContext } from '../contexts/Liquidacao
 // Screens
 import ClientesScreen from '../screens/ClientesScreen';
 import ConfiguracoesScreen from '../screens/ConfiguracoesScreen';
+import FichaEmprestimoScreen from '../screens/FichaEmprestimoScreen';
 import LiquidacaoScreen from '../screens/LiquidacaoScreen';
 import LoginScreen from '../screens/LoginScreen';
 import NovaMovimentacaoScreen from '../screens/NovaMovimentacaoScreen';
@@ -386,6 +387,11 @@ function AppStack() {
       <Stack.Screen 
         name="Configuracoes" 
         component={ConfiguracoesScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="FichaEmprestimo"
+        component={FichaEmprestimoScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>

@@ -1,3 +1,4 @@
+import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -77,6 +78,7 @@ const getIni = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(p => 
 // ─── Componente ─────────────────────────────────────────────────────────────
 
 export default function ProximosDiasModal({ visible, onClose, rotaId, dataLiq, lang }: Props) {
+  const nav = useNavigation<any>();
   const [dias, setDias] = useState<DiaAgrupado[]>([]);
   const [loading, setLoading] = useState(false);
   const [diasExtras, setDiasExtras] = useState<DiaAgrupado[]>([]);
@@ -265,7 +267,14 @@ export default function ProximosDiasModal({ visible, onClose, rotaId, dataLiq, l
             <Text style={S.semClientes}>{t.semClientes}</Text>
           ) : (
             sortClientes(dia.clientes).map((c, idx) => (
-              <View key={`${c.cliente_id}-${c.emprestimo_id}-${idx}`} style={S.clienteRow}>
+              <TouchableOpacity
+                key={`${c.cliente_id}-${c.emprestimo_id}-${idx}`}
+                style={S.clienteRow}
+                onPress={() => {
+                  onClose();
+                  setTimeout(() => nav.navigate('FichaEmprestimo', { emprestimoId: c.emprestimo_id }), 250);
+                }}
+              >
                 {c.cliente_foto_url ? (
                   <Image source={{ uri: c.cliente_foto_url }} style={S.clienteAvatar} />
                 ) : (
@@ -280,7 +289,8 @@ export default function ProximosDiasModal({ visible, onClose, rotaId, dataLiq, l
                   </Text>
                 </View>
                 <Text style={S.clienteValor}>$ {fmt(c.valor_parcela)}</Text>
-              </View>
+                <Ionicons name="chevron-forward" size={14} color="#D1D5DB" style={{ marginLeft: 6 }} />
+              </TouchableOpacity>
             ))
           )}
         </View>

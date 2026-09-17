@@ -1,3 +1,5 @@
+import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import React, { useRef, useState } from 'react';
 import {
   Animated,
@@ -43,6 +45,14 @@ const FREQ: Record<Language, Record<string, string>> = {
   'pt-BR': { DIARIO: 'Diário', SEMANAL: 'Semanal', QUINZENAL: 'Quinzenal', MENSAL: 'Mensal', FLEXIVEL: 'Flexível' },
   'es': { DIARIO: 'Diario', SEMANAL: 'Semanal', QUINZENAL: 'Quincenal', MENSAL: 'Mensual', FLEXIVEL: 'Flexible' },
 };
+
+// Botões em avaliação com o cliente (setembro/2026).
+//
+// O de parcelas sai porque a Ficha do Empréstimo faz o que ele fazia e mais.
+// O link de detalhes sai porque a foto do cliente passou a abrir o modal.
+// Ficam como constante, e não apagados, até o Julio validar a mudança.
+const MOSTRAR_BOTAO_PARCELAS = false;
+const MOSTRAR_LINK_DETALHES = false;
 
 const getIni = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase() || '').join('');
 const fmt = (v: number) => '$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -164,6 +174,7 @@ interface ClienteCardLiquidacaoProps {
 // ─── Componente ─────────────────────────────────────────────────────────────
 
 export default function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
+  const nav = useNavigation<any>();
   const {
     cliente: c,
     emprestimo: e,
@@ -260,13 +271,22 @@ export default function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps)
 
       {/* === LINHA 1: Avatar + Nome === */}
       <View style={S.cardRow}>
-        {c.foto_url ? (
-          <Image source={{ uri: c.foto_url }} style={[S.av, { backgroundColor: '#E5E7EB' }]} />
-        ) : (
-          <View style={[S.av, { backgroundColor: pg ? '#10B981' : np ? '#6B7280' : e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 ? '#EF4444' : '#3B82F6' }]}>
-            <Text style={S.avTx}>{getIni(c.nome)}</Text>
+        <TouchableOpacity
+          style={S.avWrap}
+          activeOpacity={0.7}
+          onPress={() => onAbrirDetalhes({ id: c.cliente_id, nome: c.nome, telefone: c.telefone_celular, endereco: c.endereco, codigo_cliente: c.codigo_cliente })}
+        >
+          {c.foto_url ? (
+            <Image source={{ uri: c.foto_url }} style={[S.av, { backgroundColor: '#E5E7EB' }]} />
+          ) : (
+            <View style={[S.av, { backgroundColor: pg ? '#10B981' : np ? '#6B7280' : e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 ? '#EF4444' : '#3B82F6' }]}>
+              <Text style={S.avTx}>{getIni(c.nome)}</Text>
+            </View>
+          )}
+          <View style={S.avBadge}>
+            <Ionicons name="information" size={9} color="#fff" />
           </View>
-        )}
+        </TouchableOpacity>
         <View style={S.cardInfo}>
           <View style={S.nameRow}>
             <Text style={[S.nome, np && { color: '#6B7280' }]} numberOfLines={1}>{c.nome}</Text>
@@ -382,21 +402,49 @@ export default function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps)
               <Text style={S.btPagarIcon}>$</Text>
               <Text style={S.btPagarText}>{t.pagar}</Text>
             </TouchableOpacity>
+          </View>
+
+          {MOSTRAR_BOTAO_PARCELAS && (
             <TouchableOpacity style={S.btSecVerde} onPress={() => onAbrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}>
               <View style={S.btSecIconBox}><Text style={S.btSecIconTx}>☰</Text></View>
             </TouchableOpacity>
-            <TouchableOpacity style={S.btSecAmarelo} onPress={() => onAbrirNotas(c.cliente_id, c.nome)}>
-              <View style={S.btSecIconBox}><Text style={S.btSecIconTx}>✎</Text></View>
-              {notasCount > 0 && <View style={S.btSecBadge}><Text style={S.btSecBadgeT}>{notasCount}</Text></View>}
+          )}
+
+          {/* Pagar é a única ação de verdade e fica sozinho acima, na largura toda.
+              Estes três são navegação: mesmo peso entre si, discretos. Antes os
+              quatro disputavam a mesma linha e nada dizia qual era o principal. */}
+          <View style={S.acoesSec}>
+            <TouchableOpacity style={S.btSec} activeOpacity={0.7} onPress={() => onAbrirNotas(c.cliente_id, c.nome)}>
+              <Ionicons name="create-outline" size={17} color="#4B5563" />
+              <Text style={S.btSecTx}>Notas</Text>
+              {notasCount > 0 && <View style={S.btSecCount}><Text style={S.btSecCountTx}>{notasCount}</Text></View>}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={S.btSec}
+              activeOpacity={0.7}
+              onPress={() => nav.navigate('FichaEmprestimo', { emprestimoId: e.emprestimo_id })}
+            >
+              <Ionicons name="list-outline" size={17} color="#4B5563" />
+              <Text style={S.btSecTx}>{lang === 'es' ? 'Cuotas' : 'Parcelas'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={S.btSec}
+              activeOpacity={0.7}
+              onPress={() => onAbrirDetalhes({ id: c.cliente_id, nome: c.nome, telefone: c.telefone_celular, endereco: c.endereco, codigo_cliente: c.codigo_cliente })}
+            >
+              <Ionicons name="person-outline" size={17} color="#4B5563" />
+              <Text style={S.btSecTx}>{lang === 'es' ? 'Datos' : 'Dados'}</Text>
             </TouchableOpacity>
           </View>
 
           {/* Link para detalhes */}
+          {MOSTRAR_LINK_DETALHES && (
           <TouchableOpacity style={S.linkDetalhes} onPress={() => {
             onAbrirDetalhes({ id: c.cliente_id, nome: c.nome, telefone: c.telefone_celular, endereco: c.endereco, codigo_cliente: c.codigo_cliente });
           }}>
             <Text style={S.linkDetalhesTx}>{t.toqueDetalhes} ▽</Text>
           </TouchableOpacity>
+          )}
         </View>
       )}
     </TouchableOpacity>
@@ -445,6 +493,7 @@ function CardMultiplo({
   onAbrirNotas,
   onAbrirDetalhes,
 }: ClienteCardLiquidacaoProps) {
+  const nav = useNavigation<any>();
   const { width } = useWindowDimensions();
   const [idx, setIdx] = useState(0);
 
@@ -570,12 +619,38 @@ function CardMultiplo({
             <Text style={S.btPagarIcon}>$</Text>
             <Text style={S.btPagarText}>{t.pagar}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[S.btSecSm, { backgroundColor: '#10B981' }]} onPress={() => onAbrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}>
-            <Text style={S.btSecIconTx}>☰</Text>
+        </View>
+
+        {MOSTRAR_BOTAO_PARCELAS && (
+          <TouchableOpacity style={S.btSecVerde} onPress={() => onAbrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}>
+            <View style={S.btSecIconBox}><Text style={S.btSecIconTx}>☰</Text></View>
           </TouchableOpacity>
-          <TouchableOpacity style={[S.btSecSm, { backgroundColor: '#F59E0B' }]} onPress={() => onAbrirNotas(c.cliente_id, c.nome)}>
-            <Text style={S.btSecIconTx}>✎</Text>
-            {notasCount > 0 && <View style={S.btSecBadge}><Text style={S.btSecBadgeT}>{notasCount}</Text></View>}
+        )}
+
+        {/* Pagar é a única ação de verdade e fica sozinho acima, na largura toda.
+            Estes três são navegação: mesmo peso entre si, discretos. Antes os
+            quatro disputavam a mesma linha e nada dizia qual era o principal. */}
+        <View style={S.acoesSec}>
+          <TouchableOpacity style={S.btSec} activeOpacity={0.7} onPress={() => onAbrirNotas(c.cliente_id, c.nome)}>
+            <Ionicons name="create-outline" size={17} color="#4B5563" />
+            <Text style={S.btSecTx}>Notas</Text>
+            {notasCount > 0 && <View style={S.btSecCount}><Text style={S.btSecCountTx}>{notasCount}</Text></View>}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={S.btSec}
+            activeOpacity={0.7}
+            onPress={() => nav.navigate('FichaEmprestimo', { emprestimoId: e.emprestimo_id })}
+          >
+            <Ionicons name="list-outline" size={17} color="#4B5563" />
+            <Text style={S.btSecTx}>{lang === 'es' ? 'Cuotas' : 'Parcelas'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={S.btSec}
+            activeOpacity={0.7}
+            onPress={() => onAbrirDetalhes({ id: c.cliente_id, nome: c.nome, telefone: c.telefone_celular, endereco: c.endereco, codigo_cliente: c.codigo_cliente })}
+          >
+            <Ionicons name="person-outline" size={17} color="#4B5563" />
+            <Text style={S.btSecTx}>{lang === 'es' ? 'Datos' : 'Dados'}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -586,13 +661,22 @@ function CardMultiplo({
     <View style={[S.card, { borderLeftColor: borderOf(pior.e, pagoDe(pior.e)) }]}>
       {/* === Cabeçalho do cliente (fixo, fora do carrossel) === */}
       <View style={S.cardRow}>
-        {c.foto_url ? (
-          <Image source={{ uri: c.foto_url }} style={[S.av, { backgroundColor: '#E5E7EB' }]} />
-        ) : (
-          <View style={[S.av, { backgroundColor: qtdPagas === n ? '#10B981' : '#6366F1' }]}>
-            <Text style={S.avTx}>{getIni(c.nome)}</Text>
+        <TouchableOpacity
+          style={S.avWrap}
+          activeOpacity={0.7}
+          onPress={() => onAbrirDetalhes({ id: c.cliente_id, nome: c.nome, telefone: c.telefone_celular, endereco: c.endereco, codigo_cliente: c.codigo_cliente })}
+        >
+          {c.foto_url ? (
+            <Image source={{ uri: c.foto_url }} style={[S.av, { backgroundColor: '#E5E7EB' }]} />
+          ) : (
+            <View style={[S.av, { backgroundColor: qtdPagas === n ? '#10B981' : '#6366F1' }]}>
+              <Text style={S.avTx}>{getIni(c.nome)}</Text>
+            </View>
+          )}
+          <View style={S.avBadge}>
+            <Ionicons name="information" size={9} color="#fff" />
           </View>
-        )}
+        </TouchableOpacity>
         <View style={S.cardInfo}>
           <Text style={S.nome} numberOfLines={1}>{c.nome}</Text>
           <Text style={S.sub} numberOfLines={1}>
@@ -637,12 +721,14 @@ function CardMultiplo({
         </View>
       </View>
 
+        {MOSTRAR_LINK_DETALHES && (
       <TouchableOpacity
         style={S.linkDetalhes}
         onPress={() => onAbrirDetalhes({ id: c.cliente_id, nome: c.nome, telefone: c.telefone_celular, endereco: c.endereco, codigo_cliente: c.codigo_cliente })}
       >
         <Text style={S.linkDetalhesTx}>{t.toqueDetalhes} ▽</Text>
       </TouchableOpacity>
+        )}
     </View>
   );
 }
@@ -650,6 +736,35 @@ function CardMultiplo({
 // ─── Styles ─────────────────────────────────────────────────────────────────
 
 const S = StyleSheet.create({
+  avWrap: { position: 'relative' },
+  avBadge: {
+    position: 'absolute', right: -2, bottom: -2,
+    width: 16, height: 16, borderRadius: 8,
+    backgroundColor: '#6366F1', borderWidth: 2, borderColor: '#fff',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  acoesSec: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  btSec: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
+    height: 38, borderRadius: 10,
+    backgroundColor: '#fff', borderWidth: 1, borderColor: '#E5E7EB',
+  },
+  btSecTx: { fontSize: 12, fontWeight: '600', color: '#4B5563' },
+  btSecCount: {
+    minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 4,
+    backgroundColor: '#F59E0B', alignItems: 'center', justifyContent: 'center',
+  },
+  btSecCountTx: { fontSize: 10, fontWeight: '800', color: '#fff' },
+  btFicha: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: '#6366F1', borderRadius: 10,
+    height: 46, paddingHorizontal: 16, marginLeft: 6,
+  },
+  btFichaTx: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  btSecFicha: {
+    backgroundColor: '#6366F1', borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 7, marginLeft: 6,
+  },
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 12, marginBottom: 8, borderLeftWidth: 5, elevation: 2 },
   cardRow: { flexDirection: 'row' },
   av: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
