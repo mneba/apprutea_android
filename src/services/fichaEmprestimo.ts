@@ -31,9 +31,17 @@ export interface EventoFicha {
   liquidacao_data?: string | null;
   parcelas?: number[];
   pagamento_ids?: string[];
+  /** Quantos comprovantes existem nesta operação. Vem contado do banco para
+   *  o rótulo poder dizer o número sem abrir a gaveta. */
+  anexos?: number;
   registros?: number;
-  /** Valor abatido do empréstimo (dinheiro + crédito). */
+  /** Total que entrou nesta operação: dinheiro + crédito usado, incluindo o
+   *  excedente que virou crédito. É o que a cliente entregou. */
   aplicado?: number;
+  /** O que de fato reduziu a dívida = `aplicado` menos o crédito gerado.
+   *  Excedente não paga parcela: fica em saldo_excedente e abate depois,
+   *  quando consumido. Somar `aplicado` contaria o mesmo dinheiro duas vezes. */
+  abatido?: number;
   /** Só o que entrou no caixa. */
   dinheiro?: number;
   credito_usado?: number;

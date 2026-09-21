@@ -7,15 +7,18 @@ import {
   Animated,
   Dimensions,
   FlatList,
+  LayoutAnimation,
   Platform,
   RefreshControl,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  UIManager,
   View
 } from 'react-native';
 import AlphabetSidebar from '../components/AlphabetSidebar';
+import Carregando from '../components/Carregando';
 import AutorizacaoEstornoModal from '../components/AutorizacaoEstornoModal';
 import ClienteCardLiquidacao from '../components/ClienteCardLiquidacao';
 import ClienteCardTodos from '../components/ClienteCardTodos';
@@ -26,7 +29,7 @@ import LegendaCoresModal from '../components/LegendaCoresModal';
 import { ModalCriarNota, ModalNotasLista, buscarNotasCountPorClientes } from '../components/NotasComponent';
 import PagamentoModal from '../components/PagamentoModal';
 import MenuPagamento from '../components/MenuPagamento';
-import ConfirmModal from '../components/ConfirmModal';
+import ConfirmModal, { LinhaConfirm } from '../components/ConfirmModal';
 import PagarMultiplasModal from '../components/PagarMultiplasModal';
 import ValorLivreModal from '../components/ValorLivreModal';
 import ResumoPagamentoModal from '../components/ResumoPagamentoModal';
@@ -43,6 +46,22 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DRAWER_WIDTH = SCREEN_WIDTH * 0.75;
 
 // Language importado do LiquidacaoContext
+// Expansão do card: animação nativa de altura.
+//
+// Sem isto o conteúdo aparece de uma vez, e num aparelho lento a troca brusca
+// é lida como travada. 180ms é curto o bastante para não atrasar o vendedor e
+// longo o bastante para o olho acompanhar.
+const ANIM_EXPANDIR = {
+  duration: 180,
+  update: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+};
+
+// No Android com a arquitetura antiga o LayoutAnimation vem desligado. Na
+// nova o método nem existe — daí o teste antes de chamar.
+if (Platform.OS === 'android' && (UIManager as any).setLayoutAnimationEnabledExperimental) {
+  (UIManager as any).setLayoutAnimationEnabledExperimental(true);
+}
+
 type TabAtiva = 'liquidacao' | 'todos';
 type FiltroLiquidacao = 'todos' | 'atrasados' | 'pagas';
 type OrdenacaoLiquidacao = 'rota' | 'nome';
@@ -632,7 +651,8 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [modoPagamento, setModoPagamento] = useState<'parcela' | 'livre' | 'quitar'>('parcela');
   // ⭐ Modal de confirmação próprio (Alert nativo não aparece sobre Modal no Android)
   const [confirmModal, setConfirmModal] = useState<{
-    visible: boolean; titulo: string; mensagem: string; corConfirmar?: string; onConfirmar: () => void;
+    visible: boolean; titulo: string; mensagem: string; corConfirmar?: string;
+    detalhes?: LinhaConfirm[]; aviso?: string; onConfirmar: () => void;
   }>({ visible: false, titulo: '', mensagem: '', onConfirmar: () => {} });
   // ⭐ Tela nova "Pagar mais de 1 parcela" (com cascata de crédito)
   const [multiplasVisible, setMultiplasVisible] = useState(false);
@@ -1603,20 +1623,57 @@ export default function ClientesScreen({ navigation, route }: any) {
     const credito = Number(dadosPagamento?.credito_disponivel || 0);
     if (dinheiro <= 0 && credito <= 0) { Alert.alert(t.atencao, t.semSaldoQuitar || 'Empréstimo já está quitado'); return; }
     setMenuPagamentoVisible(false);
-    const msg = credito > 0
-      ? `${fmt(dinheiro)} ${t.dinheiro} + ${fmt(credito)} ${t.credito || 'crédito'}`
-      : `${t.saldoTotalLbl || 'Saldo total'}: ${fmt(dinheiro)} · ${t.dinheiro}`;
+
+    // Detalhamento da quitação.
+    //
+    // Uma linha só ("$ 360,00 Dinheiro + $ 120,00 crédito") não explicava de
+    // onde vinha o valor, e o vendedor ficava sem saber por que o dinheiro
+    // pedido era menor que o saldo que ele via na tela. Agora a conta aparece
+    // inteira: parcelas em aberto, crédito que abate, dinheiro a receber.
+    //
+    // `saldo_emprestimo` já vem LÍQUIDO de crédito (ver nota em
+    // quitarEmprestimoRpc), então o bruto é dinheiro + crédito.
+    const bruto = dinheiro + credito;
+    const es = lang === 'es';
+    const detalhes: LinhaConfirm[] = [
+      { rotulo: es ? 'Cuotas en abierto' : 'Parcelas em aberto', valor: fmt(bruto) },
+    ];
+    if (credito > 0) {
+      detalhes.push({
+        rotulo: es ? 'Crédito del cliente' : 'Crédito do cliente',
+        valor: `− ${fmt(credito)}`,
+        abate: true,
+      });
+    }
+    detalhes.push({
+      rotulo: es ? 'A recibir en efectivo' : 'A receber em dinheiro',
+      valor: fmt(dinheiro),
+      total: true,
+    });
+
+    // Crédito maior que a dívida: fn_quitar_emprestimo recusa, porque quitar
+    // aqui destruiria a diferença. Avisa antes em vez de deixar o vendedor
+    // bater no erro depois de confirmar.
+    const sobra = credito - bruto;
+    const aviso = sobra > 0.01
+      ? (es
+          ? `El crédito del cliente (${fmt(credito)}) supera las cuotas en abierto. Resuelva el excedente de ${fmt(sobra)} antes de liquidar.`
+          : `O crédito do cliente (${fmt(credito)}) é maior que as parcelas em aberto. Resolva a sobra de ${fmt(sobra)} antes de quitar.`)
+      : undefined;
+
     setConfirmModal({
       visible: true,
       titulo: t.quitarEmprestimo || 'Quitar empréstimo',
-      mensagem: msg,
+      mensagem: '',
+      detalhes,
+      aviso,
       corConfirmar: '#10B981',
       onConfirmar: () => {
         setConfirmModal(cc => ({ ...cc, visible: false }));
         quitarEmprestimoRpc(dinheiro);
       },
     });
-  }, [parcelaPagamento, clienteModal, dadosPagamento, t, quitarEmprestimoRpc]);
+  }, [parcelaPagamento, clienteModal, dadosPagamento, t, lang, quitarEmprestimoRpc]);
 
   // Chama a RPC de crédito em cascata
   // Função para ir para próxima parcela pendente
@@ -2443,15 +2500,48 @@ export default function ClientesScreen({ navigation, route }: any) {
         lang={lang}
         notasCount={notasCountMap.get(c.cliente_id) || 0}
         t={t}
-        onToggleExpand={() => setExpanded(p => p === it.key ? null : it.key)}
+        chaveExpand={it.key}
+        onToggleExpand={toggleExpandLiq}
         onPagar={abrirPagamento}
         onAbrirParcelas={abrirParcelas}
-        onAbrirNotas={(id, nome) => { setNotasClienteId(id); setNotasClienteNome(nome); setModalNotasClienteVisible(true); }}
-        onAbrirDetalhes={(cli) => { setDetalhesCliente(cli); setModalDetalhesVisible(true); }}
+        onAbrirNotas={abrirNotasCliente}
+        onAbrirDetalhes={abrirDetalhesCliente}
         onNaoPago={abrirNaoPago}
       />
     );
   };
+
+  // ── Handlers estáveis ──
+  //
+  // Eram arrows inline no JSX: identidade nova a cada render, o que anula
+  // qualquer React.memo nos cards. Como só chamam setters (estáveis por
+  // contrato do React), useCallback com deps vazias é seguro e não cria
+  // closure velha.
+  //
+  // O LayoutAnimation é o que conserta a "transição não natural": sem ele o
+  // conteúdo do card aparece de uma vez, e num aparelho lento isso lê como
+  // travada. Com ele, o Android anima a mudança de altura nativamente, sem
+  // custo de JS.
+  const toggleExpandLiq = useCallback((chave: string) => {
+    LayoutAnimation.configureNext(ANIM_EXPANDIR);
+    setExpanded(p => (p === chave ? null : chave));
+  }, []);
+
+  const toggleExpandTodos = useCallback((chave: string) => {
+    LayoutAnimation.configureNext(ANIM_EXPANDIR);
+    setExpandedTodos(p => (p === chave ? null : chave));
+  }, []);
+
+  const abrirNotasCliente = useCallback((id: string, nome: string) => {
+    setNotasClienteId(id);
+    setNotasClienteNome(nome);
+    setModalNotasClienteVisible(true);
+  }, []);
+
+  const abrirDetalhesCliente = useCallback((cli: any) => {
+    setDetalhesCliente(cli);
+    setModalDetalhesVisible(true);
+  }, []);
 
   const todosFilt = useMemo(() => {
     let r = [...todosList];
@@ -2519,7 +2609,8 @@ export default function ClientesScreen({ navigation, route }: any) {
         notasCount={notasCountMap.get(c.id) || 0}
         todosMode={true}
         t={t}
-        onToggleExpand={() => setExpandedTodos(p => p === c.id ? null : c.id)}
+        chaveExpand={c.id}
+        onToggleExpand={toggleExpandTodos}
         onLongPressStart={() => {
           longPressTimer.current = setTimeout(() => {
             longPressTimer.current = null;
@@ -2537,8 +2628,8 @@ export default function ClientesScreen({ navigation, route }: any) {
         onChangeEmpIdx={(newIdx) => setEmpIdxTodos(p => ({ ...p, [c.id]: newIdx }))}
         onAbrirParcelas={abrirParcelas}
         onPagar={pagarClienteTodos}
-        onAbrirNotas={(id, nome) => { setNotasClienteId(id); setNotasClienteNome(nome); setModalNotasClienteVisible(true); }}
-        onAbrirDetalhes={(cli) => { setDetalhesCliente(cli); setModalDetalhesVisible(true); }}
+        onAbrirNotas={abrirNotasCliente}
+        onAbrirDetalhes={abrirDetalhesCliente}
         solicitacaoRenovacao={solicitacoesRenovacaoMap.get(c.id) || null}
         onNovoEmprestimo={(cli) => {
           const nav = navigation.getParent() || navigation;
@@ -2825,6 +2916,15 @@ return (
               ref={flatListLiqRef}
               data={filtered}
               keyExtractor={(item) => item.key}
+              // ── Virtualização ──
+              // Sem estas props o FlatList monta muito mais linhas do que cabe
+              // na tela e mantém todas vivas. Num aparelho antigo é a diferença
+              // entre rolar liso e engasgar.
+              removeClippedSubviews
+              initialNumToRender={8}
+              maxToRenderPerBatch={8}
+              updateCellsBatchingPeriod={60}
+              windowSize={7}
               renderItem={({ item }: { item: ItemLista }) => {
                 if (filtro === 'pagas') {
                   // Hora do PRIMEIRO pagamento das contas DESTE card — a mesma
@@ -2905,7 +3005,7 @@ return (
       {/* Lista Todos (colapsada quando inativa, mas sempre montada) */}
       <View style={tab === 'todos' ? { flex: 1 } : { height: 0, overflow: 'hidden' }}>
         {loadTodos && todosList.length === 0 ? (
-          <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
+          <Carregando texto={lang === 'es' ? 'Cargando clientes…' : 'Carregando clientes…'} />
         ) : todosFilt.length === 0 ? (
           <View style={S.em}><Ionicons name="document-text-outline" size={48} color="#9CA3AF" /><Text style={S.emT}>{t.semClientes}</Text></View>
         ) : (
@@ -2914,6 +3014,15 @@ return (
               ref={flatListTodosRef}
               data={todosFilt}
               keyExtractor={(item) => item.id}
+              // ── Virtualização ──
+              // Sem estas props o FlatList monta muito mais linhas do que cabe
+              // na tela e mantém todas vivas. Num aparelho antigo é a diferença
+              // entre rolar liso e engasgar.
+              removeClippedSubviews
+              initialNumToRender={8}
+              maxToRenderPerBatch={8}
+              updateCellsBatchingPeriod={60}
+              windowSize={7}
               renderItem={({ item }) => renderTodos(item)}
               style={S.ls}
               contentContainerStyle={S.lsI}
@@ -3018,6 +3127,8 @@ return (
         visible={confirmModal.visible}
         titulo={confirmModal.titulo}
         mensagem={confirmModal.mensagem}
+        detalhes={confirmModal.detalhes}
+        aviso={confirmModal.aviso}
         textoCancelar={t.cancelar || 'Cancelar'}
         textoConfirmar={t.confirmar || 'Confirmar'}
         corConfirmar={confirmModal.corConfirmar}

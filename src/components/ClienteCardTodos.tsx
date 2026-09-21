@@ -126,7 +126,11 @@ interface ClienteCardTodosProps {
     toqueDetalhes: string;
     novoEmprestimo: string;
   };
-  onToggleExpand: () => void;
+  /** Chave desta linha na lista. Vai de volta no onToggleExpand para o
+   *  handler poder ser estável (useCallback sem dependências) — é o que
+   *  permite o React.memo funcionar. */
+  chaveExpand: string;
+  onToggleExpand: (chave: string) => void;
   onLongPressStart: () => void;
   onLongPressEnd: () => void;
   onChangeEmpIdx: (newIdx: number) => void;
@@ -158,7 +162,14 @@ const MOSTRAR_LINK_DETALHES = false;
 
 // ─── Componente ─────────────────────────────────────────────────────────────
 
-export default function ClienteCardTodos({
+// Memoizado de propósito.
+//
+// A lista de clientes chega a algumas dezenas de cards e cada um é pesado
+// (carrossel, badges, barra de progresso, quatro botões). Sem memo, abrir UM
+// card re-renderizava TODOS — num Motorola antigo isso é a travada que o
+// campo relatou. O memo só funciona porque ClientesScreen estabilizou os
+// handlers com useCallback; props novas a cada render anulariam tudo.
+function ClienteCardTodos({
   cliente: c,
   emprestimo: emp,
   empIdx: ei,
@@ -167,6 +178,7 @@ export default function ClienteCardTodos({
   lang,
   notasCount,
   t,
+  chaveExpand,
   onToggleExpand,
   onLongPressStart,
   onLongPressEnd,
@@ -205,7 +217,7 @@ export default function ClienteCardTodos({
     <TouchableOpacity
       key={c.id}
       activeOpacity={0.7}
-      onPress={() => { if (!modoReordenar) onToggleExpand(); }}
+      onPress={() => { if (!modoReordenar) onToggleExpand(chaveExpand); }}
       onPressIn={onLongPressStart}
       onPressOut={onLongPressEnd}
       style={[S.card, { borderLeftColor: cor }, todosMode && { backgroundColor: '#FFFBEB' }]}
@@ -456,27 +468,40 @@ export default function ClienteCardTodos({
             </TouchableOpacity>
           )}
 
+          {/* Notas e Dados abrem modal AQUI; Parcelas sai para outra tela.
+              Por isso os dois primeiros ficam colados num controle segmentado
+              e o terceiro fica apartado, com o chevron que é a convenção de
+              "isto te leva embora". */}
           <View style={S.acoesSec}>
-            <TouchableOpacity style={S.btSec} onPress={() => onAbrirNotas(c.id, c.nome)} activeOpacity={0.7}>
-              <Ionicons name="create-outline" size={17} color="#4B5563" />
-              <Text style={S.btSecTx}>{lang === 'es' ? 'Notas' : 'Notas'}</Text>
-              {notasCount > 0 && <View style={S.btSecCount}><Text style={S.btSecCountTx}>{notasCount}</Text></View>}
-            </TouchableOpacity>
+            <View style={S.grupoModal}>
+              <TouchableOpacity
+                style={[S.btGrupo, S.btGrupoEsq]}
+                activeOpacity={0.6}
+                onPress={() => onAbrirNotas(c.id, c.nome)}
+              >
+                <Ionicons name="create-outline" size={16} color="#4B5563" />
+                <Text style={S.btSecTx}>Notas</Text>
+                {notasCount > 0 && <View style={S.btSecCount}><Text style={S.btSecCountTx}>{notasCount}</Text></View>}
+              </TouchableOpacity>
+              <View style={S.divisor} />
+              <TouchableOpacity
+                style={[S.btGrupo, S.btGrupoDir]}
+                activeOpacity={0.6}
+                onPress={() => onAbrirDetalhes({ id: c.id, nome: c.nome, telefone: c.telefone_celular, codigo_cliente: c.codigo_cliente })}
+              >
+                <Ionicons name="person-outline" size={16} color="#4B5563" />
+                <Text style={S.btSecTx}>{lang === 'es' ? 'Datos' : 'Dados'}</Text>
+              </TouchableOpacity>
+            </View>
+
             <TouchableOpacity
-              style={S.btSec}
+              style={S.btPagina}
               activeOpacity={0.7}
               onPress={() => nav.navigate('FichaEmprestimo', { emprestimoId: emp.id })}
             >
-              <Ionicons name="list-outline" size={17} color="#4B5563" />
-              <Text style={S.btSecTx}>{lang === 'es' ? 'Cuotas' : 'Parcelas'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={S.btSec}
-              activeOpacity={0.7}
-              onPress={() => onAbrirDetalhes({ id: c.id, nome: c.nome, telefone: c.telefone_celular, codigo_cliente: c.codigo_cliente })}
-            >
-              <Ionicons name="person-outline" size={17} color="#4B5563" />
-              <Text style={S.btSecTx}>{lang === 'es' ? 'Datos' : 'Dados'}</Text>
+              <Ionicons name="list-outline" size={16} color="#4338CA" />
+              <Text style={S.btPaginaTx}>{lang === 'es' ? 'Cuotas' : 'Parcelas'}</Text>
+              <Ionicons name="chevron-forward" size={13} color="#818CF8" />
             </TouchableOpacity>
           </View>
 
@@ -502,12 +527,23 @@ const S = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', marginTop: 4,
   },
   btPagarFullTx: { color: '#fff', fontSize: 15, fontWeight: '800', letterSpacing: 0.3 },
-  acoesSec: { flexDirection: 'row', gap: 8, marginTop: 8 },
-  btSec: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
-    height: 38, borderRadius: 10,
-    backgroundColor: '#fff', borderWidth: 1, borderColor: '#E5E7EB',
+  acoesSec: { flexDirection: 'row', gap: 10, marginTop: 8 },
+  grupoModal: {
+    flex: 1, flexDirection: 'row', height: 38, borderRadius: 10,
+    backgroundColor: '#fff', borderWidth: 1, borderColor: '#E5E7EB', overflow: 'hidden',
   },
+  btGrupo: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
+  },
+  btGrupoEsq: {},
+  btGrupoDir: {},
+  divisor: { width: 1, backgroundColor: '#E5E7EB', marginVertical: 7 },
+  btPagina: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
+    height: 38, borderRadius: 10,
+    backgroundColor: '#EEF2FF', borderWidth: 1, borderColor: '#C7D2FE',
+  },
+  btPaginaTx: { fontSize: 12, fontWeight: '700', color: '#4338CA' },
   btSecTx: { fontSize: 12, fontWeight: '600', color: '#4B5563' },
   btSecCount: {
     minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 4,
@@ -615,3 +651,4 @@ const S = StyleSheet.create({
     fontWeight: '600' as const,
   },
 });
+export default React.memo(ClienteCardTodos);

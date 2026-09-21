@@ -21,7 +21,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   ScrollView,
   StyleSheet,
   Text,
@@ -30,6 +29,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AnexosLista from '../components/AnexosLista';
+import Carregando from '../components/Carregando';
 import { useAuth } from '../contexts/AuthContext';
 import { buscarFicha, EventoFicha, Ficha } from '../services/fichaEmprestimo';
 
@@ -40,6 +40,7 @@ const TX = {
     titulo: 'Ficha do empréstimo',
     erro: 'Não foi possível carregar a ficha',
     tentar: 'Tentar de novo',
+    carregando: 'Abrindo a ficha…',
     linhaTempo: 'Linha do tempo',
     parcelas: 'Parcelas',
     emprestado: 'Emprestado',
@@ -85,6 +86,7 @@ const TX = {
     titulo: 'Ficha del préstamo',
     erro: 'No se pudo cargar la ficha',
     tentar: 'Intentar de nuevo',
+    carregando: 'Abriendo la ficha…',
     linhaTempo: 'Línea de tiempo',
     parcelas: 'Cuotas',
     emprestado: 'Prestado',
@@ -225,7 +227,7 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
       </View>
 
       {carregando ? (
-        <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
+        <Carregando texto={t.carregando} />
       ) : erro ? (
         <View style={S.erroBox}>
           <Ionicons name="alert-circle-outline" size={40} color="#EF4444" />
@@ -537,7 +539,7 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
                             onPress={() => setExpandido(aberto ? null : chave)}
                           >
                             <Text style={S.btDetalheTx}>
-                              {aberto ? '▲' : '▼'} {t.comprovantes}
+                              {aberto ? '▲' : '▼'} {t.comprovantes} ({ev.anexos ?? 0})
                             </Text>
                           </TouchableOpacity>
                         )}
