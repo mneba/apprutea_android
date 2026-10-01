@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -23,6 +23,7 @@ import { supabase } from '../services/supabase';
 
 // Componentes
 import FormularioCliente from '../components/nova-venda/FormularioCliente';
+import CarrosselFlexivel from '../components/nova-venda/CarrosselFlexivel';
 import FormularioEmprestimo from '../components/nova-venda/FormularioEmprestimo';
 import ModalBuscaDocumento from '../components/nova-venda/ModalBuscaDocumento';
 import ModalResultado from '../components/nova-venda/ModalResultado';
@@ -41,6 +42,7 @@ import SecaoMicroseguro from '../components/nova-venda/SecaoMicroseguro';
 // ============================================================
 
 export default function NovaVendaScreen({ navigation, route }: any) {
+  const [carrosselFlexivelVisible, setCarrosselFlexivelVisible] = useState(false);
   const { vendedor } = useAuth();
   const liqCtx = useLiquidacaoContext();
   const lang = liqCtx.language;
@@ -88,7 +90,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   // -----------------------------------------------------------
   // HOOKS
   // -----------------------------------------------------------
-  const form = useNovaVendaForm({ clienteExistente, renegociacao, isRenegociacao, solicitacaoRenovacao: solicitacaoRenovacaoParam, t });
+  const form = useNovaVendaForm({ clienteExistente, renegociacao, isRenegociacao, solicitacaoRenovacao: solicitacaoRenovacaoParam, dataOperacional, t });
 
   const config = useNovaVendaConfig({
     vendedorId: vendedor?.id,
@@ -354,7 +356,6 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                   diaSemanaPagamento={form.diaSemanaPagamento} setDiaSemanaPagamento={form.setDiaSemanaPagamento}
                   diaMesPagamento={form.diaMesPagamento} setDiaMesPagamento={form.setDiaMesPagamento}
                   diasMesFlexivel={form.diasMesFlexivel}
-                  iniciarProximoMes={form.iniciarProximoMes} setIniciarProximoMes={form.setIniciarProximoMes}
                   dataPrimeiroVencimento={form.dataPrimeiroVencimento} setDataPrimeiroVencimento={form.setDataPrimeiroVencimento}
                   observacoesEmprestimo={form.observacoesEmprestimo} setObservacoesEmprestimo={form.setObservacoesEmprestimo}
                   valorPrincipal={form.valorPrincipal} taxaNum={form.taxaNum} parcelasNum={form.parcelasNum}
@@ -364,10 +365,10 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                   camposComErro={form.camposComErro} lang={lang}
                   handleValorEmprestimoChange={form.handleValorEmprestimoChange}
                   limparErroCampo={form.limparErroCampo}
-                  toggleDiaFlexivel={form.toggleDiaFlexivel}
                   getDiaSemanaLabel={form.getDiaSemanaLabel}
                   onOpenDiaSemanaModal={() => form.setShowDiaSemanaModal(true)}
                   onOpenDatePicker={() => form.setShowDatePicker(true)}
+                  onOpenCarrosselFlexivel={() => setCarrosselFlexivelVisible(true)}
                   dataOperacional={dataOperacional}
                   t={t}
                 />
@@ -524,6 +525,29 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         minDate={dataOperacional}
         onSelect={form.setDataPrimeiroVencimento}
         onClose={() => form.setShowDatePicker(false)}
+      />
+
+      {/* Flexível: a data da 1ª parcela e os dias do mês saem daqui juntos, e
+          o Finalizar valida o cronograma no banco antes de fechar. Ver
+          sql/2026-09-26_datas_parcelas_unificadas.sql.
+          A folha é aberta pelo próprio toque em "Flexível", no
+          FormularioEmprestimo — não há botão intermediário.
+          `dataInicial` só é reaproveitada quando o flexível JÁ foi
+          configurado: sem isso, quem viesse de DIÁRIO ou MENSAL abriria a
+          folha com a âncora escolhida por outra frequência, e o bloco
+          "Primeira parcela" apareceria preenchido sem ter tocado em nada. */}
+      <CarrosselFlexivel
+        visible={carrosselFlexivelVisible}
+        onClose={() => setCarrosselFlexivelVisible(false)}
+        lang={lang}
+        numeroParcelas={parseInt(form.numeroParcelas, 10) || 1}
+        dataOperacional={dataOperacional}
+        dataInicial={form.diasMesFlexivel.length > 0 ? form.dataPrimeiroVencimento : null}
+        diasIniciais={form.diasMesFlexivel}
+        onConfirmar={(data, dias) => {
+          form.setDataPrimeiroVencimento(data);
+          form.setDiasMesFlexivel(dias);
+        }}
       />
 
       <ModalAlteracao

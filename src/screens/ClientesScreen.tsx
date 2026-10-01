@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -41,6 +42,8 @@ import { Language, useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import useClientesLiquidacao from '../hooks/useClientesLiquidacao';
 import useClientesTodos from '../hooks/useClientesTodos';
 import useGPSTracking from '../hooks/useGPSTracking';
+import { DIAS_SEMANA_CURTO } from '../constants/novaVendaConstants';
+import { buscarDiasSemana, MapaDiasSemana } from '../services/diasSemanaEmprestimos';
 import { supabase } from '../services/supabase';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DRAWER_WIDTH = SCREEN_WIDTH * 0.75;
@@ -61,6 +64,13 @@ const ANIM_EXPANDIR = {
 if (Platform.OS === 'android' && (UIManager as any).setLayoutAnimationEnabledExperimental) {
   (UIManager as any).setLayoutAnimationEnabledExperimental(true);
 }
+
+// Preferência de densidade da lista, por aparelho.
+//
+// Compacto deixa o card colapsado só com nome e telefone; tudo mais abre no
+// toque, já com os botões. Há quem prefira ver os valores sem tocar, então é
+// escolha do usuário — e ela persiste até ele desligar.
+const CHAVE_COMPACTO = 'clientes_modo_compacto';
 
 type TabAtiva = 'liquidacao' | 'todos';
 type FiltroLiquidacao = 'todos' | 'atrasados' | 'pagas';
@@ -620,6 +630,10 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [filtroTipo, setFiltroTipo] = useState<string>('todos');
   const [filtroStatus, setFiltroStatus] = useState<string>('todos');
   const [filtroFrequencia, setFiltroFrequencia] = useState<string>('todos');
+  // Dia programado dos empréstimos SEMANAL. Lido sob demanda — não vem no
+  // payload da liquidação. Ver services/diasSemanaEmprestimos.ts.
+  const [diasSemana, setDiasSemana] = useState<MapaDiasSemana>({});
+  const [filtroDiaSemana, setFiltroDiaSemana] = useState<number | null>(null);
   const [showProximosDias, setShowProximosDias] = useState(false);
   const [showFiltroTipo, setShowFiltroTipo] = useState(false);
   const [showFiltroStatus, setShowFiltroStatus] = useState(false);
@@ -650,6 +664,8 @@ export default function ClientesScreen({ navigation, route }: any) {
   // Modo do modal de pagamento: 'livre' (campo editável) ou 'quitar' (valor = saldo)
   const [modoPagamento, setModoPagamento] = useState<'parcela' | 'livre' | 'quitar'>('parcela');
   // ⭐ Modal de confirmação próprio (Alert nativo não aparece sobre Modal no Android)
+  const [compacto, setCompacto] = useState(false);
+
   const [confirmModal, setConfirmModal] = useState<{
     visible: boolean; titulo: string; mensagem: string; corConfirmar?: string;
     detalhes?: LinhaConfirm[]; aviso?: string; onConfirmar: () => void;
@@ -1251,6 +1267,55 @@ export default function ClientesScreen({ navigation, route }: any) {
   }, []);
 
   // FUNÇÃO ATUALIZADA - Busca dados completos via RPC antes de abrir modal
+  /**
+   * Segundo pagamento do mesmo cliente na mesma liquidação.
+   *
+   * O cliente pediu poder lançar mais um pagamento na aba Pagos — em geral
+   * para gastar crédito numa parcela seguinte. Só é possível porque o reset é
+   * POR CLIENTE e leva a liquidação inteira dele: não existe estorno parcial,
+   * logo não há ordem entre operações para proteger.
+   *
+   * A parcela alvo é resolvida pelo banco. Reaproveitar a parcela do card
+   * mandaria uma já PAGA para `fn_registrar_pagamento`, que tem guarda contra
+   * isso — e seria errado de qualquer forma.
+   */
+  const abrirPagamentoProxima = useCallback(async (clienteInfo: { id: string; nome: string; emprestimo_id: string; saldo_emprestimo?: number; emprestimo_status?: string }) => {
+    if (!liqId && !isViz) { Alert.alert(t.atencao, t.liquidacaoNecessaria); return; }
+    try {
+      const { data, error } = await supabase.rpc('fn_buscar_proxima_parcela_a_pagar', {
+        p_emprestimo_id: clienteInfo.emprestimo_id,
+      });
+      if (error) throw error;
+      const prox = Array.isArray(data) ? data[0] : data;
+      if (!prox?.parcela_id) {
+        Alert.alert(
+          t.atencao,
+          lang === 'es'
+            ? 'Este préstamo no tiene cuotas abiertas.'
+            : 'Este empréstimo não tem parcelas em aberto.',
+        );
+        return;
+      }
+      abrirPagamento({
+        parcela_id: prox.parcela_id,
+        numero_parcela: prox.numero_parcela,
+        data_vencimento: prox.data_vencimento,
+        valor_parcela: prox.valor_parcela,
+        status: prox.status,
+        data_pagamento: null,
+        valor_multa: prox.valor_multa || 0,
+        valor_pago: prox.valor_pago || 0,
+        valor_saldo: prox.valor_saldo || prox.valor_parcela,
+      } as ParcelaModal, clienteInfo);
+    } catch (e: any) {
+      console.error('❌ Próxima parcela para novo pagamento:', e);
+      Alert.alert(t.erroGenerico, e?.message || '');
+    }
+    // `abrirPagamento` é estável (useCallback abaixo); as demais são setters e
+    // valores da própria tela.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liqId, isViz, lang, t]);
+
   const abrirPagamento = useCallback(async (parcela: ParcelaModal, clienteInfo?: { id: string; nome: string; emprestimo_id: string; saldo_emprestimo?: number; emprestimo_status?: string }) => {
     if (!liqId && !isViz) { Alert.alert(t.atencao, t.liquidacaoNecessaria); return; }    
     // Atualizar clienteModal se info do cliente foi passada (evita dados stale do cliente anterior)
@@ -2356,11 +2421,19 @@ export default function ClientesScreen({ navigation, route }: any) {
     return itens;
   }, [isCliPago, empsPagosNaLiq, msDoItem]);
 
-  const filtered = useMemo(() => {
+  // ── Funil único ──
+  //
+  // A lista e os contadores do drawer PRECISAM sair daqui, variando só o
+  // escopo de vencimento. Antes os contadores olhavam `grouped` cru — clientes
+  // antes de `montarItens`, antes do filtro de frequência e antes da busca — e
+  // por isso o badge dizia 14 enquanto a tela mostrava menos. Item pago, por
+  // exemplo, é descartado por `montarItens` e nunca chegava a ser descontado
+  // do número.
+  const funilItens = useCallback((venc: 'todos' | 'dia' | 'atrasados') => {
     let r = [...grouped];
     // Escopo só faz sentido no braço da liquidação; a aba "Todos" é a carteira
-    if (tab === 'liquidacao' && filtroVencimento === 'dia') r = r.filter(ehDoDiaCli);
-    else if (tab === 'liquidacao' && filtroVencimento === 'atrasados') r = r.filter(c => !ehDoDiaCli(c));
+    if (tab === 'liquidacao' && venc === 'dia') r = r.filter(ehDoDiaCli);
+    else if (tab === 'liquidacao' && venc === 'atrasados') r = r.filter(c => !ehDoDiaCli(c));
     if (busca.trim()) { const b = normalizarBusca(busca); r = r.filter(c => normalizarBusca(c.nome).includes(b) || (c.telefone_celular && c.telefone_celular.includes(b)) || (c.endereco && normalizarBusca(c.endereco).includes(b))); }
     // ⭐ O filtro corta os EMPRÉSTIMOS, não só o cliente.
     //
@@ -2376,8 +2449,30 @@ export default function ClientesScreen({ navigation, route }: any) {
         .map(c => ({ ...c, emprestimos: c.emprestimos.filter(e => e.frequencia_pagamento === filtroFrequencia) }))
         .filter(c => c.emprestimos.length > 0);
     }
+    // O dia programado chega depois da lista — leitura sob demanda —, então é
+    // injetado aqui. Só custa quando há o que injetar.
+    if (Object.keys(diasSemana).length) {
+      r = r.map(c => ({
+        ...c,
+        emprestimos: c.emprestimos.map(e => (
+          e.frequencia_pagamento === 'SEMANAL' && diasSemana[e.emprestimo_id] != null
+            ? { ...e, dia_semana_cobranca: diasSemana[e.emprestimo_id] }
+            : e
+        )),
+      }));
+    }
+    // Mesmo corte por EMPRÉSTIMO do breadcrumb da aba Todos.
+    if (filtroDiaSemana != null) {
+      r = r
+        .map(c => ({ ...c, emprestimos: c.emprestimos.filter(e => diasSemana[e.emprestimo_id] === filtroDiaSemana) }))
+        .filter(c => c.emprestimos.length > 0);
+    }
 
-    const itens = montarItens(r, filtro);
+    return montarItens(r, filtro);
+  }, [grouped, tab, ehDoDiaCli, busca, filtroFrequencia, filtroDiaSemana, diasSemana, filtro, montarItens]);
+
+  const filtered = useMemo(() => {
+    const itens = funilItens(filtroVencimento);
 
     if (filtro === 'pagas') {
       // #40: a aba Pagos ordena pela ORDEM EM QUE OS PAGAMENTOS FORAM
@@ -2397,7 +2492,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         : (a, b) => a.nome.localeCompare(b.nome));
     }
     return itens;
-  }, [grouped, busca, filtro, filtroFrequencia, ord, ordemRotaMap, tab, filtroVencimento, ehDoDiaCli, montarItens]);
+  }, [funilItens, filtroVencimento, filtro, ord, ordemRotaMap]);
 
   // Base dos contadores segue o escopo: com "Do dia" ativo, os números dos
   // segmentos precisam refletir a lista exibida.
@@ -2407,8 +2502,11 @@ export default function ClientesScreen({ navigation, route }: any) {
     return grouped;
   }, [grouped, filtroVencimento, ehDoDiaCli]);
 
-  const cntVencDia = useMemo(() => grouped.filter(ehDoDiaCli).length, [grouped, ehDoDiaCli]);
-  const cntVencAtrasados = useMemo(() => grouped.filter(c => !ehDoDiaCli(c)).length, [grouped, ehDoDiaCli]);
+  // Mesmo funil da lista, só trocando o escopo: o badge passa a ser o número
+  // de cards que aquela opção realmente mostra.
+  const cntVencDia = useMemo(() => funilItens('dia').length, [funilItens]);
+  const cntVencAtrasados = useMemo(() => funilItens('atrasados').length, [funilItens]);
+  const cntVencTodos = useMemo(() => funilItens('todos').length, [funilItens]);
 
   // Contam CARDS, não clientes — é o que a lista mostra. Só difere para quem
   // tem 2+ contas: em "Pagas" cada conta paga conta como um card.
@@ -2500,9 +2598,12 @@ export default function ClientesScreen({ navigation, route }: any) {
         lang={lang}
         notasCount={notasCountMap.get(c.cliente_id) || 0}
         t={t}
+        compacto={compacto}
         chaveExpand={it.key}
         onToggleExpand={toggleExpandLiq}
         onPagar={abrirPagamento}
+        onPagarProxima={abrirPagamentoProxima}
+        permiteNovoPagamento={filtro === 'pagas'}
         onAbrirParcelas={abrirParcelas}
         onAbrirNotas={abrirNotasCliente}
         onAbrirDetalhes={abrirDetalhesCliente}
@@ -2522,6 +2623,23 @@ export default function ClientesScreen({ navigation, route }: any) {
   // conteúdo do card aparece de uma vez, e num aparelho lento isso lê como
   // travada. Com ele, o Android anima a mudança de altura nativamente, sem
   // custo de JS.
+  useEffect(() => {
+    AsyncStorage.getItem(CHAVE_COMPACTO)
+      .then(v => { if (v === '1') setCompacto(true); })
+      .catch(() => {});
+  }, []);
+
+  // Grava junto com a animação: a troca de densidade mexe na altura de todos
+  // os cards de uma vez, e sem LayoutAnimation ela pisca.
+  const alternarCompacto = useCallback(() => {
+    LayoutAnimation.configureNext(ANIM_EXPANDIR);
+    setCompacto(v => {
+      const novo = !v;
+      AsyncStorage.setItem(CHAVE_COMPACTO, novo ? '1' : '0').catch(() => {});
+      return novo;
+    });
+  }, []);
+
   const toggleExpandLiq = useCallback((chave: string) => {
     LayoutAnimation.configureNext(ANIM_EXPANDIR);
     setExpanded(p => (p === chave ? null : chave));
@@ -2542,6 +2660,92 @@ export default function ClientesScreen({ navigation, route }: any) {
     setDetalhesCliente(cli);
     setModalDetalhesVisible(true);
   }, []);
+
+  // Busca o dia programado dos semanais SÓ quando ele vai ser usado: aba Todos
+  // aberta, ou filtro Semanal ligado. Fora daí não há chamada nenhuma, e o
+  // carregamento diário segue com a sua única onda.
+  //
+  // A chave é a lista de ids, não o array: `todosList` ganha identidade nova a
+  // cada recarga e dispararia a busca de novo sem nada ter mudado.
+  const idsSemanais = useMemo(() => {
+    const ids: string[] = [];
+    // Os dois lados usam nomes diferentes para a mesma chave: `id` na aba
+    // Todos, `emprestimo_id` na Liquidação.
+    if (tab === 'todos' || filtroFrequencia === 'SEMANAL') {
+      for (const c of todosList) {
+        for (const e of c.emprestimos) {
+          if (e.frequencia_pagamento === 'SEMANAL') ids.push(e.id);
+        }
+      }
+    }
+    if (tab === 'liquidacao' || filtroFrequencia === 'SEMANAL') {
+      for (const c of grouped) {
+        for (const e of c.emprestimos) {
+          if (e.frequencia_pagamento === 'SEMANAL') ids.push(e.emprestimo_id);
+        }
+      }
+    }
+    return Array.from(new Set(ids)).sort().join(',');
+  }, [tab, filtroFrequencia, todosList, grouped]);
+
+  useEffect(() => {
+    if (!idsSemanais) return;
+    let vivo = true;
+    buscarDiasSemana(idsSemanais.split(',')).then(m => { if (vivo) setDiasSemana(m); });
+    return () => { vivo = false; };
+  }, [idsSemanais]);
+
+  // Quantos clientes semanais por dia. Alimenta o breadcrumb: dia sem ninguém
+  // fica apagado, para o vendedor não tocar e achar lista vazia.
+  //
+  // Conta a fonte da ABA ATIVA — a contagem tem de descrever a lista que está
+  // na tela. As duas nomeiam a chave do empréstimo de formas diferentes.
+  const contagemPorDia = useMemo(() => {
+    const c = [0, 0, 0, 0, 0, 0, 0];
+    const fonte: { emprestimos: any[] }[] = tab === 'todos' ? todosList : grouped;
+    for (const cli of fonte) {
+      const dias = new Set<number>();
+      for (const e of cli.emprestimos) {
+        if (e.frequencia_pagamento !== 'SEMANAL') continue;
+        const d = diasSemana[e.id ?? e.emprestimo_id];
+        if (d != null) dias.add(d);
+      }
+      dias.forEach(d => { c[d] += 1; });
+    }
+    return c;
+  }, [tab, todosList, grouped, diasSemana]);
+
+  // Breadcrumb dos dias da semana, compartilhado pelas DUAS listas: os três
+  // braços do topo — Liquidação, Pagas e Todos — levam a uma delas, e filtrar
+  // por dia só num deles não faria sentido.
+  //
+  // Só existe com o filtro Semanal ligado: fora dele a fileira não filtraria
+  // nada e roubaria altura da lista.
+  //
+  // Iniciais em vez de nomes porque cabem sete numa linha; as letras repetidas
+  // (S-T-Q-Q-S-S) se desambiguam pela ordem do calendário, que é como qualquer
+  // agenda as apresenta.
+  const breadcrumbDias = filtroFrequencia !== 'SEMANAL' ? null : (
+    <View style={S.diasBc}>
+      {DIAS_SEMANA_CURTO.map((ini, d) => {
+        const qtd = contagemPorDia[d];
+        const on = filtroDiaSemana === d;
+        const off = qtd === 0 && !on;
+        return (
+          <TouchableOpacity
+            key={d}
+            style={[S.diaBc, on && S.diaBcOn, off && S.diaBcOff]}
+            onPress={() => setFiltroDiaSemana(on ? null : d)}
+            disabled={off}
+            activeOpacity={0.7}
+          >
+            <Text style={[S.diaBcTx, on && S.diaBcTxOn, off && S.diaBcTxOff]}>{ini}</Text>
+            {qtd > 0 && <Text style={[S.diaBcQtd, on && S.diaBcQtdOn]}>{qtd}</Text>}
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
 
   const todosFilt = useMemo(() => {
     let r = [...todosList];
@@ -2565,6 +2769,26 @@ export default function ClientesScreen({ navigation, route }: any) {
         .map(c => ({ ...c, emprestimos: c.emprestimos.filter(e => e.frequencia_pagamento === filtroFrequencia) }))
         .filter(c => c.emprestimos.length > 0);
     }
+    // O dia programado entra aqui, e não na montagem da lista, porque chega
+    // depois — leitura sob demanda. Só custa quando há o que injetar.
+    if (Object.keys(diasSemana).length) {
+      r = r.map(c => ({
+        ...c,
+        emprestimos: c.emprestimos.map(e => (
+          e.frequencia_pagamento === 'SEMANAL' && diasSemana[e.id] != null
+            ? { ...e, dia_semana_cobranca: diasSemana[e.id] }
+            : e
+        )),
+      }));
+    }
+    // Breadcrumb dos dias: corta os EMPRÉSTIMOS, como os filtros acima, e não
+    // só o cliente — senão um semanal de terça apareceria no filtro de quinta
+    // porque o mesmo cliente tem outro empréstimo naquele dia.
+    if (filtroDiaSemana != null) {
+      r = r
+        .map(c => ({ ...c, emprestimos: c.emprestimos.filter(e => diasSemana[e.id] === filtroDiaSemana) }))
+        .filter(c => c.emprestimos.length > 0);
+    }
     // Filtro por status do empréstimo
     if (filtroStatus !== 'todos') {
       if (filtroStatus === 'QUITADO') {
@@ -2585,7 +2809,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       return a.nome.localeCompare(b.nome);
     });
     return r;
-  }, [todosList, busca, filtroTipo, filtroStatus, filtroFrequencia, ocultarLiquidacao, clientesLiqIds, ordemRotaMap]);
+  }, [todosList, busca, filtroTipo, filtroStatus, filtroFrequencia, filtroDiaSemana, diasSemana, ocultarLiquidacao, clientesLiqIds, ordemRotaMap]);
 
   const renderTodos = (c: ClienteTodos) => {
     // Default: ativo/vencido primeiro; sem ativo, usa o último (mais recente)
@@ -2609,6 +2833,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         notasCount={notasCountMap.get(c.id) || 0}
         todosMode={true}
         t={t}
+        compacto={compacto}
         chaveExpand={c.id}
         onToggleExpand={toggleExpandTodos}
         onLongPressStart={() => {
@@ -2759,6 +2984,26 @@ return (
               <Ionicons name="sync-outline" size={20} color="#2563EB" />
             )}
           </TouchableOpacity>
+          <TouchableOpacity
+            style={S.filterBtn}
+            onPress={alternarCompacto}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={compacto
+              ? (lang === 'es' ? 'Lista detallada' : 'Lista detalhada')
+              : (lang === 'es' ? 'Lista compacta' : 'Lista compacta')}
+          >
+            {/* Mostra a AÇÃO, não o estado: detalhado exibe as setas para
+                dentro ("compactar"), compacto exibe as setas para fora.
+                Diagonal de propósito — é a única forma diagonal da barra, e
+                não se confunde com as linhas do filtro nem com o círculo da
+                ajuda, que ficam ao lado. */}
+            <Ionicons
+              name={compacto ? 'expand-outline' : 'contract-outline'}
+              size={20}
+              color={compacto ? '#2563EB' : '#374151'}
+            />
+          </TouchableOpacity>
           <TouchableOpacity style={S.filterBtn} onPress={openDrawer} activeOpacity={0.7}>
             <Ionicons name="options-outline" size={20} color="#374151" />
             {temFiltroAtivo && <View style={S.filterDot} />}
@@ -2850,6 +3095,7 @@ return (
         }}
         filtroVencimento={filtroVencimento}
         setFiltroVencimento={setFiltroVencimento}
+        cntVencTodos={cntVencTodos}
         cntVencDia={cntVencDia}
         cntVencAtrasados={cntVencAtrasados}
         temFiltroAtivo={temFiltroAtivo}
@@ -2914,6 +3160,7 @@ return (
           <View style={{ flex: 1 }}>
             <FlatList
               ref={flatListLiqRef}
+              ListHeaderComponent={breadcrumbDias}
               data={filtered}
               keyExtractor={(item) => item.key}
               // ── Virtualização ──
@@ -3030,6 +3277,8 @@ return (
               showsVerticalScrollIndicator={false}
               onScrollBeginDrag={() => { setShowFiltroTipo(false); setShowFiltroStatus(false); }}
               ListHeaderComponent={
+                <>
+                {breadcrumbDias}
                 <View style={{ backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#F59E0B', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <Ionicons name="people" size={16} color="#92400E" />
                   <Text style={{ fontSize: 13, fontWeight: '600', color: '#92400E', flex: 1 }}>
@@ -3049,6 +3298,7 @@ return (
                     </TouchableOpacity>
                   )}
                 </View>
+                </>
               }
               ListFooterComponent={<View style={{ height: 90 }} />}
               viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
@@ -3542,6 +3792,21 @@ const S = StyleSheet.create({
   semLiqDesc: { fontSize: 11, color: '#B91C1C', marginTop: 1 },
 
   // Lista
+  // Breadcrumb dos dias da semana, acima da listagem quando o filtro Semanal
+  // está ligado.
+  diasBc: { flexDirection: 'row', gap: 6, marginBottom: 8 },
+  diaBc: {
+    flex: 1, alignItems: 'center', paddingVertical: 7, borderRadius: 9,
+    backgroundColor: '#F3F4F6', borderWidth: 1, borderColor: '#E5E7EB',
+  },
+  diaBcOn: { backgroundColor: '#4338CA', borderColor: '#4338CA' },
+  diaBcOff: { backgroundColor: '#FAFAFA', borderColor: '#F3F4F6' },
+  diaBcTx: { fontSize: 13, fontWeight: '700', color: '#374151' },
+  diaBcTxOn: { color: '#fff', fontWeight: '800' },
+  diaBcTxOff: { color: '#D1D5DB' },
+  diaBcQtd: { fontSize: 9, fontWeight: '700', color: '#9CA3AF', marginTop: 1 },
+  diaBcQtdOn: { color: 'rgba(255,255,255,0.8)' },
+
   ls: { flex: 1, marginTop: 10, zIndex: 1 },
   lsI: { paddingHorizontal: 16 },
   faixaAtualizando: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#EFF6FF', paddingVertical: 6 },

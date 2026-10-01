@@ -11,6 +11,7 @@ import {
   useWindowDimensions,
   View
 } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Language } from '../contexts/LiquidacaoContext';
 import { diasAtraso as calcAtraso, type ConfigCobranca } from '../utils/diasCobranca';
@@ -21,6 +22,12 @@ export interface EmprestimoData {
   emprestimo_id: string; saldo_emprestimo: number; valor_principal: number;
   valor_total?: number;
   numero_parcelas: number; status_emprestimo: string; frequencia_pagamento: string;
+  /**
+   * Só em SEMANAL, e só depois da leitura sob demanda — o payload da
+   * liquidação não traz este campo. 0 = domingo.
+   * Ver services/diasSemanaEmprestimos.ts.
+   */
+  dia_semana_cobranca?: number | null;
   parcela_id: string; numero_parcela: number; valor_parcela: number;
   valor_pago_parcela: number; saldo_parcela: number; status_parcela: string;
   data_vencimento: string; ordem_visita_dia: number | null;
@@ -40,6 +47,23 @@ export interface ClienteAgrupado {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+// Abreviado, ao contrário do card da aba Todos: aqui o rótulo divide uma
+// única linha com a frequência e o atraso ("Semanal · Ter · 3 dias"), e o
+// nome cheio a estouraria.
+const DIA_SEMANA_ABREV: Record<Language, string[]> = {
+  'pt-BR': ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'],
+  'es': ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'],
+};
+
+/** "Semanal" vira "Semanal · Ter" quando o dia programado é conhecido. */
+const tipoComDia = (e: EmprestimoData, lang: Language) => {
+  const base = FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento;
+  if (e.frequencia_pagamento !== 'SEMANAL') return base;
+  const d = e.dia_semana_cobranca;
+  if (d == null || d < 0 || d > 6) return base;
+  return `${base} · ${DIA_SEMANA_ABREV[lang][d]}`;
+};
 
 const FREQ: Record<Language, Record<string, string>> = {
   'pt-BR': { DIARIO: 'Diário', SEMANAL: 'Semanal', QUINZENAL: 'Quinzenal', MENSAL: 'Mensal', FLEXIVEL: 'Flexível' },
@@ -160,9 +184,23 @@ interface ClienteCardLiquidacaoProps {
   /** Chave desta linha na lista. Vai de volta no onToggleExpand para o
    *  handler poder ser estável (useCallback sem dependências) — é o que
    *  permite o React.memo funcionar. */
+  /** Lista compacta: colapsado fica só a linha do nome e endereço; o resto
+   *  abre no toque, já com os botões. Preferência persistida do usuário. */
+  compacto?: boolean;
   chaveExpand: string;
   onToggleExpand: (chave: string) => void;
   onPagar: (parcela: any, clienteInfo: any) => void;
+  /**
+   * Segundo pagamento do mesmo cliente na mesma liquidação.
+   *
+   * Na aba Pagos todo cliente listado já pagou — e o cliente pediu poder
+   * lançar mais um lançamento ali, tipicamente para gastar crédito numa
+   * parcela seguinte. O botão não repete a parcela já paga: quem resolve
+   * qual é a próxima em aberto é a tela, por `fn_buscar_proxima_parcela_a_pagar`.
+   */
+  onPagarProxima?: (clienteInfo: any) => void;
+  /** Liga o caminho acima. Hoje: só na aba Pagos. */
+  permiteNovoPagamento?: boolean;
   onAbrirParcelas: (clienteId: string, clienteNome: string, emprestimoId: string) => void;
   onAbrirNotas: (clienteId: string, clienteNome: string) => void;
   onAbrirDetalhes: (cliente: { id: string; nome: string; telefone?: string | null; endereco?: string | null; codigo_cliente?: string | number | null }) => void;
@@ -201,9 +239,12 @@ function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
     lang,
     notasCount,
     t,
+    compacto = false,
     chaveExpand,
     onToggleExpand,
     onPagar,
+    onPagarProxima,
+    permiteNovoPagamento,
     onAbrirParcelas,
     onAbrirNotas,
     onAbrirDetalhes,
@@ -272,8 +313,21 @@ function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
       style={[
         S.card, 
         { borderLeftColor: np ? '#6B7280' : bc, backgroundColor: np ? '#F9FAFB' : bg },
+        compacto && S.cardCompacto,
       ]}
     >
+      {/* Gota: brota da linha fina da esquerda e carrega a inicial da
+          frequência — D, S, Q, M ou F. */}
+      {compacto && !ex && (
+        <View style={S.gotaWrap} pointerEvents="none">
+          <View style={S.gotaCaixa}>
+            <Svg width={19} height={44} viewBox="0 0 19 44" style={S.gotaSvg}>
+              <Path d="M 0 0 C 0 9, 19 11, 19 22 C 19 33, 0 35, 0 44 Z" fill={np ? '#6B7280' : bc} />
+            </Svg>
+            <Text style={S.gotaTx}>{((FREQ[lang][e.frequencia_pagamento]) || '?').charAt(0).toUpperCase()}</Text>
+          </View>
+        </View>
+      )}
       {/* Badge NÃO PAGO */}
       {np && (
         <View style={S.naoPagoBadge}>
@@ -288,10 +342,13 @@ function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
           activeOpacity={0.7}
           onPress={() => onAbrirDetalhes({ id: c.cliente_id, nome: c.nome, telefone: c.telefone_celular, endereco: c.endereco, codigo_cliente: c.codigo_cliente })}
         >
+          {/* Sem foto: iniciais na MESMA cor da borda. Antes o avatar tinha
+              paleta própria e o card dizia duas coisas sobre o mesmo
+              cliente — borda âmbar, avatar vermelho. */}
           {c.foto_url ? (
             <Image source={{ uri: c.foto_url }} style={[S.av, { backgroundColor: '#E5E7EB' }]} />
           ) : (
-            <View style={[S.av, { backgroundColor: pg ? '#10B981' : np ? '#6B7280' : e.tem_parcelas_vencidas && e.total_parcelas_vencidas > 0 ? '#EF4444' : '#3B82F6' }]}>
+            <View style={[S.av, { backgroundColor: np ? '#6B7280' : bc }]}>
               <Text style={S.avTx}>{getIni(c.nome)}</Text>
             </View>
           )}
@@ -310,83 +367,85 @@ function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
       </View>
 
       {/* === LINHA 2: [breadcrumb tipo·status] + Parcela + Valores === */}
-      <View style={S.pRow}>
-        <View>
-          {/* ⭐ Breadcrumb: tipo do empréstimo · dias de atraso. "ok" quando em
-              dia; "N dias" a partir do 1º dia de atraso (para TODOS os clientes
-              com parcela vencida, sem depender do status VENCIDO formal).
-              Dias = dia da liquidação vista (dataReferencia) − vencimento da
-              parcela exibida. Datas parseadas como string (sem timezone). */}
-          {(() => {
-            const refAtraso = (e as any).dia_referencia || dataReferencia;
-            const diasAtraso = calcAtraso(e.data_vencimento, refAtraso, configCobranca);
-            const emDia = diasAtraso <= 0;
-            const cor = emDia ? '#10B981' : corAtraso(e.total_parcelas_vencidas || 1);
-            const tipo = FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento;
-            const txtDias = diasAtraso === 1
-              ? (lang === 'es' ? '1 día' : '1 dia')
-              : `${diasAtraso} ${lang === 'es' ? 'días' : 'dias'}`;
-            return (
-              <Text style={[S.breadTipo, { color: cor }]} numberOfLines={1}>
-                {tipo} · {emDia ? 'ok' : txtDias}
-              </Text>
-            );
-          })()}
-          <View style={S.pLblR}>
-            <Text style={S.pLbl}>{t.parcela} {e.numero_parcela}/{e.numero_parcelas}</Text>
-          </View>
-          {e.data_emprestimo ? <Text style={S.dataEmpLbl}>{lang === 'es' ? 'Préstamo:' : 'Empréstimo:'} {fmtData(e.data_emprestimo)}</Text> : null}
-        </View>
-        <View style={S.sCol}>
-          {pg && resumoPago ? (
-            // Aba Pagos: DINHEIRO EFETIVO recebido em destaque; crédito à parte;
-            // valor/qtd de parcela discreto. Soma todas as parcelas do cliente.
-            <View style={{ alignItems: 'flex-end' }}>
-              <Text style={[S.pValBig, { color: '#059669' }]}>{fmt(resumoPago.dinheiroReal)}</Text>
-              <Text style={S.pRecebidoLbl}>{lang === 'es' ? 'recibido' : 'recebido'}</Text>
-              {/* "pagos com crédito", não "+ crédito": este número COMPÕE o valor
-                  da parcela, não é saldo a favor do cliente. Com o rótulo antigo
-                  o cobrador lia como se o cliente ainda tivesse esse crédito
-                  guardado — e o saldo disponível dele podia ser zero. */}
-              {resumoPago.creditoUsado > 0 ? (
-                <Text style={S.pCreditoLbl}>
-                  {fmt(resumoPago.creditoUsado)} {lang === 'es' ? 'pagados con crédito' : 'pagos com crédito'}
+      {(!compacto || ex) && (
+        <View style={S.pRow}>
+          <View>
+            {/* ⭐ Breadcrumb: tipo do empréstimo · dias de atraso. "ok" quando em
+                dia; "N dias" a partir do 1º dia de atraso (para TODOS os clientes
+                com parcela vencida, sem depender do status VENCIDO formal).
+                Dias = dia da liquidação vista (dataReferencia) − vencimento da
+                parcela exibida. Datas parseadas como string (sem timezone). */}
+            {(() => {
+              const refAtraso = (e as any).dia_referencia || dataReferencia;
+              const diasAtraso = calcAtraso(e.data_vencimento, refAtraso, configCobranca);
+              const emDia = diasAtraso <= 0;
+              const cor = emDia ? '#10B981' : corAtraso(e.total_parcelas_vencidas || 1);
+              const tipo = tipoComDia(e, lang);
+              const txtDias = diasAtraso === 1
+                ? (lang === 'es' ? '1 día' : '1 dia')
+                : `${diasAtraso} ${lang === 'es' ? 'días' : 'dias'}`;
+              return (
+                <Text style={[S.breadTipo, { color: cor }]} numberOfLines={1}>
+                  {tipo} · {emDia ? 'ok' : txtDias}
                 </Text>
-              ) : null}
-              <Text style={S.pParcelaDiscreta}>
-                {resumoPago.qtdParcelas > 1
-                  ? (resumoPago.valorUnitario != null
-                      ? `${resumoPago.qtdParcelas} ${lang === 'es' ? 'cuotas de' : 'parcelas de'} ${fmt(resumoPago.valorUnitario)}`
-                      : `${resumoPago.qtdParcelas} ${lang === 'es' ? 'cuotas' : 'parcelas'} · ${lang === 'es' ? 'total' : 'total'} ${fmt(resumoPago.somaParcelas)}`)
-                  : `${t.parcela} ${e.numero_parcela}/${e.numero_parcelas} · ${fmt(resumoPago.somaParcelas)}`}
-              </Text>
+              );
+            })()}
+            <View style={S.pLblR}>
+              <Text style={S.pLbl}>{t.parcela} {e.numero_parcela}/{e.numero_parcelas}</Text>
             </View>
-          ) : pg && pi ? (
-            <Text style={[S.pValBig, { color: '#10B981' }]}>{fmt(pi.valorPago)}</Text>
-          ) : np ? (
-            <Text style={[S.pValBig, { color: '#6B7280', textDecorationLine: 'line-through' }]}>{fmt(valorAPagar)}</Text>
-          ) : (
-            <Text style={S.pValBig}>{fmt(valorAPagar)}</Text>
-          )}
-          <Text style={S.sLbl}>{t.saldoEmprestimo} {fmt(e.saldo_emprestimo)}</Text>
-          {/* ⭐ Composição do empréstimo: emprestado + juros + total.
-              Antes só o total era exibido; agora o usuário vê quanto foi
-              de fato emprestado sem calcular. Juros = total − principal. */}
-          {typeof e.valor_total === 'number' && e.valor_total > 0 && (
-            <View style={S.compEmp}>
-              <Text style={S.compEmpLine}>
-                {lang === 'es' ? 'Préstamo' : 'Empréstimo'}: <Text style={S.compEmpStrong}>{fmt(e.valor_principal)}</Text>
-              </Text>
-              <Text style={S.compEmpLine}>
-                {lang === 'es' ? 'Intereses' : 'Juros'}: <Text style={S.compEmpStrong}>{fmt(e.valor_total - e.valor_principal)}</Text>
-              </Text>
-              <Text style={S.compEmpLine}>
-                {lang === 'es' ? 'Total' : 'Total'}: <Text style={S.compEmpStrong}>{fmt(e.valor_total)}</Text>
-              </Text>
-            </View>
-          )}
+            {e.data_emprestimo ? <Text style={S.dataEmpLbl}>{lang === 'es' ? 'Préstamo:' : 'Empréstimo:'} {fmtData(e.data_emprestimo)}</Text> : null}
+          </View>
+          <View style={S.sCol}>
+            {pg && resumoPago ? (
+              // Aba Pagos: DINHEIRO EFETIVO recebido em destaque; crédito à parte;
+              // valor/qtd de parcela discreto. Soma todas as parcelas do cliente.
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={[S.pValBig, { color: '#059669' }]}>{fmt(resumoPago.dinheiroReal)}</Text>
+                <Text style={S.pRecebidoLbl}>{lang === 'es' ? 'recibido' : 'recebido'}</Text>
+                {/* "pagos com crédito", não "+ crédito": este número COMPÕE o valor
+                    da parcela, não é saldo a favor do cliente. Com o rótulo antigo
+                    o cobrador lia como se o cliente ainda tivesse esse crédito
+                    guardado — e o saldo disponível dele podia ser zero. */}
+                {resumoPago.creditoUsado > 0 ? (
+                  <Text style={S.pCreditoLbl}>
+                    {fmt(resumoPago.creditoUsado)} {lang === 'es' ? 'pagados con crédito' : 'pagos com crédito'}
+                  </Text>
+                ) : null}
+                <Text style={S.pParcelaDiscreta}>
+                  {resumoPago.qtdParcelas > 1
+                    ? (resumoPago.valorUnitario != null
+                        ? `${resumoPago.qtdParcelas} ${lang === 'es' ? 'cuotas de' : 'parcelas de'} ${fmt(resumoPago.valorUnitario)}`
+                        : `${resumoPago.qtdParcelas} ${lang === 'es' ? 'cuotas' : 'parcelas'} · ${lang === 'es' ? 'total' : 'total'} ${fmt(resumoPago.somaParcelas)}`)
+                    : `${t.parcela} ${e.numero_parcela}/${e.numero_parcelas} · ${fmt(resumoPago.somaParcelas)}`}
+                </Text>
+              </View>
+            ) : pg && pi ? (
+              <Text style={[S.pValBig, { color: '#10B981' }]}>{fmt(pi.valorPago)}</Text>
+            ) : np ? (
+              <Text style={[S.pValBig, { color: '#6B7280', textDecorationLine: 'line-through' }]}>{fmt(valorAPagar)}</Text>
+            ) : (
+              <Text style={S.pValBig}>{fmt(valorAPagar)}</Text>
+            )}
+            <Text style={S.sLbl}>{t.saldoEmprestimo} {fmt(e.saldo_emprestimo)}</Text>
+            {/* ⭐ Composição do empréstimo: emprestado + juros + total.
+                Antes só o total era exibido; agora o usuário vê quanto foi
+                de fato emprestado sem calcular. Juros = total − principal. */}
+            {typeof e.valor_total === 'number' && e.valor_total > 0 && (
+              <View style={S.compEmp}>
+                <Text style={S.compEmpLine}>
+                  {lang === 'es' ? 'Préstamo' : 'Empréstimo'}: <Text style={S.compEmpStrong}>{fmt(e.valor_principal)}</Text>
+                </Text>
+                <Text style={S.compEmpLine}>
+                  {lang === 'es' ? 'Intereses' : 'Juros'}: <Text style={S.compEmpStrong}>{fmt(e.valor_total - e.valor_principal)}</Text>
+                </Text>
+                <Text style={S.compEmpLine}>
+                  {lang === 'es' ? 'Total' : 'Total'}: <Text style={S.compEmpStrong}>{fmt(e.valor_total)}</Text>
+                </Text>
+              </View>
+            )}
+          </View>
         </View>
-      </View>
+      )}
 
       {/* === EXPANDIDO (1 clique) === */}
       {ex && (
@@ -401,19 +460,32 @@ function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
           )}
           {/* Pagar (flex) + Parcelas + Notas na mesma linha */}
           <View style={S.expActRow}>
-            <TouchableOpacity
-              style={[S.btPagarGrande, (pg || np || !liqId || isViz) && S.btPagarDisabled]}
-              onPress={() => {
-                if (liqId && !isViz && !pg && !np) onPagar(
-                  { parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0, valor_pago: e.valor_pago_parcela || 0, valor_saldo: e.saldo_parcela || e.valor_parcela },
-                  { id: c.cliente_id, nome: c.nome, emprestimo_id: e.emprestimo_id, saldo_emprestimo: e.saldo_emprestimo, emprestimo_status: e.status_emprestimo }
-                );
-              }}
-              disabled={pg || np || !liqId || isViz}
-            >
-              <Text style={S.btPagarIcon}>$</Text>
-              <Text style={S.btPagarText}>{t.pagar}</Text>
-            </TouchableOpacity>
+            {(() => {
+              // Já pago e na aba Pagos: o botão vira "+ Pagamento" e mira a
+              // PRÓXIMA parcela em aberto, nunca a que acabou de ser paga.
+              const novo = pg && !!permiteNovoPagamento && !!onPagarProxima;
+              const off = (novo ? (np || !liqId || isViz) : (pg || np || !liqId || isViz));
+              return (
+                <TouchableOpacity
+                  style={[S.btPagarGrande, off && S.btPagarDisabled, novo && !off && S.btPagarNovo]}
+                  onPress={() => {
+                    if (off) return;
+                    const info = { id: c.cliente_id, nome: c.nome, emprestimo_id: e.emprestimo_id, saldo_emprestimo: e.saldo_emprestimo, emprestimo_status: e.status_emprestimo };
+                    if (novo) { onPagarProxima!(info); return; }
+                    onPagar(
+                      { parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0, valor_pago: e.valor_pago_parcela || 0, valor_saldo: e.saldo_parcela || e.valor_parcela },
+                      info,
+                    );
+                  }}
+                  disabled={off}
+                >
+                  <Text style={S.btPagarIcon}>{novo ? '+' : '$'}</Text>
+                  <Text style={S.btPagarText}>
+                    {novo ? (lang === 'es' ? 'Nuevo pago' : 'Novo pagamento') : t.pagar}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })()}
           </View>
 
           {MOSTRAR_BOTAO_PARCELAS && (
@@ -505,6 +577,8 @@ function CardMultiplo({
   notasCount,
   t,
   onPagar,
+  onPagarProxima,
+  permiteNovoPagamento,
   onAbrirParcelas,
   onAbrirNotas,
   onAbrirDetalhes,
@@ -547,7 +621,7 @@ function CardMultiplo({
     );
     const emDia = diasAtraso <= 0;
     const corDias = emDia ? '#10B981' : corAtraso(e.total_parcelas_vencidas || 1);
-    const tipo = FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento;
+    const tipo = tipoComDia(e, lang);
     const txtDias = diasAtraso === 1
       ? (lang === 'es' ? '1 día' : '1 dia')
       : `${diasAtraso} ${lang === 'es' ? 'días' : 'dias'}`;
@@ -621,20 +695,33 @@ function CardMultiplo({
         )}
 
         <View style={S.expActRow}>
-          <TouchableOpacity
-            style={[S.btPagarGrande, bloqueado && S.btPagarDisabled]}
-            disabled={bloqueado}
-            onPress={() => {
-              if (bloqueado) return;
-              onPagar(
-                { parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0, valor_pago: e.valor_pago_parcela || 0, valor_saldo: e.saldo_parcela || e.valor_parcela },
-                { id: c.cliente_id, nome: c.nome, emprestimo_id: e.emprestimo_id, saldo_emprestimo: e.saldo_emprestimo, emprestimo_status: e.status_emprestimo }
-              );
-            }}
-          >
-            <Text style={S.btPagarIcon}>$</Text>
-            <Text style={S.btPagarText}>{t.pagar}</Text>
-          </TouchableOpacity>
+          {(() => {
+            // Mesma regra do card de empréstimo único — ver lá. `bloqueado`
+            // inclui `pago` e `isClientePago`, que são justamente o que a aba
+            // Pagos precisa destravar.
+            const novo = (pago || isClientePago) && !!permiteNovoPagamento && !!onPagarProxima;
+            const off = novo ? (np || !liqId || isViz) : bloqueado;
+            return (
+              <TouchableOpacity
+                style={[S.btPagarGrande, off && S.btPagarDisabled, novo && !off && S.btPagarNovo]}
+                disabled={off}
+                onPress={() => {
+                  if (off) return;
+                  const info = { id: c.cliente_id, nome: c.nome, emprestimo_id: e.emprestimo_id, saldo_emprestimo: e.saldo_emprestimo, emprestimo_status: e.status_emprestimo };
+                  if (novo) { onPagarProxima!(info); return; }
+                  onPagar(
+                    { parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0, valor_pago: e.valor_pago_parcela || 0, valor_saldo: e.saldo_parcela || e.valor_parcela },
+                    info,
+                  );
+                }}
+              >
+                <Text style={S.btPagarIcon}>{novo ? '+' : '$'}</Text>
+                <Text style={S.btPagarText}>
+                  {novo ? (lang === 'es' ? 'Nuevo pago' : 'Novo pagamento') : t.pagar}
+                </Text>
+              </TouchableOpacity>
+            );
+          })()}
         </View>
 
         {MOSTRAR_BOTAO_PARCELAS && (
@@ -793,6 +880,31 @@ const S = StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 7, marginLeft: 6,
   },
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 12, marginBottom: 8, borderLeftWidth: 5, elevation: 2 },
+  // Compacto: menos respiro dentro e entre os cards. O ganho não está no
+  // card individual, e sim em quantos cabem na tela sem rolar.
+  // Compacto: menos respiro dentro e entre os cards. O paddingLeft maior
+  // é o espaço da gota — a borda fina da esquerda fica como sempre foi.
+  cardCompacto: { paddingVertical: 8, marginBottom: 5, paddingLeft: 22 },
+  // Gota de frequência — só no modo compacto.
+  //
+  // A coluna da esquerda continua a mesma linha fina de sempre; o que brota
+  // dela é uma folha desenhada em SVG. Precisa ser SVG: `borderRadius` só faz
+  // canto arredondado, e o encontro da linha com a bolha vira um degrau.
+  //
+  // O detalhe que faz a forma escorrer em vez de parecer colada está nos
+  // pontos de controle das pontas: `C 0 9, ...` mantém o controle em x=0, ou
+  // seja, a curva SAI TANGENTE à linha — desce reta antes de abrir. Com o
+  // controle fora do eixo ela partia em ângulo e virava meia-bola grudada.
+  //
+  // `left: 0` num filho absoluto é a borda INTERNA em RN — ou seja, o ponto
+  // onde a linha de 5px termina. O lado reto da folha nasce colado nela.
+  gotaWrap: { position: 'absolute', left: 0, top: 0, bottom: 0, justifyContent: 'center' },
+  gotaCaixa: { width: 19, height: 44, alignItems: 'center', justifyContent: 'center' },
+  gotaSvg: { position: 'absolute', left: 0, top: 0 },
+  // Desloca a letra para a barriga: o centro da caixa cai à direita da massa
+  // da curva.
+  gotaTx: { color: '#fff', fontSize: 11, fontWeight: '800', marginRight: 4 },
+
   cardRow: { flexDirection: 'row' },
   av: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
   avTx: { color: '#fff', fontSize: 13, fontWeight: '700' },
@@ -821,6 +933,9 @@ const S = StyleSheet.create({
   faixaParcial: { backgroundColor: '#FEF3C7', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginBottom: 8 },
   faixaParcialTx: { fontSize: 12, color: '#B45309', lineHeight: 17 },
   btPagarGrande: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#10B981', borderRadius: 10, paddingVertical: 12, gap: 8 },
+  // Verde, e não o azul do "Pagar": é outra ação. O vendedor não pode tocar
+  // achando que vai repetir o pagamento que acabou de fazer.
+  btPagarNovo: { backgroundColor: '#059669' },
   btPagarDisabled: { backgroundColor: '#D1D5DB' },
   btPagarIcon: { fontSize: 16, fontWeight: '800', color: '#FFF' },
   btPagarText: { fontSize: 15, fontWeight: '700', color: '#FFF' },

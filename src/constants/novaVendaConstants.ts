@@ -75,10 +75,17 @@ export const FREQ_LABELS: Record<string, string> = {
 // ============================================================
 
 /** Retorna o dia seguinte à data base no formato YYYY-MM-DD.
- *  Se dataBase não for fornecida, usa a data real de hoje.
- *  Usar sempre a data operacional da liquidação (não new Date()) para evitar
- *  bloqueio de datas retroativas. */
-export const amanha = (dataBase?: string): string => {
+ *
+ *  `dataBase` é a DATA OPERACIONAL — `data_liquidacao` da liquidação aberta,
+ *  nunca o relógio. Ver CLAUDE.md, "A liquidação é a régua do tempo": o
+ *  vendedor que recupera o dia 25/08 precisa de vencimentos contados de 25/08.
+ *
+ *  O parâmetro é OBRIGATÓRIO de propósito, mesmo aceitando `undefined`. Ele já
+ *  era opcional, com este mesmo aviso no comentário, e nenhum dos cinco call
+ *  sites do app o passava — o relógio voltou pela porta de trás. Obrigatório,
+ *  o compilador cobra a decisão de quem chama; `undefined` continua caindo no
+ *  relógio porque há caminhos legítimos sem liquidação aberta. */
+export const amanha = (dataBase: string | undefined): string => {
   const d = dataBase ? new Date(dataBase + 'T12:00:00') : new Date();
   d.setDate(d.getDate() + 1);
   const y = d.getFullYear();
@@ -87,8 +94,28 @@ export const amanha = (dataBase?: string): string => {
   return `${y}-${m}-${day}`;
 };
 
-/** Para MENSAL: se o dia já passou no mês atual (ou na data base), avança para o mês seguinte */
-export const calcularDataMensal = (dia: number, dataBase?: string): string => {
+/** Dia da semana de uma data operacional, como `'0'`..`'6'` (0 = domingo).
+ *
+ *  Pedido do Julio em 23/09/2026: ao escolher SEMANAL, sugerir o dia em que o
+ *  vendedor está operando em vez de cair sempre em segunda-feira. Quem vende
+ *  numa quarta combina cobrança na quarta — a sugestão acerta quase sempre, e
+ *  segue trocável à mão.
+ *
+ *  Monta a data em UTC de propósito: `new Date('2026-09-23')` é interpretado
+ *  como meia-noite UTC e, na Colômbia (UTC−5), volta um dia.
+ *
+ *  `dataBase` é obrigatória pelo mesmo motivo de `amanha` — ver acima. */
+export const diaSemanaDe = (dataBase: string | undefined): string => {
+  if (dataBase) {
+    const [a, m, d] = dataBase.substring(0, 10).split('-').map(Number);
+    if (a && m && d) return String(new Date(Date.UTC(a, m - 1, d)).getUTCDay());
+  }
+  return String(new Date().getDay());
+};
+
+/** Para MENSAL: se o dia já passou no mês da data base, avança para o seguinte.
+ *  `dataBase` é a data operacional e é obrigatória — ver `amanha` acima. */
+export const calcularDataMensal = (dia: number, dataBase: string | undefined): string => {
   if (!dia || dia < 1 || dia > 31) return amanha(dataBase);
   const hoje = dataBase ? new Date(dataBase + 'T12:00:00') : new Date();
   const ano = hoje.getFullYear();

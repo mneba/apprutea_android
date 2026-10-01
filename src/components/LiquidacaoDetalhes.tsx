@@ -51,6 +51,20 @@ const fmtData = (d: string | null) => {
   return dt.toLocaleDateString('pt-BR');
 };
 
+/** `DD/MM/AAAA HH:MM` de um timestamp do banco.
+ *
+ *  Mesma correção de `fmtHora`: o Supabase devolve sem `Z`, mas é UTC. Sem o
+ *  sufixo, um fechamento às 19h na Colômbia (UTC−5) vira meia-noite do dia
+ *  seguinte — o tipo de deslize que o CLAUDE.md documenta em
+ *  "A liquidação é a régua do tempo". */
+const fmtDataHora = (d: string | null) => {
+  if (!d) return '';
+  const utcStr = d.endsWith('Z') || d.includes('+') ? d : d + 'Z';
+  const dt = new Date(utcStr);
+  if (isNaN(dt.getTime())) return '';
+  return `${dt.toLocaleDateString('pt-BR')} ${dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+};
+
 const fmtHora = (d: string | null) => {
   if (!d) return '';
   // Supabase retorna timestamps sem 'Z' mas são UTC — adicionar Z para forçar interpretação correta
@@ -218,6 +232,11 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const [vendasDia, setVendasDia] = useState<any[]>([]);
   const [renegociacoesDia, setRenegociacoesDia] = useState<any[]>([]);
   const extratoViewRef = useRef<View>(null);
+  // Selo de fechamento. `quando` é `data_fechamento`; `por` é o nome de quem
+  // fechou, resolvido por `fn_nome_usuario` — que procura em `vendedores` e
+  // depois em `user_profiles`, cobrindo tanto o vendedor no app quanto o
+  // admin pelo webapp. Pedido do Julio em 23/09/2026.
+  const [fechamento, setFechamento] = useState<{ quando: string; por: string | null } | null>(null);
   const [modalResetVisible, setModalResetVisible] = useState(false);
   const handleResetSuccess = () => {
     // Mantém o modal de reset E o extrato abertos.
@@ -243,7 +262,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
       // Busca dados da liquidação (vendedor + data + microseguro)
       const { data: liqData } = await supabase
         .from('liquidacoes_diarias')
-        .select('data_liquidacao, data_abertura, microseguro_inicial, microseguro_final, clientes_pagos, clientes_nao_pagos, clientes_novos, clientes_renovados, clientes_renegociados')
+        .select('data_liquidacao, data_abertura, status, data_fechamento, fechado_por, microseguro_inicial, microseguro_final, clientes_pagos, clientes_nao_pagos, clientes_novos, clientes_renovados, clientes_renegociados')
         .eq('id', liquidacaoId)
         .single();
 
@@ -254,6 +273,30 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
           setDataLiquidacao(`${d}/${m}/${y}`);
         }
         if (vendedorNomeExterno) setVendedorNome(vendedorNomeExterno);
+
+        // Só há selo se a liquidação foi de fato fechada. Uma reaberta perde o
+        // selo de propósito: o extrato deixou de representar um dia encerrado,
+        // que é justamente o que o selo afirma.
+        const fechadaEm = (liqData as any).data_fechamento as string | null;
+        const statusLiq = String((liqData as any).status || '').toUpperCase();
+        if (fechadaEm && statusLiq === 'FECHADO') {
+          setFechamento({ quando: fechadaEm, por: null });
+          const quem = (liqData as any).fechado_por;
+          if (quem) {
+            // O nome é um extra: se a busca falhar, o selo aparece mesmo assim
+            // com a data e a hora, que é o essencial do pedido.
+            supabase.rpc('fn_nome_usuario', { p_user_id: quem }).then(
+              ({ data: nome, error: errNome }) => {
+                if (!errNome && typeof nome === 'string' && nome.trim()) {
+                  setFechamento({ quando: fechadaEm, por: nome.trim() });
+                }
+              },
+              () => {},
+            );
+          }
+        } else {
+          setFechamento(null);
+        }
         setCaixaMicroInicial(liqData.microseguro_inicial || 0);
         setCaixaMicroFinal(liqData.microseguro_final || 0);
         setResumoOp({
@@ -480,6 +523,10 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   .c { text-align: center; }
   .cb { text-align: center; font-weight: 700; }
   .sub { text-align: center; color: #666; font-size: 10px; margin-top: 2px; }
+  .selo { text-align: center; margin-top: 6px; padding: 5px 8px;
+          border: 1px dashed #CCC; border-radius: 4px; background: #FAFAFA;
+          color: #666; font-size: 10px; line-height: 1.5; }
+  .selo-t { font-weight: 700; color: #333; letter-spacing: 0.5px; }
   .sep { border: none; border-top: 1px dashed #CCC; margin: 6px 0; }
   .sep2 { border: none; border-top: 2px solid #AAA; margin: 6px 0; }
   .row { display: flex; justify-content: space-between; align-items: baseline; padding: 2px 0; font-size: 12px; line-height: 1.6; }
@@ -506,6 +553,11 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   <div class="cb" style="font-size:14px">${rotaNome || 'Rota'}</div>
   ${vendedorNome ? `<div class="sub">${vendedorNome}</div>` : ''}
   <div class="sub">${dataLiquidacao || dataHoje}</div>
+  ${fechamento ? `<div class="selo">
+    <div class="selo-t">${lang === 'es' ? '🔒 SISTEMA CERRADO' : '🔒 SISTEMA FECHADO'}</div>
+    <div>${fmtDataHora(fechamento.quando)}</div>
+    ${fechamento.por ? `<div>por ${fechamento.por}</div>` : ''}
+  </div>` : ''}
   <hr class="sep2">
 
   <div class="row"><span>${lang === 'es' ? 'Caja inicial' : 'Caixa inicial'}</span><span class="r">${fmt(caixaInicial)}</span></div>
@@ -697,6 +749,24 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
             <Text style={cupom.centro}>{rotaNome || 'Rota'}</Text>
             {vendedorNome ? <Text style={cupom.centroSub}>{vendedorNome}</Text> : null}
             <Text style={cupom.centroSub}>{dataLiquidacao || dataHoje}</Text>
+
+            {/* Selo de fechamento. Fica no cabeçalho, antes dos números,
+                porque é ele que diz o que este extrato É: a fotografia de um
+                dia oficialmente encerrado, e não um parcial do dia em curso. */}
+            {fechamento && (
+              <View style={cupom.selo}>
+                <Text style={cupom.seloTitulo}>
+                  {lang === 'es' ? '🔒 SISTEMA CERRADO' : '🔒 SISTEMA FECHADO'}
+                </Text>
+                <Text style={cupom.seloTxt}>{fmtDataHora(fechamento.quando)}</Text>
+                {!!fechamento.por && (
+                  <Text style={cupom.seloTxt}>
+                    {lang === 'es' ? 'por' : 'por'} {fechamento.por}
+                  </Text>
+                )}
+              </View>
+            )}
+
             <Text style={cupom.div2}>{DDIV}</Text>
 
             {/* ═══ RESUMO CAIXA ═══ */}
@@ -1264,6 +1334,16 @@ const cupom = StyleSheet.create({
   papel: { backgroundColor: '#FFFEF7', borderRadius: 4, paddingHorizontal: 14, paddingVertical: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
   centro: { textAlign: 'center', fontSize: 12, color: '#1F2937', fontFamily: MONO, fontWeight: '700' },
   centroSub: { textAlign: 'center', fontSize: 10, color: '#6B7280', fontFamily: MONO, marginTop: 2 },
+
+  // Selo de fechamento. Borda e fundo tênues, sem cor de alerta: não é aviso,
+  // é constatação — o dia está encerrado.
+  selo: {
+    alignItems: 'center', marginTop: 8, paddingVertical: 7, paddingHorizontal: 10,
+    borderRadius: 6, borderWidth: 1, borderColor: '#D1D5DB',
+    backgroundColor: '#F9FAFB', borderStyle: 'dashed',
+  },
+  seloTitulo: { fontSize: 10, fontWeight: '700', color: '#374151', fontFamily: MONO, letterSpacing: 0.5 },
+  seloTxt: { fontSize: 10, color: '#6B7280', fontFamily: MONO, marginTop: 2 },
   linha: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 },
   txt: { fontSize: 11, color: '#1F2937', fontFamily: MONO },
   txtBold: { fontSize: 12, color: '#1F2937', fontFamily: MONO, fontWeight: '700' },

@@ -36,6 +36,12 @@ interface UseNovaVendaFormParams {
   renegociacao: any;
   isRenegociacao: boolean;
   solicitacaoRenovacao?: SolicitacaoRenovacao | null;
+  /**
+   * `data_liquidacao` da liquidação aberta — a data operacional. É a base do 1º
+   * vencimento, tanto no estado inicial quanto no `limparFormulario`. Ver
+   * CLAUDE.md, "A liquidação é a régua do tempo".
+   */
+  dataOperacional?: string;
   t: Textos;
 }
 
@@ -44,6 +50,7 @@ export function useNovaVendaForm({
   renegociacao,
   isRenegociacao,
   solicitacaoRenovacao,
+  dataOperacional,
   t,
 }: UseNovaVendaFormParams) {
   // Veio de uma solicitação de renovação (aprovada ou pendente).
@@ -107,11 +114,17 @@ export function useNovaVendaForm({
   const [diasMesFlexivel, setDiasMesFlexivel] = useState<number[]>(
     solicitacaoRenovacao?.dias_mes_cobranca || []
   );
-  const [iniciarProximoMes, setIniciarProximoMes] = useState(
-    solicitacaoRenovacao?.iniciar_proximo_mes ?? false
-  );
+  // Aposentado em 26/09/2026. O gerador de parcelas NUNCA leu este
+  // parametro -- descobrimos lendo `fn_gerar_parcelas_emprestimo` -- e
+  // agora quem decide o mes e a data da primeira parcela, escolhida no
+  // carrossel do flexivel.
+  //
+  // Continua sendo enviado as RPCs, que o aceitam e ignoram, so para nao
+  // mexer nas quatro assinaturas. Fixo em false: nao ha mais como liga-lo.
+  const iniciarProximoMes = false;
+  const setIniciarProximoMes = (_: boolean) => {};
   const [dataPrimeiroVencimento, setDataPrimeiroVencimento] = useState(
-    solicitacaoRenovacao?.data_primeiro_vencimento || amanha()
+    solicitacaoRenovacao?.data_primeiro_vencimento || amanha(dataOperacional)
   );
   const [observacoesEmprestimo, setObservacoesEmprestimo] = useState(
     solicitacaoRenovacao?.observacoes_emprestimo || ''
@@ -332,7 +345,10 @@ export function useNovaVendaForm({
     setTaxaJuros(''); setTaxaJurosPersonalizada(false);
     setFrequencia('DIARIO'); setDiaSemanaPagamento('1');
     setDiaMesPagamento('15'); setDiasMesFlexivel([]);
-    setIniciarProximoMes(false); setDataPrimeiroVencimento(amanha());
+    // A data operacional, não o relógio: este era o pior dos cinco pontos,
+    // porque o efeito que corrigia o valor inicial na tela não roda de novo
+    // depois de um limparFormulario.
+    setIniciarProximoMes(false); setDataPrimeiroVencimento(amanha(dataOperacional));
     setObservacoesEmprestimo(''); setValorMicroseguro('');
     setCamposComErro(new Set());
   };

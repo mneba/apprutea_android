@@ -8,6 +8,7 @@ import {
 import {
   amanha,
   calcularDataMensal,
+  diaSemanaDe,
   formatarData,
   type Lang,
   type Textos
@@ -24,7 +25,6 @@ interface Props {
   diaSemanaPagamento: string; setDiaSemanaPagamento: (v: string) => void;
   diaMesPagamento: string; setDiaMesPagamento: (v: string) => void;
   diasMesFlexivel: number[];
-  iniciarProximoMes: boolean; setIniciarProximoMes: (v: boolean) => void;
   dataPrimeiroVencimento: string; setDataPrimeiroVencimento: (v: string) => void;
   observacoesEmprestimo: string; setObservacoesEmprestimo: (v: string) => void;
   // Cálculos
@@ -43,14 +43,24 @@ interface Props {
    */
   isVendaAprovadaTravada: boolean;
   camposComErro: Set<string>;
+  /**
+   * `data_liquidacao` da liquidação em que a venda está sendo lançada — a data
+   * operacional. Toda data de vencimento calculada aqui sai dela, nunca do
+   * relógio: o vendedor que recupera 25/08 precisa de vencimentos contados de
+   * 25/08. Ver CLAUDE.md, "A liquidação é a régua do tempo".
+   *
+   * A tela já passava esta prop; o `Props` é que não a declarava, então o React
+   * a descartava em silêncio e o `tsc` acusava desde então.
+   */
+  dataOperacional?: string;
   lang: Lang;
   // Handlers
   handleValorEmprestimoChange: (text: string) => void;
   limparErroCampo: (campo: string) => void;
-  toggleDiaFlexivel: (dia: number) => void;
   getDiaSemanaLabel: () => string;
   onOpenDiaSemanaModal: () => void;
   onOpenDatePicker: () => void;
+  onOpenCarrosselFlexivel: () => void;
   // i18n
   t: Textos;
 }
@@ -60,16 +70,16 @@ export default function FormularioEmprestimo(props: Props) {
     valorEmprestimo, numeroParcelas, setNumeroParcelas,
     taxaJuros, setTaxaJuros, taxaJurosPersonalizada, setTaxaJurosPersonalizada,
     frequencia, setFrequencia,
-    diaSemanaPagamento, diaMesPagamento, setDiaMesPagamento,
-    diasMesFlexivel, iniciarProximoMes, setIniciarProximoMes,
+    diaSemanaPagamento, setDiaSemanaPagamento, diaMesPagamento, setDiaMesPagamento,
+    diasMesFlexivel,
     dataPrimeiroVencimento, setDataPrimeiroVencimento,
     observacoesEmprestimo, setObservacoesEmprestimo,
     valorPrincipal, taxaNum, parcelasNum,
     valorTotal, valorParcela, totalJuros,
     taxasPermitidas,
-    isRenegociacao, isVendaAprovadaTravada, camposComErro, lang,
-    handleValorEmprestimoChange, limparErroCampo, toggleDiaFlexivel,
-    getDiaSemanaLabel, onOpenDiaSemanaModal, onOpenDatePicker,
+    isRenegociacao, isVendaAprovadaTravada, camposComErro, dataOperacional, lang,
+    handleValorEmprestimoChange, limparErroCampo,
+    getDiaSemanaLabel, onOpenDiaSemanaModal, onOpenDatePicker, onOpenCarrosselFlexivel,
     t,
   } = props;
 
@@ -217,9 +227,24 @@ export default function FormularioEmprestimo(props: Props) {
                 setFrequencia(freq.value);
                 limparErroCampo('frequencia');
                 if (freq.value === 'DIARIO') {
-                  setDataPrimeiroVencimento(amanha());
+                  setDataPrimeiroVencimento(amanha(dataOperacional));
                 } else if (freq.value === 'MENSAL' && diaMesPagamento) {
-                  setDataPrimeiroVencimento(calcularDataMensal(parseInt(diaMesPagamento)));
+                  setDataPrimeiroVencimento(calcularDataMensal(parseInt(diaMesPagamento), dataOperacional));
+                } else if (freq.value === 'SEMANAL' && frequencia !== 'SEMANAL') {
+                  // Sugere o dia em que o vendedor está operando, em vez de
+                  // cair sempre em segunda. Pedido do Julio em 23/09/2026.
+                  //
+                  // A condição `frequencia !== 'SEMANAL'` importa: só sugere
+                  // ao ENTRAR na frequência. Sem ela, tocar de novo em
+                  // "Semanal" apagaria o dia que o vendedor tivesse escolhido
+                  // à mão.
+                  setDiaSemanaPagamento(diaSemanaDe(dataOperacional));
+                } else if (freq.value === 'FLEXIVEL') {
+                  // A folha abre no próprio toque em "Flexível": não existe
+                  // botão intermediário. Tocar de novo em "Flexível", já
+                  // selecionado, é o caminho de volta para reconfigurar.
+                  limparErroCampo('diasMesFlexivel');
+                  onOpenCarrosselFlexivel();
                 }
               }}
               activeOpacity={0.7}
@@ -265,7 +290,7 @@ export default function FormularioEmprestimo(props: Props) {
               const num = text.replace(/[^\d]/g, '');
               const val = Math.min(31, Math.max(0, parseInt(num) || 0));
               setDiaMesPagamento(num ? String(val) : '');
-              if (val > 0) setDataPrimeiroVencimento(calcularDataMensal(val));
+              if (val > 0) setDataPrimeiroVencimento(calcularDataMensal(val, dataOperacional));
               limparErroCampo('diaMesPagamento');
             }}
             placeholder="1-31"
@@ -276,44 +301,35 @@ export default function FormularioEmprestimo(props: Props) {
         </View>
       )}
 
-      {/* Dias do mês (FLEXIVEL) */}
+      {/* Flexível: a folha abre no toque em "Flexível", sem botão
+          intermediário — ver o onPress da grade de frequências acima.
+          Aqui sobra só o retorno do que ficou configurado. A explicação da
+          regra saiu: o passo 0 da folha já a dá, na hora em que importa. */}
       {frequencia === 'FLEXIVEL' && (
         <View style={styles.fieldGroup}>
           <Text style={[styles.fieldLabel, camposComErro.has('diasMesFlexivel') && styles.fieldLabelError]}>
-            Dias de cobrança <Text style={styles.required}>*</Text>
+            {lang === 'es' ? 'Cronograma flexible' : 'Cronograma flexível'} <Text style={styles.required}>*</Text>
           </Text>
-          <View style={[styles.diasGrid, camposComErro.has('diasMesFlexivel') && { borderWidth: 2, borderColor: '#EF4444', borderRadius: 8, padding: 4 }]}>
-            {Array.from({ length: 31 }, (_, i) => i + 1).map((dia) => (
-              <TouchableOpacity
-                key={dia}
-                style={[styles.diaGridItem, diasMesFlexivel.includes(dia) && styles.diaGridItemActive]}
-                onPress={() => toggleDiaFlexivel(dia)}
-                activeOpacity={0.6}
-              >
-                <Text style={[styles.diaGridText, diasMesFlexivel.includes(dia) && styles.diaGridTextActive]}>
-                  {dia}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          {diasMesFlexivel.length > 0 && (
-            <View style={styles.infoBox}>
-              <Text style={styles.infoBoxText}>
-                Selecionados: {diasMesFlexivel.join(', ')} — {diasMesFlexivel.length} cobrança(s) por mês
+
+          {diasMesFlexivel.length > 0 ? (
+            <View style={{ backgroundColor: '#EEF2FF', borderRadius: 10, padding: 11, gap: 3 }}>
+              <Text style={{ fontSize: 13, color: '#3730A3' }}>
+                {lang === 'es' ? '1ª cuota' : '1ª parcela'}:{' '}
+                <Text style={{ fontWeight: '800' }}>{formatarData(dataPrimeiroVencimento)}</Text>
+              </Text>
+              <Text style={{ fontSize: 13, color: '#3730A3' }}>
+                {lang === 'es' ? 'Días' : 'Dias'}:{' '}
+                <Text style={{ fontWeight: '800' }}>{diasMesFlexivel.join(', ')}</Text>
               </Text>
             </View>
-          )}
-          {diasMesFlexivel.length > 0 && (
-            <TouchableOpacity
-              style={styles.checkboxRow}
-              onPress={() => setIniciarProximoMes(!iniciarProximoMes)}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.checkbox, iniciarProximoMes && styles.checkboxActive]}>
-                {iniciarProximoMes && <Text style={styles.checkboxCheck}>✓</Text>}
-              </View>
-              <Text style={styles.checkboxLabel}>{t.iniciarProxMes}</Text>
-            </TouchableOpacity>
+          ) : (
+            <View style={{ backgroundColor: '#FFFBEB', borderRadius: 10, padding: 11 }}>
+              <Text style={{ fontSize: 12, color: '#92400E', lineHeight: 17 }}>
+                {lang === 'es'
+                  ? 'Toque otra vez en "Flexible" para configurar el cronograma.'
+                  : 'Toque novamente em "Flexível" para configurar o cronograma.'}
+              </Text>
+            </View>
           )}
         </View>
       )}

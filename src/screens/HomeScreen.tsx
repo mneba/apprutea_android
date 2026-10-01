@@ -16,6 +16,7 @@ import {
 import { ModalExtrato } from '../components/LiquidacaoDetalhes';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
+import { buscarConflitos, diaCurto, encerrarConflitos } from '../services/solicitacoesAbertura';
 
 // ==================== TIPOS ====================
 interface LiquidacaoDiaria {
@@ -285,6 +286,30 @@ export default function HomeScreen({ navigation }: any) {
   const handleAbrirLiquidacao = async () => {
     if (!vendedor) return;
     const valorCaixa = parseFloat(caixaInicial.replace(',', '.')) || 0;
+
+    // Pedido de abertura pendente para outro dia: decide antes de abrir.
+    // Ver sql/2026-09-21_solicitacao_abertura_conflito.sql.
+    const conflitos = await buscarConflitos(vendedor.rota_id, null);
+    if (conflitos.length > 0) {
+      const dias = conflitos.map(c => diaCurto(c.data_solicitada)).join(', ');
+      const seguir = await new Promise<boolean>(resolve => {
+        Alert.alert(
+          'Solicitação pendente',
+          `Você pediu para abrir ${dias} e ainda não houve resposta.
+
+` +
+          'Abrir o dia de hoje agora cancela esse pedido.',
+          [
+            { text: 'Esperar a resposta', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Abrir e cancelar o pedido', style: 'destructive', onPress: () => resolve(true) },
+          ],
+          { cancelable: false },
+        );
+      });
+      if (!seguir) return;
+      await encerrarConflitos(conflitos, vendedor.user_id || null);
+    }
+
     setProcessando(true);
     try {
       const { data, error } = await supabase.rpc('fn_abrir_liquidacao_diaria', {

@@ -21,10 +21,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  LayoutAnimation,
+  Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
+  UIManager,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -75,6 +79,11 @@ const TX = {
     pendente: 'Pendente',
     parcial: 'Parcial',
     cancelado: 'Cancelado',
+    jurosLbl: 'Juros',
+    creditoCurto: 'Crédito',
+    saldoCurto: 'Saldo',
+    pc1: 'parcela',
+    pcN: 'parcelas',
     semEventos: 'Nenhuma movimentação registrada',
     comprovantes: 'Comprovantes',
     documentos: 'Documentos do cliente',
@@ -121,6 +130,11 @@ const TX = {
     pendente: 'Pendiente',
     parcial: 'Parcial',
     cancelado: 'Cancelada',
+    jurosLbl: 'Intereses',
+    creditoCurto: 'Crédito',
+    saldoCurto: 'Saldo',
+    pc1: 'cuota',
+    pcN: 'cuotas',
     semEventos: 'Ninguna movimentación registrada',
     comprovantes: 'Comprobantes',
     documentos: 'Documentos del cliente',
@@ -129,6 +143,42 @@ const TX = {
     todas: 'Todas',
   },
 };
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+const ANIM = {
+  duration: 180,
+  create: { type: 'easeInEaseOut', property: 'opacity' },
+  update: { type: 'easeInEaseOut' },
+  delete: { type: 'easeInEaseOut', property: 'opacity' },
+} as const;
+
+/** Uma linha do painel: rótulo à esquerda, valor à direita. */
+const Linha = ({ rot, val, cor, forte, derivada }: {
+  rot: string; val: string; cor?: string; forte?: boolean;
+  /** Desdobra a linha de cima: recuo, cotovelo e peso menor. */
+  derivada?: boolean;
+}) => (
+  <View style={[S.linha, derivada && S.linhaDeriv]}>
+    <View style={S.linhaEsq}>
+      {derivada && (
+        <Ionicons name="return-down-forward-outline" size={13} color="rgba(255,255,255,0.45)" />
+      )}
+      <Text
+        style={[S.linhaRot, forte && S.linhaRotForte, derivada && S.linhaRotDeriv]}
+        numberOfLines={1}
+      >{rot}</Text>
+    </View>
+    <Text style={[
+      S.linhaVal,
+      forte && S.linhaValForte,
+      derivada && S.linhaValDeriv,
+      !!cor && { color: cor },
+    ]}>{val}</Text>
+  </View>
+);
 
 const fmt = (v: number | null | undefined) =>
   '$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -177,9 +227,11 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [aba, setAba] = useState<'parcelas' | 'tempo'>('parcelas');
+  const [resumoAberto, setResumoAberto] = useState(true);
   const [soAbertas, setSoAbertas] = useState(true);
   const [expandido, setExpandido] = useState<string | null>(null);
   const [anexoAberto, setAnexoAberto] = useState<string | null>(null);
+  const [seletorAberto, setSeletorAberto] = useState(false);
 
   const carregar = useCallback(async () => {
     if (!emprestimoId) {
@@ -204,6 +256,50 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
   const nomeCliente = ficha?.cliente?.nome || '';
   const conf = ficha?.conferencia;
   const tudoConfere = !!conf && conf.caixa_confere && conf.credito_confere;
+
+  // Os números do painel. Nenhum é lido de coluna que alguém mantenha à mão:
+  // todos saem do que o banco já calculou ou de uma subtração entre eles.
+  const principalEmp = Number(ficha?.emprestimo?.valor_principal || 0);
+  const totalEmp = Number(ficha?.totais?.valor_total || 0);
+  const saldoEmp = Number(ficha?.totais?.saldo_atual || 0);
+  const creditoEmp = Number(ficha?.totais?.credito_disponivel || 0);
+  const valorParcelaEmp = Number(ficha?.emprestimo?.valor_parcela || 0);
+
+  // SALDO é o que o cliente ainda tem de TRAZER, e por isso desconta o
+  // crédito: esse dinheiro ele já entregou e pode usá-lo a qualquer momento
+  // para pagar uma parcela. `saldo_atual` é a dívida contábil das parcelas,
+  // que não enxerga crédito ainda não aplicado — e é maior exatamente por ele.
+  const saldoFaltaEmp = Math.max(saldoEmp - creditoEmp, 0);
+
+  // PAGO é tudo o que o cliente entregou, crédito incluído: quem paga 150 numa
+  // parcela de 100 pagou 150. O CRÉDITO não é uma parcela irmã desta — é um
+  // PEDAÇO dela, a parte que ainda não baixou parcela. Daí a linha do crédito
+  // aparecer derivada, recuada sob o pago, e não como mais um item da lista.
+  //
+  // Derivado do saldo, e não de `dinheiro_recebido + crédito`, para fechar
+  // também quando o crédito vem de outro empréstimo da cadeia — nesse caso ele
+  // já entrou no abatimento, e somá-lo contaria o mesmo dinheiro duas vezes.
+  //
+  // A cadeia fecha por construção: Juros − Pago = Saldo.
+  const pagoEmp = Math.max(totalEmp - saldoFaltaEmp, 0);
+
+  const taxaEmp = ficha?.emprestimo?.taxa_juros;
+  // Sem zeros à direita: 20.00 vira "20%", 20.50 vira "20,5%". Taxa nula não
+  // vira "null%" — fica um travessão.
+  const taxaTx = taxaEmp == null || isNaN(Number(taxaEmp))
+    ? '—'
+    : Number(taxaEmp).toFixed(2).replace(/\.?0+$/, '').replace('.', ',') + '%';
+
+  // "Pago (1,5 parcelas)". O número sai do dinheiro dividido pelo valor da
+  // parcela e pode ser quebrado — pagamento parcial é a regra, não a exceção.
+  // Sem valor de parcela o rótulo fica sozinho, em vez de exibir uma divisão
+  // por zero.
+  const rotComParcelas = (rot: string, valor: number) => {
+    if (!valorParcelaEmp) return rot;
+    const n = Math.round((valor / valorParcelaEmp) * 10) / 10;
+    const txt = Number.isInteger(n) ? String(n) : n.toFixed(1).replace('.', ',');
+    return `${rot} (${txt} ${n === 1 ? t.pc1 : t.pcN})`;
+  };
 
   const rotuloEvento = (ev: EventoFicha) => ({
     CONCESSAO: t.concessao,
@@ -237,42 +333,88 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
           </TouchableOpacity>
         </View>
       ) : !ficha ? null : (
+        <>
+
+        {/* Recolhido, o painel é o MESMO card — mesma cor, mesmo raio, mesmas
+            margens —, só que de uma linha. Não vira uma faixa de ponta a
+            ponta: minimizar é encolher dentro dos próprios limites, não trocar
+            de forma.
+
+            Continua fora do ScrollView de propósito: é o único jeito de rolar
+            a lista de parcelas sem perder o saldo de vista. */}
+        {!resumoAberto && (
+          <TouchableOpacity
+            style={[S.resumo, S.resumoMin]}
+            onPress={() => { LayoutAnimation.configureNext(ANIM); setResumoAberto(true); }}
+            activeOpacity={0.85}
+          >
+            <Text style={S.linhaRotForte} numberOfLines={1}>
+              {rotComParcelas(t.saldoCurto, saldoFaltaEmp)}
+            </Text>
+            <View style={S.minDir}>
+              <Text style={[S.linhaVal, S.linhaValForte, { color: saldoFaltaEmp > 0 ? '#FCD34D' : '#6EE7B7' }]}>
+                {fmt(saldoFaltaEmp)}
+              </Text>
+              <Ionicons name="chevron-down" size={16} color="rgba(255,255,255,0.6)" />
+            </View>
+          </TouchableOpacity>
+        )}
+
         <ScrollView style={S.scroll} showsVerticalScrollIndicator={false}>
 
-          {/* ── Resumo ── */}
-          <View style={S.card}>
-            <View style={S.resumoLinha}>
-              <View style={S.resumoItem}>
-                <Text style={S.resumoRot}>{t.emprestado}</Text>
-                <Text style={S.resumoVal}>{fmt(ficha.totais.valor_total)}</Text>
-              </View>
-              <View style={S.resumoItem}>
-                <Text style={S.resumoRot}>{t.saldo}</Text>
-                <Text style={[S.resumoVal, { color: ficha.totais.saldo_atual > 0 ? '#DC2626' : '#059669' }]}>
-                  {fmt(ficha.totais.saldo_atual)}
-                </Text>
-              </View>
+          {/* ── Resumo ──
+              Linha a linha, rótulo à esquerda e valor à direita: a conta do
+              empréstimo se lê de cima para baixo como um extrato, em vez de
+              exigir que o vendedor junte células espalhadas em colunas.
+
+              A cadeia fecha em `Juros − Pago = Saldo`, por construção.
+              `Pago` é tudo o que o cliente entregou e `Saldo` é o que falta
+              trazer; o `Crédito` é um pedaço do pago, não um item à parte, e
+              por isso aparece recuado sob ele.
+
+              Recolhido, o painel vira uma barra de uma linha só com o saldo,
+              fixa abaixo do cabeçalho: sai de dentro do scroll justamente
+              para que rolar a lista de parcelas não esconda o número. */}
+          {/* O card inteiro é o botão de recolher — o chevron lá embaixo é só
+              o indicador de que ele responde ao toque. */}
+          {resumoAberto && (
+          <TouchableOpacity
+            style={S.resumo}
+            onPress={() => { LayoutAnimation.configureNext(ANIM); setResumoAberto(false); }}
+            activeOpacity={0.9}
+          >
+
+            <Linha rot={t.emprestado} val={fmt(principalEmp)} />
+            <Linha rot={`${t.jurosLbl} (${taxaTx})`} val={fmt(totalEmp)} />
+
+            <View style={S.resumoDiv} />
+
+            <Linha rot={rotComParcelas(t.pago, pagoEmp)} val={fmt(pagoEmp)} />
+            <Linha
+              rot={t.creditoCurto}
+              val={fmt(creditoEmp)}
+              cor={creditoEmp > 0 ? '#C7D2FE' : undefined}
+              derivada
+            />
+
+            <View style={S.resumoDiv} />
+
+            {/* Âmbar quando ainda deve, verde quando zerou: no fundo escuro o
+                vermelho some, e o que importa é a distinção. */}
+            <Linha
+              rot={rotComParcelas(t.saldoCurto, saldoFaltaEmp)}
+              val={fmt(saldoFaltaEmp)}
+              cor={saldoFaltaEmp > 0 ? '#FCD34D' : '#6EE7B7'}
+              forte
+            />
+            <Linha rot={t.parcela} val={fmt(valorParcelaEmp)} />
+
+            <View style={S.pega} pointerEvents="none">
+              <Ionicons name="chevron-up" size={16} color="rgba(255,255,255,0.65)" />
             </View>
-            <View style={S.divider} />
-            <View style={S.resumoLinha}>
-              <View style={S.resumoItem}>
-                <Text style={S.resumoRot}>{t.recebido}</Text>
-                <Text style={S.resumoValPeq}>{fmt(ficha.totais.dinheiro_recebido)}</Text>
-              </View>
-              <View style={S.resumoItem}>
-                <Text style={S.resumoRot}>{t.credito}</Text>
-                <Text style={[S.resumoValPeq, ficha.totais.credito_disponivel > 0 && { color: '#4F46E5' }]}>
-                  {fmt(ficha.totais.credito_disponivel)}
-                </Text>
-              </View>
-              <View style={S.resumoItem}>
-                <Text style={S.resumoRot}>{t.parcelas}</Text>
-                <Text style={S.resumoValPeq}>
-                  {ficha.totais.parcelas_pagas}/{ficha.totais.parcelas_total}
-                </Text>
-              </View>
-            </View>
-          </View>
+
+          </TouchableOpacity>
+          )}
 
           {/* ── Conferência ──
               Aparece sempre, verde ou vermelha. Um empréstimo que não fecha
@@ -292,47 +434,31 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
             </View>
           </View>
 
-          {/* ── Cadeia (renovações) ── */}
+          {/* ── Cadeia de empréstimos ──
+              Dropdown, e não lista aberta: um cliente com cinco renovações
+              empurrava as parcelas para fora da tela logo na abertura. Fechado
+              ele é uma linha que diz onde você está; aberto, a escolha. */}
           {ficha.cadeia?.length > 1 && (
-            <View style={S.card}>
-              <Text style={S.cardTitulo}>{t.cadeia}</Text>
-              <View style={S.divider} />
-              {ficha.cadeia.map(elo => {
-                const cor = elo.status === 'QUITADO' ? '#10B981'
-                  : elo.status === 'RENEGOCIADO' ? '#9333EA'
-                  : elo.status === 'CANCELADO' ? '#9CA3AF' : '#3B82F6';
-                return (
-                  <TouchableOpacity
-                    key={elo.id}
-                    style={[S.eloLinha, elo.atual && S.eloAtual]}
-                    // Continua tocável quando é o atual: um botão morto parece
-                    // quebrado. Só não navega — recarregar a própria ficha
-                    // empilharia a mesma tela e o voltar deixaria de funcionar.
-                    activeOpacity={elo.atual ? 1 : 0.7}
-                    onPress={() => {
-                      if (elo.atual) return;
-                      navigation.replace('FichaEmprestimo', { emprestimoId: elo.id });
-                    }}
-                  >
-                    <View style={[S.eloPonto, { backgroundColor: elo.atual ? '#fff' : cor }]} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[S.eloTx, elo.atual && S.eloTxAtual]}>
-                        {elo.tipo_emprestimo || '—'} · {fmtData(elo.data_emprestimo)}
-                      </Text>
-                      <Text style={[S.eloSub, elo.atual && S.eloSubAtual]}>
-                        {fmt(elo.valor_total)} · {elo.status}
-                        {(elo.valor_saldo || 0) > 0 ? ` · ${t.saldo.toLowerCase()} ${fmt(elo.valor_saldo)}` : ''}
-                      </Text>
-                    </View>
-                    {elo.atual ? (
-                      <View style={S.eloBadge}><Text style={S.eloBadgeTx}>{t.atual}</Text></View>
-                    ) : (
-                      <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+            <TouchableOpacity
+              style={S.seletor}
+              activeOpacity={0.7}
+              onPress={() => setSeletorAberto(true)}
+            >
+              <Ionicons name="swap-horizontal-outline" size={16} color="#4338CA" />
+              <View style={{ flex: 1 }}>
+                <Text style={S.seletorRot}>{t.cadeia}</Text>
+                <Text style={S.seletorTx} numberOfLines={1}>
+                  {(() => {
+                    const atual = ficha.cadeia.find(e => e.atual);
+                    const pos = ficha.cadeia.findIndex(e => e.atual) + 1;
+                    return atual
+                      ? `${pos}/${ficha.cadeia.length} · ${atual.tipo_emprestimo || '—'} · ${fmtData(atual.data_emprestimo)}`
+                      : `${ficha.cadeia.length}`;
+                  })()}
+                </Text>
+              </View>
+              <Ionicons name="chevron-down" size={16} color="#6B7280" />
+            </TouchableOpacity>
           )}
 
           {/* ── Abas ── */}
@@ -579,7 +705,60 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
 
           <View style={{ height: 40 }} />
         </ScrollView>
+        </>
       )}
+
+      {/* Escolha do empréstimo. Modal e não menu ancorado: no Android antigo
+          menu flutuante posicionado à mão erra em tela pequena. */}
+      <Modal
+        visible={seletorAberto}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSeletorAberto(false)}
+      >
+        <TouchableOpacity
+          style={S.selOverlay}
+          activeOpacity={1}
+          onPress={() => setSeletorAberto(false)}
+        >
+          <View style={S.selCaixa}>
+            <Text style={S.selTitulo}>{t.cadeia}</Text>
+            {ficha?.cadeia?.map(elo => {
+              const cor = elo.status === 'QUITADO' ? '#10B981'
+                : elo.status === 'RENEGOCIADO' ? '#9333EA'
+                : elo.status === 'CANCELADO' ? '#9CA3AF' : '#3B82F6';
+              return (
+                <TouchableOpacity
+                  key={elo.id}
+                  style={[S.selLinha, elo.atual && S.selLinhaAtual]}
+                  activeOpacity={elo.atual ? 1 : 0.7}
+                  onPress={() => {
+                    setSeletorAberto(false);
+                    // Não recarrega o mesmo: push da própria ficha empilharia
+                    // a mesma tela e quebraria o voltar.
+                    if (elo.atual) return;
+                    navigation.replace('FichaEmprestimo', { emprestimoId: elo.id });
+                  }}
+                >
+                  <View style={[S.eloPonto, { backgroundColor: cor }]} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[S.eloTx, elo.atual && { color: '#4338CA' }]}>
+                      {elo.tipo_emprestimo || '—'} · {fmtData(elo.data_emprestimo)}
+                    </Text>
+                    <Text style={S.eloSub}>
+                      {fmt(elo.valor_total)} · {elo.status}
+                      {(elo.valor_saldo || 0) > 0 ? ` · ${t.saldo.toLowerCase()} ${fmt(elo.valor_saldo)}` : ''}
+                    </Text>
+                  </View>
+                  {elo.atual
+                    ? <Ionicons name="checkmark-circle" size={18} color="#4338CA" />
+                    : <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -617,11 +796,49 @@ const S = StyleSheet.create({
   cardTitulo: { fontSize: 13, fontWeight: '700', color: '#374151' },
   divider: { height: 1, backgroundColor: '#F3F4F6', marginVertical: 10 },
 
+  resumo: {
+    // Azul da familia do cabecalho (#3B82F6), bem mais fundo. O #2563EB que
+    // tentei antes estourava: saturado demais para uma area grande e chapada,
+    // ainda por cima encostada num azul claro. Superficie grande pede tom
+    // baixo; o brilho fica para o saldo em ambar.
+    backgroundColor: '#1E40AF', borderRadius: 16, paddingVertical: 8, paddingHorizontal: 16,
+    marginBottom: 12,
+    shadowColor: '#172554', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2, shadowRadius: 6, elevation: 3,
+  },
+  resumoDiv: { height: 1, backgroundColor: 'rgba(255,255,255,0.18)', marginVertical: 6 },
+
+  // Minimizado: o mesmo card, uma linha. Herda `resumo` e só troca o arranjo
+  // interno e as margens que o ScrollView daria.
+  resumoMin: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    gap: 10, marginHorizontal: 14, marginTop: 14, marginBottom: 4,
+    paddingVertical: 12,
+  },
+  minDir: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+
+  pega: { alignItems: 'center', paddingTop: 4, paddingBottom: 2, marginTop: 2 },
+
+  linha: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 7, gap: 12,
+  },
+  linhaEsq: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
+  linhaRot: { fontSize: 13, color: 'rgba(255,255,255,0.78)', flexShrink: 1 },
+
+  // Derivada: recuo, cotovelo e peso menor. O crédito é um pedaço do pago
+  // logo acima, não um irmão dele na lista.
+  linhaDeriv: { paddingLeft: 14, paddingVertical: 4, marginTop: -2 },
+  linhaRotDeriv: { fontSize: 12, color: 'rgba(255,255,255,0.6)' },
+  linhaValDeriv: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.85)' },
+  linhaRotForte: { fontSize: 14, color: '#fff', fontWeight: '700' },
+  linhaVal: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  linhaValForte: { fontSize: 20, fontWeight: '800' },
   resumoLinha: { flexDirection: 'row', justifyContent: 'space-between' },
   resumoItem: { flex: 1 },
-  resumoRot: { fontSize: 11, color: '#6B7280' },
-  resumoVal: { fontSize: 17, fontWeight: '700', color: '#111827', marginTop: 2 },
-  resumoValPeq: { fontSize: 14, fontWeight: '600', color: '#111827', marginTop: 2 },
+  resumoRot: { fontSize: 10, color: 'rgba(255,255,255,0.65)', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.3 },
+  resumoVal: { fontSize: 19, fontWeight: '800', color: '#fff', marginTop: 3 },
+  resumoValPeq: { fontSize: 14, fontWeight: '700', color: '#fff', marginTop: 3 },
 
   selo: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
@@ -632,25 +849,27 @@ const S = StyleSheet.create({
   seloTx: { fontSize: 13, fontWeight: '700' },
   seloDetalhe: { fontSize: 11, color: '#991B1B', marginTop: 2 },
 
-  eloLinha: {
+  seletor: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingVertical: 10, paddingHorizontal: 11, marginTop: 8,
-    borderRadius: 10, backgroundColor: '#F9FAFB',
-    borderWidth: 1, borderColor: '#F3F4F6',
+    backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11,
+    marginBottom: 12, borderWidth: 1, borderColor: '#E5E7EB',
   },
-  // O selecionado escurece em vez de desbotar: desbotado lê como desabilitado,
-  // e o empréstimo que se está vendo é o mais importante da lista.
-  eloAtual: { backgroundColor: '#4338CA', borderColor: '#4338CA' },
+  seletorRot: { fontSize: 10, color: '#9CA3AF', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.3 },
+  seletorTx: { fontSize: 13, fontWeight: '700', color: '#111827', marginTop: 2 },
+
+  selOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 24 },
+  selCaixa: { backgroundColor: '#fff', borderRadius: 16, padding: 16 },
+  selTitulo: { fontSize: 12, fontWeight: '800', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 },
+  selLinha: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingVertical: 11, paddingHorizontal: 10, borderRadius: 10, marginTop: 6,
+    backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#F3F4F6',
+  },
+  selLinhaAtual: { backgroundColor: '#EEF2FF', borderColor: '#C7D2FE' },
+
   eloPonto: { width: 8, height: 8, borderRadius: 4 },
   eloTx: { fontSize: 13, fontWeight: '700', color: '#111827' },
-  eloTxAtual: { color: '#fff' },
   eloSub: { fontSize: 11, color: '#6B7280', marginTop: 2 },
-  eloSubAtual: { color: 'rgba(255,255,255,0.85)' },
-  eloBadge: {
-    backgroundColor: 'rgba(255,255,255,0.22)',
-    paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
-  },
-  eloBadgeTx: { fontSize: 10, fontWeight: '800', color: '#fff', letterSpacing: 0.3 },
 
   filtro: { flexDirection: 'row', gap: 8, marginBottom: 10 },
   filtroBt: {

@@ -50,6 +50,10 @@ interface FiltrosDrawerProps {
   // carregado atrasado de dias anteriores.
   filtroVencimento: 'todos' | 'dia' | 'atrasados';
   setFiltroVencimento: (v: 'todos' | 'dia' | 'atrasados') => void;
+  /** 'Todos' NÃO é a soma de dia + atrasados: cada escopo passa pelo mesmo
+   *  funil da lista (busca, frequência, itens pagos), e a soma das partes
+   *  não é o total do todo. Vem contado da tela. */
+  cntVencTodos: number;
   cntVencDia: number;
   cntVencAtrasados: number;
   // Todos filters
@@ -111,6 +115,7 @@ export default function FiltrosDrawer({
   cntPagas,
   filtroVencimento,
   setFiltroVencimento,
+  cntVencTodos,
   cntVencDia,
   cntVencAtrasados,
   filtroTipo,
@@ -197,7 +202,7 @@ export default function FiltrosDrawer({
                 <Ionicons name="calendar-outline" size={16} color="#6B7280" /> {lang === 'es' ? 'Por vencimientos' : 'Por vencimentos'}
               </Text>
               {[
-                { k: 'todos' as const, l: lang === 'es' ? 'Todos' : 'Todos', cnt: cntVencDia + cntVencAtrasados, icon: 'layers-outline' as const },
+                { k: 'todos' as const, l: lang === 'es' ? 'Todos' : 'Todos', cnt: cntVencTodos, icon: 'layers-outline' as const },
                 { k: 'dia' as const, l: lang === 'es' ? 'Del día' : 'Do dia', cnt: cntVencDia, icon: 'today-outline' as const },
                 { k: 'atrasados' as const, l: lang === 'es' ? 'Atrasados' : 'Atrasados', cnt: cntVencAtrasados, icon: 'time-outline' as const },
               ].map(f => (

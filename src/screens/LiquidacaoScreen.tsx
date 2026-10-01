@@ -20,6 +20,7 @@ import { ModalNotasLista } from '../components/NotasComponent';
 import { useAuth } from '../contexts/AuthContext';
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
+import { buscarConflitos, ConflitoAbertura, diaCurto, encerrarConflitos } from '../services/solicitacoesAbertura';
 import { LiquidacaoDiaria } from '../types';
 
 type Language = 'pt-BR' | 'es';
@@ -1093,6 +1094,33 @@ export default function LiquidacaoScreen({ navigation }: any) {
     }
   };
 
+
+// Pedido de abertura ainda sem resposta para OUTRO dia.
+//
+// É aqui que ele vira contradição: foi feito porque não havia dia aberto, e
+// agora se abre outro. Sem esta pergunta ele fica PENDENTE para sempre — a
+// limpeza de solicitações mora no FECHAMENTO, e pedido sem liquidação não tem
+// a que se prender. Ver sql/2026-09-21_solicitacao_abertura_conflito.sql.
+const confirmarConflitoAbertura = (
+  conflitos: ConflitoAbertura[],
+  dataAbrindo: string,
+): Promise<boolean> =>
+  new Promise(resolve => {
+    const dias = conflitos.map(c => diaCurto(c.data_solicitada)).join(', ');
+    Alert.alert(
+      'Solicitação pendente',
+      `Você pediu para abrir ${dias} e ainda não houve resposta.
+
+` +
+      `Abrir ${dataAbrindo} agora cancela esse pedido.`,
+      [
+        { text: 'Esperar a resposta', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Abrir e cancelar o pedido', style: 'destructive', onPress: () => resolve(true) },
+      ],
+      { cancelable: false },
+    );
+  });
+
   const handleIniciarDia = async () => {
     if (!vendedor) {
       showAlert('Erro', 'Dados do vendedor não carregados. Feche e reabra o app.');
@@ -1100,6 +1128,17 @@ export default function LiquidacaoScreen({ navigation }: any) {
     }
     if (salvando) return;
     const valorCaixaInicial = contaRota?.saldo_atual || 0;
+
+    const conflitos = await buscarConflitos(vendedor.rota_id, dataRetroativa || null);
+    if (conflitos.length > 0) {
+      const seguir = await confirmarConflitoAbertura(
+        conflitos,
+        dataRetroativa ? diaCurto(dataRetroativa) : 'o dia de hoje',
+      );
+      if (!seguir) return;
+      await encerrarConflitos(conflitos, vendedor.user_id || null);
+    }
+
     setSalvando(true);
     try {
       const { data, error } = await supabase.rpc('fn_abrir_liquidacao_diaria', {

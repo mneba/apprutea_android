@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 import { Language } from '../contexts/LiquidacaoContext';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -20,6 +21,12 @@ export interface EmprestimoTodos {
   status: string; frequencia_pagamento: string; tipo_emprestimo: string;
   total_parcelas_vencidas: number; valor_total_vencido: number;
   data_emprestimo?: string;
+  /**
+   * Só em SEMANAL, e só depois que a leitura sob demanda chega — o payload da
+   * liquidação não traz este campo. 0 = domingo. Pedido do Julio em
+   * 23/09/2026: ver o dia programado sem abrir o empréstimo.
+   */
+  dia_semana_cobranca?: number | null;
 }
 
 export interface ClienteTodos {
@@ -33,9 +40,31 @@ export interface ClienteTodos {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+// Nome cheio, não abreviação: aqui há espaço e o rótulo é para ser lido de
+// relance. As iniciais ficam para o breadcrumb do filtro, onde o espaço aperta.
+const DIA_SEMANA_NOME: Record<Language, string[]> = {
+  'pt-BR': ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira',
+    'Quinta-feira', 'Sexta-feira', 'Sábado'],
+  'es': ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'],
+};
+
 const FREQ: Record<Language, Record<string, string>> = {
   'pt-BR': { DIARIO: 'Diário', SEMANAL: 'Semanal', QUINZENAL: 'Quinzenal', MENSAL: 'Mensal', FLEXIVEL: 'Flexível' },
   'es': { DIARIO: 'Diario', SEMANAL: 'Semanal', QUINZENAL: 'Quincenal', MENSAL: 'Mensual', FLEXIVEL: 'Flexible' },
+};
+
+/**
+ * A linha "Terça-feira" sob a badge de frequência.
+ *
+ * Vai ABAIXO e não ao lado porque a linha das badges já carrega parcela,
+ * frequência e origem do empréstimo — um quarto elemento ali quebraria em
+ * tela estreita.
+ */
+const linhaDiaSemana = (emp: EmprestimoTodos, lang: Language) => {
+  if (emp.frequencia_pagamento !== 'SEMANAL') return null;
+  const d = emp.dia_semana_cobranca;
+  if (d == null || d < 0 || d > 6) return null;
+  return <Text style={S.diaSemLbl}>{DIA_SEMANA_NOME[lang][d]}</Text>;
 };
 
 /**
@@ -129,6 +158,10 @@ interface ClienteCardTodosProps {
   /** Chave desta linha na lista. Vai de volta no onToggleExpand para o
    *  handler poder ser estável (useCallback sem dependências) — é o que
    *  permite o React.memo funcionar. */
+  /** Lista compacta: o card colapsado fica só com a linha do nome e
+   *  endereço; o resto abre no toque, já com os botões. Preferência do
+   *  usuário, persistida — ver ClientesScreen. */
+  compacto?: boolean;
   chaveExpand: string;
   onToggleExpand: (chave: string) => void;
   onLongPressStart: () => void;
@@ -178,6 +211,7 @@ function ClienteCardTodos({
   lang,
   notasCount,
   t,
+  compacto = false,
   chaveExpand,
   onToggleExpand,
   onLongPressStart,
@@ -220,8 +254,20 @@ function ClienteCardTodos({
       onPress={() => { if (!modoReordenar) onToggleExpand(chaveExpand); }}
       onPressIn={onLongPressStart}
       onPressOut={onLongPressEnd}
-      style={[S.card, { borderLeftColor: cor }, todosMode && { backgroundColor: '#FFFBEB' }]}
+      style={[S.card, { borderLeftColor: cor }, compacto && S.cardCompacto, todosMode && { backgroundColor: '#FFFBEB' }]}
     >
+      {/* Gota: brota da linha fina da esquerda e carrega a inicial da
+          frequência — D, S, Q, M ou F. */}
+      {compacto && !ex && (
+        <View style={S.gotaWrap} pointerEvents="none">
+          <View style={S.gotaCaixa}>
+            <Svg width={19} height={44} viewBox="0 0 19 44" style={S.gotaSvg}>
+              <Path d="M 0 0 C 0 9, 19 11, 19 22 C 19 33, 0 35, 0 44 Z" fill={cor} />
+            </Svg>
+            <Text style={S.gotaTx}>{((FREQ[lang][emp?.frequencia_pagamento || '']) || '?').charAt(0).toUpperCase()}</Text>
+          </View>
+        </View>
+      )}
       {/* === LINHA 1: Avatar + Nome + Badges === */}
       <View style={S.cardRow}>
         <TouchableOpacity
@@ -229,10 +275,13 @@ function ClienteCardTodos({
           activeOpacity={0.7}
           onPress={() => onAbrirDetalhes({ id: c.id, nome: c.nome, telefone: c.telefone_celular, codigo_cliente: c.codigo_cliente })}
         >
+          {/* Sem foto: as iniciais usam a MESMA cor da borda. Antes era
+              vermelho/cinza próprio, e o card dizia duas coisas sobre o
+              mesmo cliente — borda âmbar e avatar vermelho. */}
           {c.foto_url ? (
             <Image source={{ uri: c.foto_url }} style={[S.av, { backgroundColor: '#E5E7EB' }]} />
           ) : (
-            <View style={[S.av, { backgroundColor: a ? '#EF4444' : '#64748B' }]}>
+            <View style={[S.av, { backgroundColor: cor }]}>
               <Text style={S.avTx}>{getIni(c.nome)}</Text>
             </View>
           )}
@@ -255,8 +304,10 @@ function ClienteCardTodos({
         </View>
       </View>
 
-      {/* === LINHA 2: Info empréstimo === */}
-      {emp && (
+      {/* === LINHA 2: Info empréstimo ===
+          No modo compacto ela só aparece expandida — é o corte que deixa
+          o card na altura mínima do nome + telefone. */}
+      {emp && (!compacto || ex) && (
         <View style={S.pRow}>
           {ENCERRADO.has(emp.status) ? (
             // Empréstimo encerrado (quitado, renegociado ou cancelado) — resumo
@@ -273,6 +324,7 @@ function ClienteCardTodos({
                   })()}
                   <View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[lang][emp.frequencia_pagamento] || emp.frequencia_pagamento}</Text></View>
                 </View>
+                {linhaDiaSemana(emp, lang)}
                 {origemLabel(emp.tipo_emprestimo, lang) ? (
                   <Text style={S.origemLbl}>{origemLabel(emp.tipo_emprestimo, lang)}</Text>
                 ) : null}
@@ -303,6 +355,7 @@ function ClienteCardTodos({
                     </View>
                   ) : null}
                 </View>
+                {linhaDiaSemana(emp, lang)}
                 {emp.data_emprestimo ? <Text style={S.dataEmpLbl}>{lang === 'es' ? 'Préstamo:' : 'Empréstimo:'} {fmtData(emp.data_emprestimo)}</Text> : null}
               </View>
               <View style={S.sCol}>
@@ -575,6 +628,31 @@ const S = StyleSheet.create({
   },
   bSuspTx: { fontSize: 10, fontWeight: '700', color: '#B91C1C' },
   card: { backgroundColor: '#fff', borderRadius: 12, padding: 12, marginBottom: 8, borderLeftWidth: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 2 },
+  // Compacto: menos respiro dentro e entre os cards. O ganho não está no
+  // card individual, e sim em quantos cabem na tela sem rolar.
+  // Compacto: menos respiro dentro e entre os cards. O paddingLeft maior
+  // é o espaço da gota — a borda fina da esquerda fica como sempre foi.
+  cardCompacto: { paddingVertical: 8, marginBottom: 5, paddingLeft: 22 },
+  // Gota de frequência — só no modo compacto.
+  //
+  // A coluna da esquerda continua a mesma linha fina de sempre; o que brota
+  // dela é uma folha desenhada em SVG. Precisa ser SVG: `borderRadius` só faz
+  // canto arredondado, e o encontro da linha com a bolha vira um degrau.
+  //
+  // O detalhe que faz a forma escorrer em vez de parecer colada está nos
+  // pontos de controle das pontas: `C 0 9, ...` mantém o controle em x=0, ou
+  // seja, a curva SAI TANGENTE à linha — desce reta antes de abrir. Com o
+  // controle fora do eixo ela partia em ângulo e virava meia-bola grudada.
+  //
+  // `left: 0` num filho absoluto é a borda INTERNA em RN — ou seja, o ponto
+  // onde a linha de 5px termina. O lado reto da folha nasce colado nela.
+  gotaWrap: { position: 'absolute', left: 0, top: 0, bottom: 0, justifyContent: 'center' },
+  gotaCaixa: { width: 19, height: 44, alignItems: 'center', justifyContent: 'center' },
+  gotaSvg: { position: 'absolute', left: 0, top: 0 },
+  // Desloca a letra para a barriga: o centro da caixa cai à direita da massa
+  // da curva.
+  gotaTx: { color: '#fff', fontSize: 11, fontWeight: '800', marginRight: 4 },
+
   cardRow: { flexDirection: 'row' },
   av: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
   avTx: { color: '#fff', fontSize: 13, fontWeight: '700' },
@@ -591,6 +669,9 @@ const S = StyleSheet.create({
   fBdg: { backgroundColor: '#EDE9FE', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 },
   fBdgT: { fontSize: 9, fontWeight: '600', color: '#7C3AED' },
   dataEmpLbl: { fontSize: 10, color: '#9CA3AF', marginTop: 2 },
+  // Mais forte que a data do empréstimo: é informação de COBRANÇA, do mesmo
+  // nível do que a badge de frequência diz.
+  diaSemLbl: { fontSize: 11, fontWeight: '700' as const, color: '#4338CA', marginTop: 2 },
   pValBig: { fontSize: 18, fontWeight: '800', color: '#1F2937', textAlign: 'right' },
   sCol: { alignItems: 'flex-end' },
   compEmp: { marginTop: 4, alignItems: 'flex-end', gap: 1 },
