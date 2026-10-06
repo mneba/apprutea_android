@@ -1,4 +1,5 @@
 import React from 'react';
+import { CORES_NIVEL } from '../utils/diasCobranca';
 import {
   Modal,
   StyleSheet,
@@ -30,11 +31,15 @@ export default function LegendaCoresModal({ visible, onClose, t }: LegendaCoresM
           <Text style={S.title}>{t.legendaTitulo}</Text>
           <Text style={S.subtitle}>{t.legendaSubtitulo}</Text>
 
+          {/* As cores vêm de CORES_NIVEL, a mesma lista que pinta os cards. Quando
+              estavam escritas aqui em hexadecimal, a legenda continuou mostrando
+              laranja depois de o cliente pedir roxo — explicando uma cor que a
+              tela já não usava. */}
           {[
-            { color: '#10B981', label: t.legPagoLabel, desc: t.legPagoDesc },
-            { color: '#F59E0B', label: t.legLeveLabel, desc: t.legLeveDesc },
-            { color: '#9333EA', label: t.legModeradoLabel, desc: t.legModeradoDesc },
-            { color: '#EF4444', label: t.legCriticoLabel, desc: t.legCriticoDesc },
+            { color: CORES_NIVEL[0], label: t.legPagoLabel, desc: t.legPagoDesc },
+            { color: CORES_NIVEL[1], label: t.legLeveLabel, desc: t.legLeveDesc },
+            { color: CORES_NIVEL[2], label: t.legModeradoLabel, desc: t.legModeradoDesc },
+            { color: CORES_NIVEL[3], label: t.legCriticoLabel, desc: t.legCriticoDesc },
           ].map((item) => (
             <View key={item.color} style={S.row}>
               <View style={[S.swatch, { backgroundColor: item.color }]} />

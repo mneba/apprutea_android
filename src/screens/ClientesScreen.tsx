@@ -142,6 +142,7 @@ interface EmprestimoTodos {
   valor_parcela: number; numero_parcelas: number; numero_parcela_atual: number;
   status: string; frequencia_pagamento: string; tipo_emprestimo: string;
   total_parcelas_vencidas: number; valor_total_vencido: number;
+  data_vencimento_mais_antiga?: string | null;
   data_emprestimo?: string;
 }
 
@@ -257,13 +258,13 @@ const textos = {
     creditoUsado: 'Crédito usado',
     toqueDetalhes: 'Toque para ver detalhes',
     legendaTitulo: 'Significado das Cores',
-    legendaSubtitulo: 'Borda esquerda de cada card',
+    legendaSubtitulo: 'Borda esquerda de cada card. A cor pega o pior entre cobranças perdidas e tempo sem pagar.',
     legendaEntendido: 'Entendido',
-    legPagoLabel: 'Pago / Em dia', legPagoDesc: 'Sem parcelas vencidas',
+    legPagoLabel: 'Pago / Em dia', legPagoDesc: 'Sem cobranças vencidas',
     legPendenteLabel: 'Pendente', legPendenteDesc: 'Ainda não é dia de cobrança',
-    legLeveLabel: 'Atraso leve (1–3)', legLeveDesc: '1 a 3 parcelas vencidas',
-    legModeradoLabel: 'Atraso moderado (4–7)', legModeradoDesc: '4 a 7 parcelas vencidas',
-    legCriticoLabel: 'Atraso crítico (8+)', legCriticoDesc: '8 ou mais parcelas vencidas',
+    legLeveLabel: 'Atraso leve', legLeveDesc: 'Até 3 cobranças perdidas e até 15 dias sem pagar',
+    legModeradoLabel: 'Atraso moderado', legModeradoDesc: '4 a 7 cobranças perdidas, ou mais de 15 dias sem pagar',
+    legCriticoLabel: 'Atraso crítico', legCriticoDesc: '8 ou mais cobranças perdidas, ou mais de 30 dias sem pagar',
   },  'es': {
     titulo: 'Mis Clientes', hoje: 'Hoy', clientes: 'clientes',
     liquidacao: 'Liquidación', todosList: 'Todos', buscar: 'Buscar...',
@@ -350,13 +351,13 @@ const textos = {
     pagoAdiantado: 'Adelantado',
     toqueDetalhes: 'Toque para ver detalles',
     legendaTitulo: 'Significado de los Colores',
-    legendaSubtitulo: 'Borde izquierdo de cada tarjeta',
+    legendaSubtitulo: 'Borde izquierdo de cada tarjeta. El color toma lo peor entre cobros perdidos y tiempo sin pagar.',
     legendaEntendido: 'Entendido',
-    legPagoLabel: 'Pago / Al día', legPagoDesc: 'Sin parcelas vencidas',
+    legPagoLabel: 'Pago / Al día', legPagoDesc: 'Sin cobros vencidos',
     legPendenteLabel: 'Pendiente', legPendenteDesc: 'Aún no es día de cobro',
-    legLeveLabel: 'Atraso leve (1–3)', legLeveDesc: '1 a 3 cuotas vencidas',
-    legModeradoLabel: 'Atraso moderado (4–7)', legModeradoDesc: '4 a 7 cuotas vencidas',
-    legCriticoLabel: 'Atraso crítico (8+)', legCriticoDesc: '8 o más cuotas vencidas',
+    legLeveLabel: 'Atraso leve', legLeveDesc: 'Hasta 3 cobros perdidos y hasta 15 días sin pagar',
+    legModeradoLabel: 'Atraso moderado', legModeradoDesc: '4 a 7 cobros perdidos, o más de 15 días sin pagar',
+    legCriticoLabel: 'Atraso crítico', legCriticoDesc: '8 o más cobros perdidos, o más de 30 días sin pagar',
   },
 };
 
@@ -400,27 +401,11 @@ const fmtData = (d: string | null | undefined) => {
   return dt.toLocaleDateString('pt-BR');
 };
 const fmtTel = (t: string) => t.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
-// Cor da borda por nível de atraso:
-// Verde: 0 parcelas de atraso (em dia)
-// Amarelo: 1-3 parcelas de atraso (leve)
-// Laranja: 4-7 parcelas de atraso (moderado)
-// Vermelho: 8+ parcelas de atraso (crítico)
-const corAtraso = (vencidas: number): string => {
-  if (vencidas <= 0) return '#10B981'; // verde — em dia
-  if (vencidas <= 3) return '#F59E0B'; // amarelo — atraso leve
-  if (vencidas <= 7) return '#9333EA'; // roxo — atraso médio (era laranja #F97316, pedido #39)
-  return '#EF4444'; // vermelho — atraso crítico
-};
-
-const borderOf = (e: EmprestimoData, paga: boolean) => {
-  // Regra simplificada (decisão do cliente): sem parcela vencida = EM DIA
-  // (verde); com parcela vencida = ATRASO. Estado "pendente" (cinza) eliminado.
-  if (paga) return '#10B981';
-  const vencidas = e.total_parcelas_vencidas || 0;
-  if (vencidas > 0) return corAtraso(vencidas);
-  if (e.is_parcela_atrasada) return corAtraso(1);
-  return '#10B981';
-};
+// `corAtraso` e `borderOf` viviam aqui também, sem nenhuma chamada: quem pinta
+// a borda é o próprio card. Foram removidos junto com a troca da escala para
+// dias de cobrança — cópia morta de uma regra é cópia que diverge sem ninguém
+// perceber, e esta já divergia: colorava por parcelas vencidas, não por dias.
+// A escala agora mora em src/utils/diasCobranca.ts.
 const bgOf = (_e: EmprestimoData, paga: boolean) => paga ? 'rgba(16,185,129,0.05)' : '#fff';
 const isPaga = (pid: string, sd: string, set: Set<string>) => set.has(pid) || sd === 'PAGO';
 const showAlert = (title: string, msg: string) => {
@@ -2851,6 +2836,8 @@ export default function ClientesScreen({ navigation, route }: any) {
         }}
         onLongPressEnd={() => { if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; } }}
         onChangeEmpIdx={(newIdx) => setEmpIdxTodos(p => ({ ...p, [c.id]: newIdx }))}
+        dataReferencia={dataLiq}
+        configCobranca={configCobranca}
         onAbrirParcelas={abrirParcelas}
         onPagar={pagarClienteTodos}
         onAbrirNotas={abrirNotasCliente}

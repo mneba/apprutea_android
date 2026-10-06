@@ -14,7 +14,7 @@ import {
 import Svg, { Path } from 'react-native-svg';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Language } from '../contexts/LiquidacaoContext';
-import { diasAtraso as calcAtraso, type ConfigCobranca } from '../utils/diasCobranca';
+import { diasAtraso as calcAtraso, corAtraso, COR_EM_DIA, type ConfigCobranca } from '../utils/diasCobranca';
 
 // ─── Types (re-exportados para uso externo) ────────────────────────────────
 
@@ -92,32 +92,30 @@ const fmtData = (d: string | null | undefined) => {
   return dt.toLocaleDateString('pt-BR');
 };
 
-const corAtraso = (vencidas: number): string => {
-  // Níveis de atraso (pedido #39 do cliente): substituído o laranja (#F97316)
-  // por ROXO (#9333EA) no nível médio, porque laranja e amarelo eram quase
-  // indistinguíveis. Escala: verde (em dia) → amarelo (leve) → roxo (médio)
-  // → vermelho (crítico).
-  if (vencidas <= 0) return '#10B981';  // verde — em dia
-  if (vencidas <= 3) return '#F59E0B';  // amarelo — atraso leve
-  if (vencidas <= 7) return '#9333EA';  // roxo — atraso médio
-  return '#EF4444';                     // vermelho — atraso crítico
-};
-
-const borderOf = (e: EmprestimoData, paga: boolean) => {
+const borderOf = (
+  e: EmprestimoData,
+  paga: boolean,
+  dataReferencia?: string | null,
+  configCobranca?: ConfigCobranca,
+) => {
   // Regra simplificada (decisão do cliente): só existem dois mundos —
-  //   sem parcela vencida não paga  → EM DIA (verde)
-  //   com parcela vencida não paga  → ATRASO (amarelo/roxo/vermelho)
+  //   sem atraso  → EM DIA (verde)
+  //   com atraso  → amarelo/roxo/vermelho conforme os DIAS
   // O antigo estado "pendente" (cinza) foi eliminado: um cliente cuja próxima
   // parcela ainda não venceu está EM DIA, não "pendente".
-  if (paga) return '#10B981';
-  const vencidas = e.total_parcelas_vencidas || 0;
-  if (vencidas > 0) return corAtraso(vencidas);
-  // is_parcela_atrasada cobre o caso em que a parcela venceu (data < hoje, não
-  // paga) mas o status ainda não virou 'VENCIDO' — também é atraso. Como só há
-  // 1 parcela nessa condição, cor de atraso leve.
-  if (e.is_parcela_atrasada) return corAtraso(1);
-  // Sem nenhuma parcela vencida → em dia (verde), inclusive cliente novo.
-  return '#10B981';
+  //
+  // A cor sai dos mesmos dias que o card escreve ao lado dela. Antes vinha de
+  // `total_parcelas_vencidas`, e os dois discordavam: 3 parcelas eram 3 dias no
+  // diário e 3 meses no mensal, pintadas do mesmo amarelo.
+  //
+  // Com dias, dois reméndios saíram daqui. O `is_parcela_atrasada` existia
+  // porque o status da parcela demora a virar 'VENCIDO' — mas a data de
+  // vencimento nunca mentiu, e é dela que `calcAtraso` parte. E o piso
+  // artificial de "1 parcela vencida = atraso leve" sumiu: um dia de atraso
+  // vale 1 naturalmente.
+  if (paga) return COR_EM_DIA;
+  const ref = (e as any).dia_referencia || dataReferencia;
+  return corAtraso(calcAtraso(e.data_vencimento, ref, configCobranca), e.total_parcelas_vencidas || 0);
 };
 
 const bgOf = (_e: EmprestimoData, paga: boolean) => paga ? 'rgba(16,185,129,0.05)' : '#fff';
@@ -260,7 +258,7 @@ function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
   // ⭐ Se isClientePago é true, forçar pg = true para desabilitar pagamento
   const pg = isClientePago || isPagaFn(e.parcela_id, e.status_dia, pagasSet);
   const np = naoPagosSet?.has(e.parcela_id) || false;
-  const bc = borderOf(e, pg);
+  const bc = borderOf(e, pg, dataReferencia, configCobranca);
   const bg = bgOf(e, pg);
   const pi = e.pagamento_info;
   const valorAPagar = valorACobrar(e, pg);
@@ -379,7 +377,7 @@ function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
               const refAtraso = (e as any).dia_referencia || dataReferencia;
               const diasAtraso = calcAtraso(e.data_vencimento, refAtraso, configCobranca);
               const emDia = diasAtraso <= 0;
-              const cor = emDia ? '#10B981' : corAtraso(e.total_parcelas_vencidas || 1);
+              const cor = corAtraso(diasAtraso, e.total_parcelas_vencidas || 0);
               const tipo = tipoComDia(e, lang);
               const txtDias = diasAtraso === 1
                 ? (lang === 'es' ? '1 día' : '1 dia')
@@ -620,7 +618,7 @@ function CardMultiplo({
       configCobranca,
     );
     const emDia = diasAtraso <= 0;
-    const corDias = emDia ? '#10B981' : corAtraso(e.total_parcelas_vencidas || 1);
+    const corDias = corAtraso(diasAtraso, e.total_parcelas_vencidas || 0);
     const tipo = tipoComDia(e, lang);
     const txtDias = diasAtraso === 1
       ? (lang === 'es' ? '1 día' : '1 dia')
@@ -632,7 +630,7 @@ function CardMultiplo({
         style={[S.slide, {
           width: SLIDE,
           marginRight: i === n - 1 ? 0 : GAP,
-          borderLeftColor: np ? '#6B7280' : borderOf(e, pago),
+          borderLeftColor: np ? '#6B7280' : borderOf(e, pago, dataReferencia, configCobranca),
           backgroundColor: np ? '#F9FAFB' : (pago ? 'rgba(16,185,129,0.06)' : '#fff'),
         }]}
       >
@@ -765,7 +763,7 @@ function CardMultiplo({
   };
 
   return (
-    <View style={[S.card, { borderLeftColor: borderOf(pior.e, pagoDe(pior.e)) }]}>
+    <View style={[S.card, { borderLeftColor: borderOf(pior.e, pagoDe(pior.e), dataReferencia, configCobranca) }]}>
       {/* === Cabeçalho do cliente (fixo, fora do carrossel) === */}
       <View style={S.cardRow}>
         <TouchableOpacity

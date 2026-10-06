@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { Language } from '../contexts/LiquidacaoContext';
+import { diasAtraso as calcAtraso, corAtraso, COR_EM_DIA, type ConfigCobranca } from '../utils/diasCobranca';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,9 @@ export interface EmprestimoTodos {
   valor_parcela: number; numero_parcelas: number; numero_parcela_atual: number;
   status: string; frequencia_pagamento: string; tipo_emprestimo: string;
   total_parcelas_vencidas: number; valor_total_vencido: number;
+  /** Vencimento da parcela em aberto mais antiga. Base dos dias de atraso,
+   *  que decidem a cor. Vem de useClientesTodos. */
+  data_vencimento_mais_antiga?: string | null;
   data_emprestimo?: string;
   /**
    * Só em SEMANAL, e só depois que a leitura sob demanda chega — o payload da
@@ -121,20 +125,10 @@ const fmtData = (d: string | null | undefined) => {
   return dt.toLocaleDateString('pt-BR');
 };
 
-/**
- * Escala de atraso — a MESMA do ClienteCardLiquidacao.
- *
- * O nível médio era laranja (#F97316) aqui. No card da Liquidação ele virou
- * ROXO por pedido do cliente (item #39): laranja e amarelo ficavam quase
- * indistinguíveis na tela do celular. Este card não acompanhou, e as duas
- * listas mostravam cores diferentes para o mesmo cliente.
- */
-const corAtraso = (vencidas: number): string => {
-  if (vencidas <= 0) return '#10B981';  // verde — em dia
-  if (vencidas <= 3) return '#F59E0B';  // amarelo — atraso leve
-  if (vencidas <= 7) return '#9333EA';  // roxo — atraso médio
-  return '#EF4444';                     // vermelho — atraso crítico
-};
+// A escala de atraso vivia copiada aqui. Era a terceira cópia da mesma regra, e
+// cada cópia divergiu da outra em algum momento — esta ficou com o laranja
+// depois que o cliente pediu roxo (item #39), e as duas listas pintavam o mesmo
+// cliente de cores diferentes. Agora vem de src/utils/diasCobranca.ts.
 
 // ─── Props ──────────────────────────────────────────────────────────────────
 
@@ -181,6 +175,10 @@ interface ClienteCardTodosProps {
   onAlterarSolicitacaoRenovacao?: (cliente: ClienteTodos, solicId: string, empQuitadoId: string, valorSolic: number, statusSolic: string) => void;
   onCancelarSolicitacaoRenovacao?: (solicId: string) => void;
   todosMode?: boolean;
+  /** Dia operacional — a liquidação aberta, ou a data da rota. Base do atraso. */
+  dataReferencia?: string | null;
+  /** Domingo e feriados da rota, para o atraso contar dias de COBRANÇA. */
+  configCobranca?: ConfigCobranca;
 }
 
 // Botões em avaliação com o cliente (setembro/2026).
@@ -226,6 +224,8 @@ function ClienteCardTodos({
   onAlterarSolicitacaoRenovacao,
   onCancelarSolicitacaoRenovacao,
   todosMode = false,
+  dataReferencia,
+  configCobranca,
 }: ClienteCardTodosProps) {
   const nav = useNavigation<any>();
   // Cliente suspenso pelo administrador: não pode iniciar renovação nem
@@ -239,13 +239,22 @@ function ClienteCardTodos({
   // que o cliente pediu para eliminar — o mesmo cliente aparecia cinza numa
   // lista e verde na outra.
   //
-  // `|| 1` porque `tem_atraso` é do CLIENTE e `total_parcelas_vencidas` é do
-  // empréstimo exibido: com o atraso vindo de um segundo empréstimo, o valor
-  // chegava zerado e `corAtraso(0)` devolvia verde, contradizendo o próprio
-  // `tem_atraso`. Um vencido é atraso leve — mesmo piso do outro card.
-  const a = c.tem_atraso;
+  // O `|| 1` que existia aqui era contorno de um problema que a mudança para
+  // dias dissolve: `tem_atraso` é do CLIENTE e `total_parcelas_vencidas` era do
+  // empréstimo exibido, então o atraso vindo de um segundo empréstimo chegava
+  // zerado e contradizia o próprio `tem_atraso`. Agora a cor sai do vencimento
+  // do empréstimo que está na tela, e os dois nunca mais discordam — cada
+  // slide do carrossel mostra o atraso dele.
+  // O badge "⚠ N" continua sendo a CONTAGEM de parcelas vencidas: quantas
+  // ficaram para trás é outra informação, e útil. O que mudou foi só a cor,
+  // que agora mede tempo em vez de quantidade.
   const vencidas = emp?.total_parcelas_vencidas || 0;
-  const cor = a ? corAtraso(vencidas || 1) : '#10B981';
+  const diasAtraso = calcAtraso(
+    emp?.data_vencimento_mais_antiga,
+    dataReferencia,
+    configCobranca,
+  );
+  const cor = (diasAtraso > 0 || vencidas > 0) ? corAtraso(diasAtraso, vencidas) : COR_EM_DIA;
 
   return (
     <TouchableOpacity

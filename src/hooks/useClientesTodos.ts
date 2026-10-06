@@ -8,6 +8,8 @@ export interface EmprestimoTodos {
   valor_parcela: number; numero_parcelas: number; numero_parcela_atual: number;
   status: string; frequencia_pagamento: string; tipo_emprestimo: string;
   total_parcelas_vencidas: number; valor_total_vencido: number;
+  /** Vencimento da parcela em aberto mais antiga — base dos dias de atraso. */
+  data_vencimento_mais_antiga?: string | null;
   data_emprestimo?: string;
 }
 
@@ -99,14 +101,30 @@ export default function useClientesTodos({ rotaId, dataOperacional, setOrdemRota
       // delas nem tinham chegado ao vencimento.
       //
       // `<` e não `<=`: parcela que vence no próprio dia ainda está no prazo.
-      const parcMap = new Map<string, { maxParcela: number; vencidas: number; totalVencido: number }>();
+      //
+      // `vencimentoMaisAntigo` é a parcela em aberto mais velha. É dela que sai o
+      // atraso em DIAS, que agora manda na cor do card — antes a cor vinha da
+      // CONTAGEM de vencidas, e por isso três parcelas pintavam igual sendo três
+      // dias no diário e três meses no mensal. O cálculo em si fica em
+      // src/utils/diasCobranca.ts, onde domingo e feriado são descontados; aqui
+      // só escolhemos a data.
+      const parcMap = new Map<string, {
+        maxParcela: number; vencidas: number; totalVencido: number;
+        vencimentoMaisAntigo: string | null;
+      }>();
       (allParcs || []).forEach((p: any) => {
         let info = parcMap.get(p.emprestimo_id);
-        if (!info) { info = { maxParcela: 0, vencidas: 0, totalVencido: 0 }; parcMap.set(p.emprestimo_id, info); }
+        if (!info) {
+          info = { maxParcela: 0, vencidas: 0, totalVencido: 0, vencimentoMaisAntigo: null };
+          parcMap.set(p.emprestimo_id, info);
+        }
         if (p.numero_parcela > info.maxParcela) info.maxParcela = p.numero_parcela;
         const emAberto = p.status !== 'PAGO' && p.status !== 'CANCELADO';
-        const venceu = !!p.data_vencimento
-          && String(p.data_vencimento).substring(0, 10) < dataOperacional;
+        const venc = p.data_vencimento ? String(p.data_vencimento).substring(0, 10) : null;
+        const venceu = !!venc && venc < dataOperacional;
+        if (emAberto && venc && (!info.vencimentoMaisAntigo || venc < info.vencimentoMaisAntigo)) {
+          info.vencimentoMaisAntigo = venc;
+        }
         if (emAberto && venceu) {
           info.vencidas++;
           info.totalVencido += (p.valor_parcela || 0);
@@ -135,7 +153,8 @@ export default function useClientesTodos({ rotaId, dataOperacional, setOrdemRota
           };
           cliMap.set(c.id, cli);
         }
-        const info = parcMap.get(e.id) || { maxParcela: 1, vencidas: 0, totalVencido: 0 };
+        const info = parcMap.get(e.id)
+          || { maxParcela: 1, vencidas: 0, totalVencido: 0, vencimentoMaisAntigo: null };
         if (info.vencidas > 0) cli.tem_atraso = true;
         cli.emprestimos.push({
           id: e.id,
@@ -150,6 +169,7 @@ export default function useClientesTodos({ rotaId, dataOperacional, setOrdemRota
           tipo_emprestimo: (e as any).tipo_emprestimo || 'NOVO',
           total_parcelas_vencidas: info.vencidas,
           valor_total_vencido: info.totalVencido,
+          data_vencimento_mais_antiga: info.vencimentoMaisAntigo,
           data_emprestimo: (e as any).data_emprestimo || null,
         });
       }

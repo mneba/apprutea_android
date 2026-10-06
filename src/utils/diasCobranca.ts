@@ -105,3 +105,85 @@ export const diasAtraso = (
   dataReferencia?: string | null,
   config: ConfigCobranca = { trabalhaDomingo: true },
 ): number => Math.max(0, diasCobrancaEntre(dataVencimento, dataReferencia, config));
+
+// =====================================================
+// A COR DO ATRASO
+// =====================================================
+//
+// A escala vivia copiada em quatro arquivos e era alimentada pelo NÚMERO DE
+// PARCELAS VENCIDAS, enquanto o texto ao lado dela mostrava DIAS. No mesmo
+// card, a cor e o número diziam coisas diferentes — e a cor significava coisas
+// incomparáveis conforme a frequência:
+//
+//   3 parcelas vencidas = 3 dias no diário · 3 semanas no semanal
+//                       = 45 dias no quinzenal · 3 meses no mensal
+//
+// Tudo isso aparecia como o mesmo amarelo de "atraso leve". Um cliente mensal
+// com 90 dias sem pagar ficava igual a um diário com três dias.
+//
+// Agora a cor sai dos MESMOS dias de cobrança que o card escreve ao lado. Os
+// limites são os de antes (1-3 / 4-7 / 8+), então a rota diária não mudou em
+// nada — ali parcela e dia sempre foram a mesma coisa. Mudou só o que estava
+// mentindo.
+//
+// O roxo no nível médio é pedido #39 do cliente: laranja e amarelo ficavam
+// quase indistinguíveis na tela do celular.
+
+export const COR_EM_DIA = '#10B981';  // verde
+export const COR_LEVE   = '#F59E0B';  // amarelo
+export const COR_MEDIO  = '#9333EA';  // roxo
+export const COR_GRAVE  = '#EF4444';  // vermelho
+
+// DOIS EIXOS, E A COR É O PIOR DOS DOIS
+//
+// Nenhuma das duas medidas serve sozinha, e a carteira prova: 60% dela é
+// diária, mas 25% é semanal e 8% é mensal ou quinzenal (medido em 05/10/2026).
+//
+//   Só por COBRANÇAS PERDIDAS, o mensal com 3 parcelas vencidas — noventa dias
+//   sem pagar — fica amarelo, igual ao diário de três dias.
+//
+//   Só por TEMPO, o mensal que atrasou 8 dias fica vermelho, tendo perdido
+//   uma única cobrança.
+//
+// As duas erram, em casos opostos. Então medimos os dois e ficamos com o pior:
+// a cor responde "quantas cobranças falharam OU há quanto tempo não entra
+// dinheiro, o que for mais grave".
+//
+// Na rota diária o resultado é idêntico ao de antes, porque ali um dia é uma
+// cobrança e os dois eixos andam juntos. Muda só o que estava mal classificado.
+//
+// Os limites de TEMPO (15 e 30 dias) são regra de negócio, não técnica —
+// calibrados para o mensal não gritar cedo demais. Trocar os dois números
+// recalibra o sistema inteiro, e é o único lugar onde eles existem.
+
+export const LIMITE_COBRANCAS_LEVE  = 3;
+export const LIMITE_COBRANCAS_MEDIO = 7;
+export const LIMITE_DIAS_LEVE       = 15;
+export const LIMITE_DIAS_MEDIO      = 30;
+
+/** 0 em dia · 1 leve · 2 moderado · 3 crítico. */
+export type NivelAtraso = 0 | 1 | 2 | 3;
+
+/** As cores na ordem dos níveis. A legenda lê daqui para não divergir. */
+export const CORES_NIVEL: readonly string[] = [COR_EM_DIA, COR_LEVE, COR_MEDIO, COR_GRAVE];
+
+export const nivelAtraso = (dias: number, cobrancasPerdidas: number): NivelAtraso => {
+  const d = Number.isFinite(dias) ? dias : 0;
+  const c = Number.isFinite(cobrancasPerdidas) ? cobrancasPerdidas : 0;
+
+  const porCobrancas: NivelAtraso =
+    c <= 0 ? 0 : c <= LIMITE_COBRANCAS_LEVE ? 1 : c <= LIMITE_COBRANCAS_MEDIO ? 2 : 3;
+  const porTempo: NivelAtraso =
+    d <= 0 ? 0 : d <= LIMITE_DIAS_LEVE ? 1 : d <= LIMITE_DIAS_MEDIO ? 2 : 3;
+
+  return Math.max(porCobrancas, porTempo) as NivelAtraso;
+};
+
+/**
+ * A cor do atraso.
+ *
+ * @param dias              dias de COBRANÇA de atraso (ver `diasAtraso`)
+ * @param cobrancasPerdidas parcelas vencidas em aberto
+ */
+export const corAtraso = (dias: number, cobrancasPerdidas = 0): string =>
+  CORES_NIVEL[nivelAtraso(dias, cobrancasPerdidas)];
