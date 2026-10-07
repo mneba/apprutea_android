@@ -352,6 +352,16 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
   const DEBOUNCE_REALTIME_MS = 1200;
   // Evento que chega até 4s de uma recarga nossa é tratado como eco dela.
   const JANELA_ECO_MS = 4000;
+  // Idade mínima dos dados para o catch-up da reconexão valer a pena.
+  //
+  // O canal cai sempre que o app vai para segundo plano, e reassina ao voltar.
+  // Como o catch-up rodava em TODA reassinatura, sair dez segundos para
+  // responder um WhatsApp custava uma recarga completa do dia — e, se a
+  // recarga anterior ainda estava em voo, o cobrador via o carregamento
+  // começar de novo do zero. Foi reclamação do campo em 07/10/2026.
+  //
+  // Trinta segundos é o mesmo limiar que as telas já usam no `useFocusEffect`.
+  const CATCHUP_MIN_MS = 30000;
 
   useEffect(() => {
     const rotaId = vendedor?.rota_id;
@@ -406,10 +416,29 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
       )
       .subscribe((status) => {
         console.log('📡 [Realtime] canal rota-' + rotaId + ':', status);
-        if (status === 'SUBSCRIBED') {
-          recarregarTudoRef.current();
+        if (status !== 'SUBSCRIBED') return;
+
+        // Catch-up da reconexão, mas só quando vale a pena.
+        //
+        // Pular quando os dados são recentes E nada está em voo. Se há carga
+        // em voo, recarregamos de qualquer forma: o app pode ter voltado do
+        // segundo plano com aquela requisição morta na linha, e aí a tela
+        // ficaria presa no carregamento para sempre. O dedupe do
+        // `recarregarClientes` cuida do caso em que ela está viva.
+        const desdeUltimaCarga = Date.now() - ultimaRecargaLocalRef.current;
+        const emVoo = recarregandoClientesRef.current;
+
+        if (!emVoo && desdeUltimaCarga < CATCHUP_MIN_MS) {
+          console.log('⏭️ [Realtime] reassinado com dados de',
+            Math.round(desdeUltimaCarga / 1000) + 's, sem catch-up');
           setSolicitacoesUpdatedAt(Date.now());
+          return;
         }
+
+        console.log('🔄 [Realtime] catch-up da reconexão',
+          emVoo ? '(carga em voo, pode ter morrido no segundo plano)' : '(dados velhos)');
+        recarregarTudoRef.current();
+        setSolicitacoesUpdatedAt(Date.now());
       });
 
     return () => {

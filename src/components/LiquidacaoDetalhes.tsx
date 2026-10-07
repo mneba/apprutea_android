@@ -499,6 +499,25 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const totalMicroseguros = entradasMicroseguro.reduce((s, r) => s + parseFloat(r.valor), 0);
   const totalOutrasReceitas = entradasOutras.reduce((s, r) => s + parseFloat(r.valor), 0);
 
+  // A diferença que as linhas não explicam.
+  //
+  // `caixaFinal` chega pronto: é o saldo REAL da conta da rota, que
+  // `fn_fechar_liquidacao_diaria` lê e grava. As linhas acima são os
+  // movimentos do dia. Quando discordam, há dinheiro que se moveu fora deste
+  // dia — em geral uma correção retroativa, que muda a conta hoje e pertence
+  // a um dia antigo.
+  //
+  // O fechamento sempre soube, e gravava em `observacoes`. Ninguém lia. Em
+  // outubro de 2026 um vendedor passou quatro dias convencido de que tinha
+  // perdido 101,00, porque o extrato não fechava e nada na tela dizia por quê.
+  //
+  // A linha não conserta a divergência — ela costuma ser legítima. Conserta o
+  // silêncio: quem lê vê que o sistema sabe, em vez de descobrir subtraindo.
+  const somaDasLinhas = caixaInicial + totalCobrancas + totalOutrasReceitas
+    - totalSaidasDespesas - totalVendasEmprestimos;
+  const diferencaNaoExplicada = caixaFinal - somaDasLinhas;
+  const temDiferenca = Math.abs(diferencaNaoExplicada) > 0.01;
+
   const dataHoje = new Date().toLocaleDateString('pt-BR');
   const horaAgora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
@@ -566,6 +585,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   <div class="row"><span class="verm">(-) ${lang === 'es' ? 'Gastos del día' : 'Despesas do dia'}</span><span class="r verm">${fmt(totalSaidasDespesas)}</span></div>
   ${totalVendasEmprestimos > 0 ? `<div class="row"><span class="verm">(-) ${lang === 'es' ? 'Préstamos del día' : 'Empréstimos do dia'}</span><span class="r verm">${fmt(totalVendasEmprestimos)}</span></div>` : ''}
   <hr class="sep2">
+  ${temDiferenca ? `<div class="row"><span class="verm">(±) ${lang === 'es' ? 'Diferencia no explicada' : 'Diferença não explicada'}</span><span class="r verm">${fmt(diferencaNaoExplicada)}</span></div>` : ''}
   <div class="row"><span class="lg">(=) ${lang === 'es' ? 'Caja final' : 'Caixa final'}</span><span class="r lg">${fmt(caixaFinal)}</span></div>
   <hr class="sep2">
   ${totalMicroseguros > 0 ? `
@@ -790,6 +810,14 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
               <View style={cupom.linha}>
                 <Text style={cupom.txtVerm}>(-) {lang === 'es' ? 'Préstamos del día' : 'Empréstimos do dia'}</Text>
                 <Text style={cupom.txtVerm}>{fmt(totalVendasEmprestimos)}</Text>
+              </View>
+            )}
+            {temDiferenca && (
+              <View style={cupom.linha}>
+                <Text style={cupom.txtVerm}>
+                  (±) {lang === 'es' ? 'Diferencia no explicada' : 'Diferença não explicada'}
+                </Text>
+                <Text style={cupom.txtVerm}>{fmt(diferencaNaoExplicada)}</Text>
               </View>
             )}
             <Text style={cupom.div2}>{DDIV}</Text>

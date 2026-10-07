@@ -24,20 +24,15 @@ export interface ClienteTodos {
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
 
-const buscarCreditoMap = async (empIds: string[]): Promise<Map<string, number>> => {
-  if (empIds.length === 0) return new Map();
-  const { data } = await supabase
-    .from('emprestimo_parcelas')
-    .select('emprestimo_id, saldo_excedente')
-    .in('emprestimo_id', empIds)
-    .gt('saldo_excedente', 0);
-  const creditoMap = new Map<string, number>();
-  (data || []).forEach((p: any) => {
-    const atual = creditoMap.get(p.emprestimo_id) || 0;
-    creditoMap.set(p.emprestimo_id, atual + parseFloat(p.saldo_excedente || 0));
-  });
-  return creditoMap;
-};
+// O `buscarCreditoMap` que existia aqui foi absorvido pela consulta das
+// parcelas: ele varria a MESMA tabela com o MESMO filtro `.in(empIds)`, só
+// trocando a coluna lida. Numa rota com 300 empréstimos de 20 parcelas eram
+// duas varreduras de seis mil linhas onde bastava uma — e a segunda ainda
+// esperava a primeira terminar.
+//
+// Agora `saldo_excedente` vem junto e o mapa de crédito é montado na mesma
+// passagem. A cópia em ClientesScreen.tsx continua existindo e serve a outro
+// caminho.
 
 // ─── Hook ───────────────────────────────────────────────────────────────────
 
@@ -74,6 +69,19 @@ export default function useClientesTodos({ rotaId, dataOperacional, setOrdemRota
     }
     setLoadTodos(true);
     try {
+      // A ordem da rota não depende de nada do que vem abaixo — basta o
+      // `rotaId`. Antes ela era a última da fila, esperando as três consultas
+      // anteriores sem motivo. Agora sai junto com a primeira e só é colhida
+      // no fim.
+      //
+      // O filtro `.in(clienteIds)` que existia nela foi removido: a tabela já
+      // é filtrada por rota, e era esse filtro que obrigava a esperar a lista
+      // de clientes ficar pronta.
+      const promessaOrdem = supabase
+        .from('ordem_rota_cliente')
+        .select('cliente_id, ordem')
+        .eq('rota_id', rotaId);
+
       // Query 1: Todos os empréstimos da rota com dados do cliente
       const { data: emps } = await supabase
         .from('emprestimos')
@@ -83,11 +91,12 @@ export default function useClientesTodos({ rotaId, dataOperacional, setOrdemRota
 
       if (!emps || emps.length === 0) { setTodosList([]); setTodosUpdatedAt(Date.now()); return; }
 
-      // Query 2: Todas as parcelas dos empréstimos de uma vez
+      // Query 2: todas as parcelas dos empréstimos de uma vez — incluindo
+      // `saldo_excedente`, que antes custava uma segunda varredura idêntica.
       const empIds = (emps as any[]).map(e => e.id);
       const { data: allParcs } = await supabase
         .from('emprestimo_parcelas')
-        .select('emprestimo_id, numero_parcela, valor_parcela, status, data_vencimento')
+        .select('emprestimo_id, numero_parcela, valor_parcela, status, data_vencimento, saldo_excedente')
         .in('emprestimo_id', empIds);
 
       // Agrupa parcelas por empréstimo
@@ -112,7 +121,14 @@ export default function useClientesTodos({ rotaId, dataOperacional, setOrdemRota
         maxParcela: number; vencidas: number; totalVencido: number;
         vencimentoMaisAntigo: string | null;
       }>();
+      // Montado na mesma passagem das parcelas — ver o comentário no topo.
+      const creditoMapTodos = new Map<string, number>();
       (allParcs || []).forEach((p: any) => {
+        const excedente = parseFloat(p.saldo_excedente || 0);
+        if (excedente > 0) {
+          creditoMapTodos.set(p.emprestimo_id,
+            (creditoMapTodos.get(p.emprestimo_id) || 0) + excedente);
+        }
         let info = parcMap.get(p.emprestimo_id);
         if (!info) {
           info = { maxParcela: 0, vencidas: 0, totalVencido: 0, vencimentoMaisAntigo: null };
@@ -174,9 +190,8 @@ export default function useClientesTodos({ rotaId, dataOperacional, setOrdemRota
         });
       }
 
-      // Descontar crédito acumulado do saldo de cada empréstimo
-      const empIdsTodos = (emps as any[]).map(e => e.id);
-      const creditoMapTodos = await buscarCreditoMap(empIdsTodos);
+      // Descontar crédito acumulado do saldo de cada empréstimo. O mapa já veio
+      // da passagem acima; antes custava uma consulta inteira a mais.
       if (creditoMapTodos.size > 0) {
         Array.from(cliMap.values()).forEach(cli => {
           cli.emprestimos.forEach(emp => {
@@ -188,19 +203,12 @@ export default function useClientesTodos({ rotaId, dataOperacional, setOrdemRota
       setTodosList(Array.from(cliMap.values()));
       setTodosUpdatedAt(Date.now());
 
-      // Carregar ordem da rota
-      if (rotaId) {
-        const clienteIds = Array.from(cliMap.keys());
-        const { data: ordens } = await supabase
-          .from('ordem_rota_cliente')
-          .select('cliente_id, ordem')
-          .eq('rota_id', rotaId)
-          .in('cliente_id', clienteIds);
-        if (ordens && ordens.length > 0) {
-          const m = new Map<string, number>();
-          (ordens as any[]).forEach(o => m.set(o.cliente_id, Number(o.ordem)));
-          setOrdemRotaMap(m);
-        }
+      // A ordem da rota, disparada lá em cima.
+      const { data: ordens } = await promessaOrdem;
+      if (ordens && ordens.length > 0) {
+        const m = new Map<string, number>();
+        (ordens as any[]).forEach(o => m.set(o.cliente_id, Number(o.ordem)));
+        setOrdemRotaMap(m);
       }
     } catch (e) {
       console.error('Erro loadTodos:', e);
