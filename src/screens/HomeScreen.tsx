@@ -16,7 +16,8 @@ import {
 import { ModalExtrato } from '../components/LiquidacaoDetalhes';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
-import { buscarConflitos, diaCurto, encerrarConflitos } from '../services/solicitacoesAbertura';
+import { buscarConflitos, diaCurto, encerrarConflitos } from '../services/solicitacoesAbertura';
+import { mensagemErro } from '../utils/mensagemErro';
 
 // ==================== TIPOS ====================
 interface LiquidacaoDiaria {
@@ -324,7 +325,7 @@ export default function HomeScreen({ navigation }: any) {
         setModoVisualizacao(false); setDataVisualizacao(null); setMostrarCalendario(false);
         carregarDados();
       } else { Alert.alert('Erro', data?.[0]?.mensagem || 'Erro ao abrir'); }
-    } catch (e: any) { Alert.alert('Erro', e.message); }
+    } catch (e: any) { Alert.alert('Erro', mensagemErro(e)); }
     finally { setProcessando(false); }
   };
 
@@ -347,7 +348,7 @@ export default function HomeScreen({ navigation }: any) {
         // Abrir extrato/comprovante automaticamente
         setExtratoFechamentoVisible(true);
       } else { Alert.alert('Erro', data?.[0]?.mensagem || 'Erro ao fechar'); }
-    } catch (e: any) { Alert.alert('Erro', e.message); }
+    } catch (e: any) { Alert.alert('Erro', mensagemErro(e)); }
     finally { setProcessando(false); }
   };
 

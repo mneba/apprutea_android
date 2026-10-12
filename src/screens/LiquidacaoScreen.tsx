@@ -21,7 +21,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
 import { buscarConflitos, ConflitoAbertura, diaCurto, encerrarConflitos } from '../services/solicitacoesAbertura';
-import { LiquidacaoDiaria } from '../types';
+import { LiquidacaoDiaria } from '../types';
+import { mensagemErro } from '../utils/mensagemErro';
 
 type Language = 'pt-BR' | 'es';
 
@@ -904,7 +905,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
       if (error) {
         console.error('Erro na validação:', error);
-        showAlert('Erro', 'Não foi possível validar a abertura: ' + error.message);
+        showAlert('Erro', mensagemErro(error, 'Não foi possível validar a abertura.'));
         return false;
       }
 
@@ -1002,7 +1003,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
     } catch (error: any) {
       console.error('Erro catch na validação:', error);
-      showAlert('Erro', error.message || 'Erro ao validar abertura');
+      showAlert('Erro', mensagemErro(error, 'Erro ao validar abertura'));
       return false;
     }
   };
@@ -1049,7 +1050,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
     } catch (error: any) {
       console.error('Erro ao criar solicitação:', error);
-      showAlert('Erro', error.message || 'Não foi possível enviar solicitação');
+      showAlert('Erro', mensagemErro(error, 'Não foi possível enviar solicitação'));
     } finally {
       setEnviandoSolicitacao(false);
     }
@@ -1088,7 +1089,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
     } catch (error: any) {
       console.error('Erro ao substituir solicitação:', error);
-      showAlert('Erro', error.message || 'Não foi possível substituir a solicitação');
+      showAlert('Erro', mensagemErro(error, 'Não foi possível substituir a solicitação'));
     } finally {
       setProcessandoSubstituicao(false);
     }
@@ -1168,7 +1169,7 @@ const confirmarConflitoAbertura = (
       await carregarLiquidacoes();
       showAlert('Sucesso', 'Dia iniciado com sucesso!');
     } catch (error: any) {
-      Alert.alert('Erro catch', error.message || 'Não foi possível iniciar o dia');
+      Alert.alert('Não foi possível iniciar o dia', mensagemErro(error, 'Tente de novo em instantes.'));
     } finally {
       setSalvando(false);
     }
@@ -1231,7 +1232,7 @@ const confirmarConflitoAbertura = (
       // showAlert e não Alert.alert: no alvo web o Alert do react-native-web
       // é no-op e o erro sumia sem nenhuma mensagem na tela.
       console.error('❌ Falha ao encerrar o dia:', error);
-      showAlert('Erro', error.message || 'Não foi possível encerrar o dia');
+      showAlert('Erro', mensagemErro(error, 'Não foi possível encerrar o dia'));
     }
   };
 

@@ -11,7 +11,8 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { supabase } from '../services/supabase';
+import { supabase } from '../services/supabase';
+import { mensagemErro } from '../utils/mensagemErro';
 
 // ==================== TIPOS ====================
 export interface Nota {
@@ -214,7 +215,7 @@ export function ModalNotasLista({
       setEditandoTexto('');
       carregarNotas();
     } catch (e: any) {
-      showAlert('❌', e.message);
+      showAlert('❌', mensagemErro(e));
     } finally {
       setSalvandoEdicao(false);
     }
@@ -231,7 +232,7 @@ export function ModalNotasLista({
       carregarNotas();
       showAlert('✅', t.notaExcluida);
     } catch (e: any) {
-      showAlert('❌', e?.message || t.erroExcluir);
+      showAlert('❌', mensagemErro(e, t.erroExcluir));
     } finally {
       setExcluindoNota(false);
     }
@@ -302,7 +303,7 @@ export function ModalNotasLista({
         showAlert('❌', res?.mensagem || t.erroSalvar);
       }
     } catch (e: any) {
-      showAlert('❌', e.message || t.erroSalvar);
+      showAlert('❌', mensagemErro(e, t.erroSalvar));
     } finally {
       setSalvandoNovo(false);
     }
@@ -734,7 +735,7 @@ export function ModalCriarNota({
         showAlert('❌', res?.mensagem || t.erroSalvar);
       }
     } catch (e: any) {
-      showAlert('❌', e.message || t.erroSalvar);
+      showAlert('❌', mensagemErro(e, t.erroSalvar));
     } finally {
       setSalvando(false);
     }

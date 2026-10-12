@@ -53,6 +53,7 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../services/supabase';
 import Carregando from '../Carregando';
+import { mensagemErro } from '../../utils/mensagemErro';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -292,7 +293,7 @@ export default function CarrosselFlexivel({
       onClose();
     } catch (e: any) {
       console.error('❌ Validação do flexível:', e);
-      setErro(e?.message || t.erroValidar);
+      setErro(mensagemErro(e, t.erroValidar));
     } finally {
       setValidando(false);
     }

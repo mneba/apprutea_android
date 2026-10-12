@@ -1,4 +1,5 @@
 import { useNavigation } from '@react-navigation/native';
+import { mensagemErro } from '../utils/mensagemErro';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -387,7 +388,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       setClienteCompleto((prev: any) => prev ? { ...prev, foto_url: publicUrl } : prev);
     } catch (e: any) {
       console.error('❌ Erro ao enviar foto:', e);
-      Alert.alert('Erro', e?.message || 'Não foi possível enviar a foto.');
+      Alert.alert('Erro', mensagemErro(e, 'Não foi possível enviar a foto.'));
     } finally {
       setUploadingFoto(false);
     }

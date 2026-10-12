@@ -24,8 +24,14 @@ import { supabase } from './supabase';
 /** 0 = domingo … 6 = sábado, igual a `DIAS_SEMANA` da Nova Venda e a getDay(). */
 export type DiaSemana = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
-/** `emprestimo_id` → dia da semana. Só empréstimos SEMANAL aparecem. */
-export type MapaDiasSemana = Record<string, DiaSemana>;
+/**
+ * `emprestimo_id` → dias da semana. Só empréstimos SEMANAL aparecem.
+ *
+ * Virou CONJUNTO em 11/10/2026, quando o semanal passou a aceitar mais de um
+ * dia. O empréstimo de um dia é o conjunto de um elemento — ninguém precisa
+ * tratar os dois casos.
+ */
+export type MapaDiasSemana = Record<string, DiaSemana[]>;
 
 // O `.in()` do PostgREST viaja na query string. Uma rota grande tem centenas
 // de empréstimos e 37 caracteres por uuid estouram a URL — daí o lote.
@@ -41,7 +47,7 @@ export async function buscarDiasSemana(emprestimoIds: string[]): Promise<MapaDia
     const lote = ids.slice(i, i + LOTE);
     const { data, error } = await supabase
       .from('emprestimos')
-      .select('id, dia_semana_cobranca')
+      .select('id, dia_semana_cobranca, dias_semana_cobranca')
       .in('id', lote)
       .eq('frequencia_pagamento', 'SEMANAL');
 
@@ -53,8 +59,19 @@ export async function buscarDiasSemana(emprestimoIds: string[]): Promise<MapaDia
     }
 
     for (const r of (data || [])) {
-      const d = (r as any).dia_semana_cobranca;
-      if (d != null && d >= 0 && d <= 6) mapa[(r as any).id] = Number(d) as DiaSemana;
+      const linha = r as any;
+      // O conjunto manda; o escalar é o caminho dos empréstimos anteriores a
+      // 11/10/2026, que não têm a coluna nova. Os dois são filtrados por
+      // 0–6: a tela indexa array de nomes com esse número.
+      const conjunto: number[] = Array.isArray(linha.dias_semana_cobranca)
+        ? linha.dias_semana_cobranca.map(Number)
+        : (linha.dia_semana_cobranca != null ? [Number(linha.dia_semana_cobranca)] : []);
+
+      const limpo = conjunto
+        .filter(d => Number.isFinite(d) && d >= 0 && d <= 6)
+        .sort((a, b) => a - b) as DiaSemana[];
+
+      if (limpo.length > 0) mapa[linha.id] = limpo;
     }
   }
 

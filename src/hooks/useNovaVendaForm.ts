@@ -23,6 +23,7 @@ interface SolicitacaoRenovacao {
   taxa_juros: number;
   frequencia: string;
   dia_semana_cobranca?: number | null;
+  dias_semana_cobranca?: number[] | null;
   dia_mes_cobranca?: number | null;
   data_primeiro_vencimento?: string | null;
   dias_mes_cobranca?: number[] | null;
@@ -105,9 +106,52 @@ export function useNovaVendaForm({
   const [frequencia, setFrequencia] = useState(
     solicitacaoRenovacao?.frequencia || 'DIARIO'
   );
-  const [diaSemanaPagamento, setDiaSemanaPagamento] = useState(
-    solicitacaoRenovacao?.dia_semana_cobranca != null ? String(solicitacaoRenovacao.dia_semana_cobranca) : '1'
-  );
+  // ─── DIAS DA SEMANA ────────────────────────────────────────────────
+  //
+  // O CONJUNTO É O ESTADO; O ESCALAR É DERIVADO.
+  //
+  // Pedido do cliente em 11/10/2026: cobrar o semanal em mais de um dia da
+  // semana. O Postgres guarda os dois — `dias_semana_cobranca` (conjunto,
+  // autoridade do cronograma) e `dia_semana_cobranca` (o primeiro do
+  // conjunto, lido por ~25 lugares dos dois apps que não vão mudar agora).
+  //
+  // Aqui o escalar NÃO é um segundo estado. Se fosse, os dois divergiriam na
+  // primeira tela que esquecesse de atualizar um deles — e o sintoma seria
+  // cronograma num dia e rótulo em outro. Ele sai do conjunto, sempre.
+  //
+  // `setDiaSemanaPagamento` continua existindo como entrada: `useBuscaDocumento`
+  // o chama em quatro lugares ao repetir termos de uma solicitação, e ali o
+  // que chega do banco é um dia só. Escrever o escalar é escrever o conjunto
+  // de um elemento.
+  const [diasSemanaPagamento, setDiasSemanaPagamento] = useState<number[]>(() => {
+    const conjunto = solicitacaoRenovacao?.dias_semana_cobranca;
+    if (conjunto && conjunto.length > 0) {
+      return [...conjunto].map(Number).filter(d => d >= 0 && d <= 6).sort((a, b) => a - b);
+    }
+    if (solicitacaoRenovacao?.dia_semana_cobranca != null) {
+      return [Number(solicitacaoRenovacao.dia_semana_cobranca)];
+    }
+    return [1];
+  });
+
+  const diaSemanaPagamento = diasSemanaPagamento.length > 0 ? String(diasSemanaPagamento[0]) : '';
+
+  const setDiaSemanaPagamento = (v: string) => {
+    const n = Number(v);
+    setDiasSemanaPagamento(Number.isFinite(n) && n >= 0 && n <= 6 ? [n] : []);
+  };
+
+  /** Liga/desliga um dia. O último marcado não desliga: semanal sem dia
+   *  nenhum não existe, e a validação só reclamaria depois, no Confirmar. */
+  const alternarDiaSemana = (dia: number) => {
+    setDiasSemanaPagamento(prev => {
+      if (prev.includes(dia)) {
+        return prev.length === 1 ? prev : prev.filter(d => d !== dia);
+      }
+      return [...prev, dia].sort((a, b) => a - b);
+    });
+    limparErroCampo('diaSemanaPagamento');
+  };
   const [diaMesPagamento, setDiaMesPagamento] = useState(
     solicitacaoRenovacao?.dia_mes_cobranca != null ? String(solicitacaoRenovacao.dia_mes_cobranca) : '15'
   );
@@ -313,7 +357,7 @@ export function useNovaVendaForm({
     if (!dataPrimeiroVencimento) erros.add('dataPrimeiroVencimento');
     if (!frequencia) erros.add('frequencia');
 
-    if (frequencia === 'SEMANAL' && !diaSemanaPagamento) erros.add('diaSemanaPagamento');
+    if (frequencia === 'SEMANAL' && diasSemanaPagamento.length === 0) erros.add('diaSemanaPagamento');
     if (frequencia === 'MENSAL' && !diaMesPagamento) erros.add('diaMesPagamento');
     if (frequencia === 'FLEXIVEL' && diasMesFlexivel.length === 0) erros.add('diasMesFlexivel');
 
@@ -382,6 +426,7 @@ export function useNovaVendaForm({
     taxaJurosPersonalizada, setTaxaJurosPersonalizada,
     frequencia, setFrequencia,
     diaSemanaPagamento, setDiaSemanaPagamento,
+    diasSemanaPagamento, setDiasSemanaPagamento, alternarDiaSemana,
     diaMesPagamento, setDiaMesPagamento,
     diasMesFlexivel, setDiasMesFlexivel,
     iniciarProximoMes, setIniciarProximoMes,

@@ -30,7 +30,7 @@ export interface EmprestimoTodos {
    * liquidação não traz este campo. 0 = domingo. Pedido do Julio em
    * 23/09/2026: ver o dia programado sem abrir o empréstimo.
    */
-  dia_semana_cobranca?: number | null;
+  dias_semana_cobranca?: number[] | null;
 }
 
 export interface ClienteTodos {
@@ -66,9 +66,18 @@ const FREQ: Record<Language, Record<string, string>> = {
  */
 const linhaDiaSemana = (emp: EmprestimoTodos, lang: Language) => {
   if (emp.frequencia_pagamento !== 'SEMANAL') return null;
-  const d = emp.dia_semana_cobranca;
-  if (d == null || d < 0 || d > 6) return null;
-  return <Text style={S.diaSemLbl}>{DIA_SEMANA_NOME[lang][d]}</Text>;
+  const dias = (emp.dias_semana_cobranca || []).filter(d => d >= 0 && d <= 6);
+  if (dias.length === 0) return null;
+
+  // Um dia cabe por extenso e é o que esta linha sempre mostrou. Dois ou mais
+  // por extenso ("Terça-feira, Sexta-feira") estouram a largura do card, então
+  // passam a abreviado — ler "Ter, Sex" aqui é imediato porque a linha existe
+  // justamente para dizer o dia.
+  const texto = dias.length === 1
+    ? DIA_SEMANA_NOME[lang][dias[0]]
+    : dias.map(d => DIA_SEMANA_NOME[lang][d].slice(0, 3)).join(', ');
+
+  return <Text style={S.diaSemLbl}>{texto}</Text>;
 };
 
 /**

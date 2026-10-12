@@ -27,6 +27,7 @@ interface FormSetters {
   setFrequencia: (v: string) => void;
   setDataPrimeiroVencimento: (v: string) => void;
   setDiaSemanaPagamento: (v: string) => void;
+  setDiasSemanaPagamento: (v: number[]) => void;
   setDiaMesPagamento: (v: string) => void;
   setDiasMesFlexivel: (v: number[]) => void;
   setIniciarProximoMes: (v: boolean) => void;
@@ -42,6 +43,7 @@ interface SolicitacaoRenovacaoParam {
   taxa_juros: number;
   frequencia: string;
   dia_semana_cobranca?: number | null;
+  dias_semana_cobranca?: number[] | null;
   dia_mes_cobranca?: number | null;
   // Termos completos vindos de renovacoes_pendentes — os mesmos que a
   // ClientesScreen já enviava pelo card do cliente.
@@ -293,7 +295,7 @@ ${msg}`);
             if (!termos) {
               const { data } = await supabase
                 .from('emprestimos')
-                .select('numero_parcelas, taxa_juros, frequencia_pagamento, dia_semana_cobranca, dia_mes_cobranca')
+                .select('numero_parcelas, taxa_juros, frequencia_pagamento, dia_semana_cobranca, dias_semana_cobranca, dia_mes_cobranca')
                 .eq('id', solicData.emprestimo_id)
                 .single();
               empQuitado = data;
@@ -306,6 +308,7 @@ ${msg}`);
               taxa_juros: termos?.taxa_juros ?? empQuitado?.taxa_juros ?? 20,
               frequencia: termos?.frequencia || empQuitado?.frequencia_pagamento || 'DIARIO',
               dia_semana_cobranca: termos?.dia_semana_cobranca ?? empQuitado?.dia_semana_cobranca ?? null,
+              dias_semana_cobranca: termos?.dias_semana_cobranca ?? empQuitado?.dias_semana_cobranca ?? null,
               dia_mes_cobranca: termos?.dia_mes_cobranca ?? empQuitado?.dia_mes_cobranca ?? null,
               dias_mes_cobranca: termos?.dias_mes_cobranca ?? null,
               iniciar_proximo_mes: termos?.iniciar_proximo_mes ?? false,
@@ -324,7 +327,11 @@ ${msg}`);
               s.setTaxaJuros(String(solicParam.taxa_juros));
               s.setTaxaJurosPersonalizada(true);
               s.setFrequencia(solicParam.frequencia);
-              if (solicParam.dia_semana_cobranca != null) s.setDiaSemanaPagamento(String(solicParam.dia_semana_cobranca));
+              if (solicParam.dias_semana_cobranca && solicParam.dias_semana_cobranca.length > 0) {
+                s.setDiasSemanaPagamento([...solicParam.dias_semana_cobranca].sort((a, b) => a - b));
+              } else if (solicParam.dia_semana_cobranca != null) {
+                s.setDiaSemanaPagamento(String(solicParam.dia_semana_cobranca));
+              }
               if (solicParam.dia_mes_cobranca != null) s.setDiaMesPagamento(String(solicParam.dia_mes_cobranca));
               if (solicParam.dias_mes_cobranca) s.setDiasMesFlexivel(solicParam.dias_mes_cobranca);
               if (solicParam.iniciar_proximo_mes != null) s.setIniciarProximoMes(solicParam.iniciar_proximo_mes);
@@ -354,7 +361,11 @@ ${msg}`);
               s.setTaxaJuros(String(solicParam.taxa_juros));
               s.setTaxaJurosPersonalizada(true);
               s.setFrequencia(solicParam.frequencia);
-              if (solicParam.dia_semana_cobranca != null) s.setDiaSemanaPagamento(String(solicParam.dia_semana_cobranca));
+              if (solicParam.dias_semana_cobranca && solicParam.dias_semana_cobranca.length > 0) {
+                s.setDiasSemanaPagamento([...solicParam.dias_semana_cobranca].sort((a, b) => a - b));
+              } else if (solicParam.dia_semana_cobranca != null) {
+                s.setDiaSemanaPagamento(String(solicParam.dia_semana_cobranca));
+              }
               if (solicParam.dia_mes_cobranca != null) s.setDiaMesPagamento(String(solicParam.dia_mes_cobranca));
               if (solicParam.dias_mes_cobranca) s.setDiasMesFlexivel(solicParam.dias_mes_cobranca);
               if (solicParam.iniciar_proximo_mes != null) s.setIniciarProximoMes(solicParam.iniciar_proximo_mes);
@@ -614,7 +625,11 @@ ${msg}`); navigation.goBack(); }
         s.setTaxaJurosPersonalizada(true);
         s.setFrequencia(vp.frequencia || 'DIARIO');
         if (vp.data_primeiro_vencimento) s.setDataPrimeiroVencimento(vp.data_primeiro_vencimento);
-        if (vp.dia_semana_cobranca != null) s.setDiaSemanaPagamento(String(vp.dia_semana_cobranca));
+        if (vp.dias_semana_cobranca && vp.dias_semana_cobranca.length > 0) {
+          s.setDiasSemanaPagamento([...vp.dias_semana_cobranca].sort((a, b) => a - b));
+        } else if (vp.dia_semana_cobranca != null) {
+          s.setDiaSemanaPagamento(String(vp.dia_semana_cobranca));
+        }
         if (vp.dia_mes_cobranca != null) s.setDiaMesPagamento(String(vp.dia_mes_cobranca));
         if (vp.dias_mes_cobranca) s.setDiasMesFlexivel(vp.dias_mes_cobranca);
         if (vp.iniciar_proximo_mes != null) s.setIniciarProximoMes(vp.iniciar_proximo_mes);
@@ -655,7 +670,7 @@ ${msg}`); navigation.goBack(); }
 
         const { data: emp } = await supabase
           .from('emprestimos')
-          .select('valor_saldo, valor_parcela, numero_parcelas, taxa_juros, frequencia_pagamento, dia_semana_cobranca, dia_mes_cobranca, dias_mes_cobranca')
+          .select('valor_saldo, valor_parcela, numero_parcelas, taxa_juros, frequencia_pagamento, dia_semana_cobranca, dias_semana_cobranca, dia_mes_cobranca, dias_mes_cobranca')
           .eq('id', empId)
           .single();
 
@@ -674,7 +689,11 @@ ${msg}`); navigation.goBack(); }
               s.setDataPrimeiroVencimento(d.toISOString().split('T')[0]);
             }
           }
-          if (emp.dia_semana_cobranca != null) s.setDiaSemanaPagamento(String(emp.dia_semana_cobranca));
+          if (emp.dias_semana_cobranca && emp.dias_semana_cobranca.length > 0) {
+            s.setDiasSemanaPagamento([...emp.dias_semana_cobranca].sort((a, b) => a - b));
+          } else if (emp.dia_semana_cobranca != null) {
+            s.setDiaSemanaPagamento(String(emp.dia_semana_cobranca));
+          }
           if (emp.dia_mes_cobranca != null) s.setDiaMesPagamento(String(emp.dia_mes_cobranca));
           if (emp.dias_mes_cobranca) s.setDiasMesFlexivel(emp.dias_mes_cobranca);
           console.log('📋 Dados do empréstimo original carregados:', { saldo: emp.valor_saldo, freq: emp.frequencia_pagamento, parcelas: emp.numero_parcelas });

@@ -17,7 +17,8 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
-import { prepararImagem } from '../services/anexos';
+import { prepararImagem } from '../services/anexos';
+import { mensagemErro } from '../utils/mensagemErro';
 
 // ============================================================
 // TIPOS
@@ -386,7 +387,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
       }, 300);
       return;
     } catch (err: any) {
-      Alert.alert(t.erro || 'Erro', err?.message || 'Erro ao enviar solicitação');
+      Alert.alert(t.erro || 'Erro', mensagemErro(err, 'Erro ao enviar solicitação'));
     } finally {
       setEnviandoSolicitacao(false);
     }
@@ -533,7 +534,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
       liqCtx.recarregarLiquidacao();
     } catch (err: any) {
       console.error('Erro ao registrar movimentação:', err);
-      Alert.alert(t.erro, err?.message || t.erroInesperado);
+      Alert.alert(t.erro, mensagemErro(err, t.erroInesperado));
     } finally {
       setEnviando(false);
     }

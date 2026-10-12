@@ -27,7 +27,7 @@ export interface EmprestimoData {
    * liquidação não traz este campo. 0 = domingo.
    * Ver services/diasSemanaEmprestimos.ts.
    */
-  dia_semana_cobranca?: number | null;
+  dias_semana_cobranca?: number[] | null;
   parcela_id: string; numero_parcela: number; valor_parcela: number;
   valor_pago_parcela: number; saldo_parcela: number; status_parcela: string;
   data_vencimento: string; ordem_visita_dia: number | null;
@@ -56,13 +56,19 @@ const DIA_SEMANA_ABREV: Record<Language, string[]> = {
   'es': ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'],
 };
 
-/** "Semanal" vira "Semanal · Ter" quando o dia programado é conhecido. */
+/**
+ * "Semanal" vira "Semanal · Ter", e "Semanal · Ter, Sex" quando a cobrança
+ * acontece em mais de um dia da semana.
+ *
+ * Abreviado por necessidade: esta linha já divide espaço com a frequência e o
+ * atraso, e dois dias escritos por extenso a estouram em tela estreita.
+ */
 const tipoComDia = (e: EmprestimoData, lang: Language) => {
   const base = FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento;
   if (e.frequencia_pagamento !== 'SEMANAL') return base;
-  const d = e.dia_semana_cobranca;
-  if (d == null || d < 0 || d > 6) return base;
-  return `${base} · ${DIA_SEMANA_ABREV[lang][d]}`;
+  const dias = (e.dias_semana_cobranca || []).filter(d => d >= 0 && d <= 6);
+  if (dias.length === 0) return base;
+  return `${base} · ${dias.map(d => DIA_SEMANA_ABREV[lang][d]).join(', ')}`;
 };
 
 const FREQ: Record<Language, Record<string, string>> = {

@@ -22,7 +22,12 @@ interface Props {
   taxaJuros: string; setTaxaJuros: (v: string) => void;
   taxaJurosPersonalizada: boolean; setTaxaJurosPersonalizada: (v: boolean) => void;
   frequencia: string; setFrequencia: (v: string) => void;
-  diaSemanaPagamento: string; setDiaSemanaPagamento: (v: string) => void;
+  diasSemanaPagamento: number[];
+  alternarDiaSemana: (dia: number) => void;
+  /** Recomeca o conjunto num dia so. Usado ao ENTRAR no semanal. */
+  definirDiaSemanaUnico: (dia: string) => void;
+  /** Sem domingo quando a rota nao trabalha domingo. */
+  diasSemanaDisponiveis: { value: string; label: string }[];
   diaMesPagamento: string; setDiaMesPagamento: (v: string) => void;
   diasMesFlexivel: number[];
   dataPrimeiroVencimento: string; setDataPrimeiroVencimento: (v: string) => void;
@@ -57,8 +62,6 @@ interface Props {
   // Handlers
   handleValorEmprestimoChange: (text: string) => void;
   limparErroCampo: (campo: string) => void;
-  getDiaSemanaLabel: () => string;
-  onOpenDiaSemanaModal: () => void;
   onOpenDatePicker: () => void;
   onOpenCarrosselFlexivel: () => void;
   // i18n
@@ -70,7 +73,8 @@ export default function FormularioEmprestimo(props: Props) {
     valorEmprestimo, numeroParcelas, setNumeroParcelas,
     taxaJuros, setTaxaJuros, taxaJurosPersonalizada, setTaxaJurosPersonalizada,
     frequencia, setFrequencia,
-    diaSemanaPagamento, setDiaSemanaPagamento, diaMesPagamento, setDiaMesPagamento,
+    diasSemanaPagamento, alternarDiaSemana, definirDiaSemanaUnico, diasSemanaDisponiveis,
+    diaMesPagamento, setDiaMesPagamento,
     diasMesFlexivel,
     dataPrimeiroVencimento, setDataPrimeiroVencimento,
     observacoesEmprestimo, setObservacoesEmprestimo,
@@ -79,7 +83,7 @@ export default function FormularioEmprestimo(props: Props) {
     taxasPermitidas,
     isRenegociacao, isVendaAprovadaTravada, camposComErro, dataOperacional, lang,
     handleValorEmprestimoChange, limparErroCampo,
-    getDiaSemanaLabel, onOpenDiaSemanaModal, onOpenDatePicker, onOpenCarrosselFlexivel,
+    onOpenDatePicker, onOpenCarrosselFlexivel,
     t,
   } = props;
 
@@ -238,7 +242,10 @@ export default function FormularioEmprestimo(props: Props) {
                   // ao ENTRAR na frequência. Sem ela, tocar de novo em
                   // "Semanal" apagaria o dia que o vendedor tivesse escolhido
                   // à mão.
-                  setDiaSemanaPagamento(diaSemanaDe(dataOperacional));
+                  // `alternarDiaSemana` nao serve aqui: ele soma ao
+                  // conjunto. Ao entrar na frequencia o conjunto recomeca
+                  // no dia de hoje, e o escalar leva a isso.
+                  definirDiaSemanaUnico(diaSemanaDe(dataOperacional));
                 } else if (freq.value === 'FLEXIVEL') {
                   // A folha abre no próprio toque em "Flexível": não existe
                   // botão intermediário. Tocar de novo em "Flexível", já
@@ -260,20 +267,47 @@ export default function FormularioEmprestimo(props: Props) {
         </View>
       </View>
 
-      {/* Dia da semana (SEMANAL) */}
+      {/* Dias da semana (SEMANAL) — conjunto, nao escolha unica.
+
+          Pedido do cliente em 11/10/2026. Marcar terca e sexta num emprestimo
+          de 8 parcelas mantem as 8 parcelas e o valor de cada uma: o que
+          dobra e o RITMO, e ele termina em 4 semanas em vez de 8.
+
+          Era um select de um dia so, e virou ficha que liga e desliga. Um dia
+          marcado e o semanal de sempre — o conjunto de um elemento. */}
       {frequencia === 'SEMANAL' && (
         <View style={styles.fieldGroup}>
           <Text style={[styles.fieldLabel, camposComErro.has('diaSemanaPagamento') && styles.fieldLabelError]}>
-            Dia da semana <Text style={styles.required}>*</Text>
+            {lang === 'es' ? 'Días de cobro' : 'Dias de cobrança'} <Text style={styles.required}>*</Text>
           </Text>
-          <TouchableOpacity
-            style={[styles.selectField, camposComErro.has('diaSemanaPagamento') && styles.inputError]}
-            onPress={() => { onOpenDiaSemanaModal(); limparErroCampo('diaSemanaPagamento'); }}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.selectFieldText}>{getDiaSemanaLabel()}</Text>
-            <Text style={styles.selectFieldChevron}>▼</Text>
-          </TouchableOpacity>
+          <View style={[
+            styles.frequenciaGrid,
+            camposComErro.has('diaSemanaPagamento') && { borderWidth: 2, borderColor: '#EF4444', borderRadius: 8, padding: 4 },
+          ]}>
+            {diasSemanaDisponiveis.map((d) => {
+              const num = parseInt(d.value, 10);
+              const marcado = diasSemanaPagamento.includes(num);
+              return (
+                <TouchableOpacity
+                  key={d.value}
+                  style={[styles.radioOption, marcado && styles.radioOptionActive]}
+                  onPress={() => alternarDiaSemana(num)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.radioLabel, marcado && styles.radioLabelActive]}>
+                    {d.label.slice(0, 3)}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          {diasSemanaPagamento.length > 1 && (
+            <Text style={{ fontSize: 12, color: '#2563EB', marginTop: 6 }}>
+              {lang === 'es'
+                ? `${diasSemanaPagamento.length} días por semana: termina antes, con las mismas cuotas.`
+                : `${diasSemanaPagamento.length} dias por semana: termina mais cedo, com as mesmas parcelas.`}
+            </Text>
+          )}
         </View>
       )}
 

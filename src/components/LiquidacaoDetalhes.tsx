@@ -26,6 +26,7 @@ import {
 } from 'react-native';
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
+import { mensagemErro } from '../utils/mensagemErro';
 
 const { width, height } = Dimensions.get('window');
 
@@ -1248,8 +1249,8 @@ export function ModalResetCliente({ visible, onClose, onResetSuccess, liquidacao
           else Alert.alert('Erro', res?.mensagem || 'Erro ao resetar');
         }
       } catch (e: any) {
-        if (Platform.OS === 'web') window.alert('Erro: ' + e.message);
-        else Alert.alert('Erro', e.message);
+        if (Platform.OS === 'web') window.alert(mensagemErro(e));
+        else Alert.alert('Erro', mensagemErro(e));
       } finally {
         setResetando(null);
       }
@@ -1850,9 +1851,9 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
       } catch (e: any) {
         console.error('Erro ao excluir:', e);
         if (Platform.OS === 'web') {
-          window.alert(e.message || t.exclusaoErro);
+          window.alert(mensagemErro(e, t.exclusaoErro));
         } else {
-          Alert.alert('Erro', e.message || t.exclusaoErro);
+          Alert.alert('Erro', mensagemErro(e, t.exclusaoErro));
         }
       } finally {
         setExcluindo(null);

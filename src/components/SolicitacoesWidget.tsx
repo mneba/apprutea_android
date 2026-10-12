@@ -17,7 +17,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { supabase } from '../services/supabase';
+import { supabase } from '../services/supabase';
+import { mensagemErro } from '../utils/mensagemErro';
 
 // ============================================================
 // TIPOS
@@ -261,7 +262,7 @@ export const SolicitacoesWidget: React.FC<Props> = ({ vendedorId, rotaId, lang =
       
     } catch (e: any) {
       console.error('[SOLICITACOES] Erro:', e);
-      setErro(e.message || t.erro);
+      setErro(mensagemErro(e, t.erro));
     } finally {
       setLoading(false);
     }

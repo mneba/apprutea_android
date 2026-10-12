@@ -14,6 +14,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
 import { ClienteRotaDia } from '../types';
+import { mensagemErro } from '../utils/mensagemErro';
 
 interface Props {
   route: {
@@ -96,7 +97,7 @@ export default function PagamentoScreen({ route, navigation }: Props) {
 
     } catch (error: any) {
       console.error('Erro ao registrar pagamento:', error);
-      Alert.alert('Erro', error.message || 'Não foi possível registrar o pagamento');
+      Alert.alert('Erro', mensagemErro(error, 'Não foi possível registrar o pagamento'));
     } finally {
       setLoading(false);
     }

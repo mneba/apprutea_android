@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import {
+  ActivityIndicator,
   Modal,
   ScrollView,
   StyleSheet,
@@ -42,6 +43,10 @@ interface MenuPagamentoProps {
   onUsarCredito: () => void;
   onPagarMultiplas: () => void;
   onQuitarEmprestimo: () => void;
+  /** Uma gravacao em curso: o botao vira espera e a folha para de aceitar toque. */
+  processando?: boolean;
+  /** `emprestimos.valor_total`, para o cenario que a folha mostra antes de gravar. */
+  valorTotalEmprestimo?: number;
   t: {
     parcela: string;
     menuTitulo?: string;
@@ -64,6 +69,11 @@ interface MenuPagamentoProps {
     quitarEmprestimo?: string;
     quantoPagar?: string;
     valorAcimaMax?: string;
+    registrando?: string;
+    emprestimoLbl?: string;
+    jaPagoLbl?: string;
+    estePagamento?: string;
+    novoSaldoLbl?: string;
   };
 }
 
@@ -100,6 +110,8 @@ export default function MenuPagamento({
   onUsarCredito,
   onPagarMultiplas,
   onQuitarEmprestimo,
+  processando = false,
+  valorTotalEmprestimo = 0,
   t,
 }: MenuPagamentoProps) {
   const [opcao, setOpcao] = useState<OpcaoRadio>(null);
@@ -130,6 +142,69 @@ export default function MenuPagamento({
   const valorSaldoLimitado = teto(valorSaldo);
   const creditoSaldo = complemento(valorSaldo);
 
+  // ─────────────────────────────────────────────────────────────────────
+  // POR QUE O CENARIO E O BOTAO MORAM AQUI
+  //
+  // Relatado em 11/10/2026: "a reacao do botao pagar nao esta muito boa".
+  // O caminho era: escolher a opcao, aparecer um botao, toca-lo, a folha
+  // DESCER e um segundo dialogo SUBIR por cima com os mesmos numeros, tocar
+  // confirmar de novo — e aí o dialogo fechava antes da RPC, deixando a tela
+  // parada sem sinal nenhum de que algo estava acontecendo. Duas animacoes
+  // cruzadas para uma decisao, e o unico momento em que o vendedor precisava
+  // de resposta era justamente o que nao tinha nenhuma.
+  //
+  // Agora o ciclo inteiro acontece na folha: escolher mostra o cenario,
+  // confirmar vira espera no proprio botao, e a folha so fecha quando o
+  // pagamento gravou.
+  // ─────────────────────────────────────────────────────────────────────
+
+  const cenario = (valorEspecie: number, valorCredito: number = 0) => {
+    if (!(valorTotalEmprestimo > 0)) return null;
+    const jaPago = Math.max(valorTotalEmprestimo - saldoEmprestimo, 0);
+    const novo = Math.max(saldoEmprestimo - valorEspecie, 0);
+    return (
+      <View style={S.cenario}>
+        <View style={S.resumoLinha}>
+          <Text style={S.resumoLbl}>{t.emprestimoLbl || 'Emprestimo'}</Text>
+          <Text style={S.resumoVal}>{fmt(valorTotalEmprestimo)}</Text>
+        </View>
+        <View style={S.resumoLinha}>
+          <Text style={S.resumoLbl}>{t.jaPagoLbl || 'Ja pago'}</Text>
+          <Text style={S.resumoVal}>{fmt(jaPago)}</Text>
+        </View>
+        <View style={S.resumoLinha}>
+          <Text style={S.resumoLbl}>{t.estePagamento || 'Este pagamento'}</Text>
+          <Text style={[S.resumoVal, { fontWeight: '700' }]}>
+            {fmt(valorEspecie)}{valorCredito > 0 ? ` + ${fmt(valorCredito)} ${t.creditoLbl2 || 'credito'}` : ''}
+          </Text>
+        </View>
+        <View style={S.divider} />
+        <View style={S.resumoLinha}>
+          <Text style={S.novoLbl}>{t.novoSaldoLbl || 'Novo saldo'}</Text>
+          <Text style={S.novoVal}>{fmt(novo)}</Text>
+        </View>
+      </View>
+    );
+  };
+
+  const botao = (rotulo: string, aoTocar: () => void, vermelho?: boolean) => (
+    <TouchableOpacity
+      style={[S.btnConfirmar, vermelho && S.btnQuitar, processando && S.btnOcupado]}
+      onPress={aoTocar}
+      disabled={processando}
+      activeOpacity={0.85}
+    >
+      {processando ? (
+        <View style={S.btnLinha}>
+          <ActivityIndicator size="small" color="#fff" />
+          <Text style={S.btnConfirmarTx}>{t.registrando || 'Registrando...'}</Text>
+        </View>
+      ) : (
+        <Text style={S.btnConfirmarTx}>{rotulo}</Text>
+      )}
+    </TouchableOpacity>
+  );
+
   const confirmarValorLivre = () => {
     const v = parseValor(valorLivre);
     if (v <= 0) { setErro(t.quantoPagar || 'Informe um valor'); return; }
@@ -143,9 +218,9 @@ export default function MenuPagamento({
   if (!visible || !parcela) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => { if (!processando) onClose(); }}>
       <View style={S.overlay}>
-        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
+        <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} disabled={processando} />
         <View style={S.folha}>
           <View style={S.handle} />
 
@@ -162,7 +237,7 @@ export default function MenuPagamento({
               {/* Fechar explícito. Tocar fora e arrastar a folha já fechavam,
                   mas nenhum dos dois é visível — quem não conhece o gesto
                   ficava preso numa tela de dinheiro. */}
-              <TouchableOpacity style={S.fechar} onPress={onClose} hitSlop={10}>
+              <TouchableOpacity style={S.fechar} onPress={onClose} hitSlop={10} disabled={processando}>
                 <Ionicons name="close" size={20} color="#6B7280" />
               </TouchableOpacity>
             </View>
@@ -181,7 +256,7 @@ export default function MenuPagamento({
             )}
 
             {/* Grupo de radios */}
-            <View style={S.grupo}>
+            <View style={S.grupo} pointerEvents={processando ? 'none' : 'auto'}>
               {/* Saldo — só se parcial */}
               {isParcial && (
                 <View style={[S.opcao, opcao === 'saldo' && S.opcaoSel]}>
@@ -202,9 +277,13 @@ export default function MenuPagamento({
                     </View>
                   </TouchableOpacity>
                   {opcao === 'saldo' && (
-                    <TouchableOpacity style={S.btnConfirmar} onPress={() => onPagarValor(valorSaldoLimitado, creditoSaldo)}>
-                      <Text style={S.btnConfirmarTx}>{t.confirmar || 'Confirmar'} {fmt(valorSaldoLimitado)}</Text>
-                    </TouchableOpacity>
+                    <View style={{ marginTop: 10 }}>
+                      {cenario(valorSaldoLimitado, creditoSaldo)}
+                      {botao(
+                        `${t.confirmar || 'Confirmar'} ${fmt(valorSaldoLimitado)}`,
+                        () => onPagarValor(valorSaldoLimitado, creditoSaldo),
+                      )}
+                    </View>
                   )}
                 </View>
               )}
@@ -228,9 +307,13 @@ export default function MenuPagamento({
                   </View>
                 </TouchableOpacity>
                 {opcao === 'cheia' && (
-                  <TouchableOpacity style={S.btnConfirmar} onPress={() => onPagarValor(valorCheioLimitado, creditoCheio)}>
-                    <Text style={S.btnConfirmarTx}>{t.confirmar || 'Confirmar'} {fmt(valorCheioLimitado)}</Text>
-                  </TouchableOpacity>
+                  <View style={{ marginTop: 10 }}>
+                    {cenario(valorCheioLimitado, creditoCheio)}
+                    {botao(
+                      `${t.confirmar || 'Confirmar'} ${fmt(valorCheioLimitado)}`,
+                      () => onPagarValor(valorCheioLimitado, creditoCheio),
+                    )}
+                  </View>
                 )}
               </View>
 
@@ -261,9 +344,13 @@ export default function MenuPagamento({
                       />
                     </View>
                     {erro && <Text style={S.erro}>{erro}</Text>}
-                    <TouchableOpacity style={S.btnConfirmar} onPress={confirmarValorLivre}>
-                      <Text style={S.btnConfirmarTx}>{t.confirmar || 'Confirmar'}</Text>
-                    </TouchableOpacity>
+                    {parseValor(valorLivre) > 0 && cenario(parseValor(valorLivre))}
+                    {botao(
+                      parseValor(valorLivre) > 0
+                        ? `${t.confirmar || 'Confirmar'} ${fmt(parseValor(valorLivre))}`
+                        : (t.confirmar || 'Confirmar'),
+                      confirmarValorLivre,
+                    )}
                   </View>
                 )}
               </View>
@@ -283,29 +370,26 @@ export default function MenuPagamento({
                   {opcao === 'credito' && (
                     <View style={{ marginTop: 10 }}>
                       <Text style={S.resumoTx}>{t.usarCreditoResumo || 'O crédito será aplicado a partir desta parcela.'}</Text>
-                      <TouchableOpacity style={S.btnConfirmar} onPress={onUsarCredito}>
-                        <Text style={S.btnConfirmarTx}>{t.confirmar || 'Confirmar'}</Text>
-                      </TouchableOpacity>
+                      {botao(t.confirmar || 'Confirmar', onUsarCredito)}
                     </View>
                   )}
                 </View>
               )}
 
-              {/* Pagar mais de 1 — radio que abre a folha de seleção */}
-              <View style={[S.opcao, opcao === 'multiplas' && S.opcaoSel]}>
-                <TouchableOpacity style={S.opcaoHead} onPress={() => setOpcao('multiplas')} activeOpacity={0.7}>
+              {/* Pagar mais de 1 — nao e escolha, e caminho: leva para a selecao.
+                  Era um radio que revelava um botao "Selecionar parcelas" para
+                  fazer exatamente o que o toque na opcao ja dizia. A seta no
+                  fim da linha avisa que daqui se sai da folha. */}
+              <View style={S.opcao}>
+                <TouchableOpacity style={S.opcaoHead} onPress={onPagarMultiplas} activeOpacity={0.7} disabled={processando}>
                   <View style={S.opcaoEsq}>
-                    <View style={[S.iconeBox, { backgroundColor: opcao === 'multiplas' ? '#6366F1' : '#F3F4F6' }]}>
-                      <Ionicons name="list-outline" size={17} color={opcao === 'multiplas' ? '#fff' : '#6B7280'} />
+                    <View style={[S.iconeBox, { backgroundColor: '#F3F4F6' }]}>
+                      <Ionicons name="list-outline" size={17} color="#6B7280" />
                     </View>
-                    <Text style={[S.opcaoLbl, opcao === 'multiplas' && S.opcaoLblSel]}>{t.pagarVarias || 'Pagar mais de 1 parcela'}</Text>
+                    <Text style={S.opcaoLbl}>{t.pagarVarias || 'Pagar mais de 1 parcela'}</Text>
                   </View>
+                  <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
                 </TouchableOpacity>
-                {opcao === 'multiplas' && (
-                  <TouchableOpacity style={S.btnConfirmar} onPress={onPagarMultiplas}>
-                    <Text style={S.btnConfirmarTx}>{t.selecionarParcelas || 'Selecionar parcelas'}</Text>
-                  </TouchableOpacity>
-                )}
               </View>
 
               {/* Quitar empréstimo — radio com resumo + confirmar */}
@@ -331,9 +415,7 @@ export default function MenuPagamento({
                         <Text style={[S.resumoVal, { color: '#4F46E5' }]}>{fmt(creditoDisponivel)}</Text>
                       </View>
                     )}
-                    <TouchableOpacity style={[S.btnConfirmar, S.btnQuitar]} onPress={onQuitarEmprestimo}>
-                      <Text style={S.btnConfirmarTx}>{t.confirmar || 'Confirmar'} {fmt(saldoEmprestimo)}</Text>
-                    </TouchableOpacity>
+                    {botao(`${t.confirmar || 'Confirmar'} ${fmt(saldoEmprestimo)}`, onQuitarEmprestimo, true)}
                   </View>
                 )}
               </View>
@@ -387,6 +469,11 @@ const S = StyleSheet.create({
   resumoVal: { fontSize: 13, fontWeight: '600', color: '#1F2937' },
   btnConfirmar: { backgroundColor: '#10B981', borderRadius: 10, padding: 12, alignItems: 'center', marginTop: 11, shadowColor: '#10B981', shadowOpacity: 0.3, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
   btnConfirmarTx: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  btnOcupado: { opacity: 0.75 },
+  btnLinha: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  cenario: { backgroundColor: '#F9FAFB', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#E5E7EB' },
+  novoLbl: { fontSize: 14, fontWeight: '700', color: '#1F2937' },
+  novoVal: { fontSize: 17, fontWeight: '700', color: '#1F2937' },
   btnQuitar: { backgroundColor: '#DC2626', shadowColor: '#DC2626' },
   inputBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderRadius: 10, borderWidth: 1, borderColor: '#E5E7EB', paddingHorizontal: 12, paddingVertical: 8, width: '100%', overflow: 'hidden' },
   currency: { fontSize: 18, fontWeight: '700', color: '#6B7280', marginRight: 8 },

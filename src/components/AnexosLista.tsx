@@ -14,7 +14,8 @@ import {
 } from 'react-native';
 import * as anexosSvc from '../services/anexos';
 import { Anexo } from '../services/anexos';
-import ConfirmModal from './ConfirmModal';
+import ConfirmModal from './ConfirmModal';
+import { mensagemErro } from '../utils/mensagemErro';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Lista de anexos (evidências) de um cliente ou de um pagamento.
@@ -137,7 +138,7 @@ export default function AnexosLista({
       setUrls(mapa);
     } catch (e: any) {
       console.error('❌ [AnexosLista] carregar:', e);
-      setErro(e?.message || 'Falha ao carregar anexos.');
+      setErro(mensagemErro(e, 'Falha ao carregar anexos.'));
     } finally {
       setCarregando(false);
     }
@@ -173,7 +174,7 @@ export default function AnexosLista({
       setDescricao('');
     } catch (e: any) {
       console.error('❌ [AnexosLista] escolher:', e);
-      setErro(e?.message || 'Falha ao abrir a imagem.');
+      setErro(mensagemErro(e, 'Falha ao abrir a imagem.'));
     }
   };
 
@@ -200,7 +201,7 @@ export default function AnexosLista({
     } catch (e: any) {
       console.error('❌ [AnexosLista] enviar:', e);
       // Mantém a foto na fila para o usuário tentar de novo ou cancelar.
-      setErro(e?.message || 'Falha ao enviar.');
+      setErro(mensagemErro(e, 'Falha ao enviar.'));
     } finally {
       setEnviando(false);
     }
@@ -215,7 +216,7 @@ export default function AnexosLista({
       await carregar();
     } catch (e: any) {
       console.error('❌ [AnexosLista] remover:', e);
-      setErro(e?.message || 'Falha ao remover.');
+      setErro(mensagemErro(e, 'Falha ao remover.'));
     }
   };
 

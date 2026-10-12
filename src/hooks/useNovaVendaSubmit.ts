@@ -26,6 +26,8 @@ interface SubmitFormValues {
   taxaJuros: string;
   frequencia: string;
   diaSemanaPagamento: string;
+  /** Conjunto de dias da semana. O escalar acima e o primeiro dele. */
+  diasSemanaPagamento: number[];
   diaMesPagamento: string;
   diasMesFlexivel: number[];
   iniciarProximoMes: boolean;
@@ -154,6 +156,10 @@ export function useNovaVendaSubmit(ctx: SubmitContext) {
       // Params comuns de frequência
       const freqParams = {
         dia_semana: fv.frequencia === 'SEMANAL' ? parseInt(fv.diaSemanaPagamento) : null,
+        // O conjunto manda no cronograma; o escalar acima fica para os
+        // leitores antigos. Fora do SEMANAL vai nulo, e as funcoes do
+        // Postgres ainda descartam por CASE — duas guardas, de proposito.
+        dias_semana: fv.frequencia === 'SEMANAL' ? fv.diasSemanaPagamento : null,
         dia_mes: fv.frequencia === 'MENSAL' ? parseInt(fv.diaMesPagamento) : null,
         dias_mes: fv.frequencia === 'FLEXIVEL' ? fv.diasMesFlexivel : null,
         iniciar_proximo_mes: fv.frequencia === 'FLEXIVEL' ? fv.iniciarProximoMes : false,
@@ -177,6 +183,7 @@ export function useNovaVendaSubmit(ctx: SubmitContext) {
           p_user_id: userId, p_liquidacao_id: liqId,
           p_observacoes: fv.observacoesEmprestimo.trim() || null,
           p_dia_semana_cobranca: freqParams.dia_semana,
+          p_dias_semana_cobranca: freqParams.dias_semana,
           p_dia_mes_cobranca: freqParams.dia_mes,
           p_dias_mes_cobranca: freqParams.dias_mes,
           p_iniciar_proximo_mes: freqParams.iniciar_proximo_mes,
@@ -215,6 +222,7 @@ export function useNovaVendaSubmit(ctx: SubmitContext) {
             p_user_id: userId, p_liquidacao_id: liqId,
             p_observacoes: fv.observacoesEmprestimo.trim() || null,
             p_dia_semana_cobranca: freqParams.dia_semana,
+            p_dias_semana_cobranca: freqParams.dias_semana,
             p_dia_mes_cobranca: freqParams.dia_mes,
             p_dias_mes_cobranca: freqParams.dias_mes,
             p_iniciar_proximo_mes: freqParams.iniciar_proximo_mes,
@@ -230,6 +238,7 @@ export function useNovaVendaSubmit(ctx: SubmitContext) {
             p_data_primeiro_vencimento: fv.dataPrimeiroVencimento,
             p_empresa_id: empresaId, p_rota_id: rotaId, p_vendedor_id: vendedorId, p_user_id: userId,
             p_dia_semana_cobranca: freqParams.dia_semana,
+            p_dias_semana_cobranca: freqParams.dias_semana,
             p_dia_mes_cobranca: freqParams.dia_mes,
             p_dias_mes_cobranca: freqParams.dias_mes,
             p_iniciar_proximo_mes: freqParams.iniciar_proximo_mes,
@@ -247,6 +256,7 @@ export function useNovaVendaSubmit(ctx: SubmitContext) {
             p_frequencia: fv.frequencia,
             p_data_primeiro_vencimento: fv.dataPrimeiroVencimento,
             p_dia_semana_cobranca: freqParams.dia_semana,
+            p_dias_semana_cobranca: freqParams.dias_semana,
             p_dia_mes_cobranca: freqParams.dia_mes,
             p_dias_mes_cobranca: freqParams.dias_mes,
             p_iniciar_proximo_mes: freqParams.iniciar_proximo_mes,
@@ -287,6 +297,7 @@ export function useNovaVendaSubmit(ctx: SubmitContext) {
               frequencia: fv.frequencia,
               data_primeiro_vencimento: fv.dataPrimeiroVencimento,
               dia_semana_cobranca: freqParams.dia_semana,
+              dias_semana_cobranca: freqParams.dias_semana,
               dia_mes_cobranca: freqParams.dia_mes,
               dias_mes_cobranca: freqParams.dias_mes,
               iniciar_proximo_mes: freqParams.iniciar_proximo_mes,
@@ -342,6 +353,7 @@ export function useNovaVendaSubmit(ctx: SubmitContext) {
           p_frequencia: fv.frequencia,
           p_data_primeiro_vencimento: fv.dataPrimeiroVencimento,
           p_dia_semana_cobranca: freqParams.dia_semana,
+          p_dias_semana_cobranca: freqParams.dias_semana,
           p_dia_mes_cobranca: freqParams.dia_mes,
           p_dias_mes_cobranca: freqParams.dias_mes,
           p_iniciar_proximo_mes: fv.frequencia === 'FLEXIVEL' ? fv.iniciarProximoMes : null,

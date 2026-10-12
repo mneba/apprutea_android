@@ -31,7 +31,6 @@ import {
   ModalAlteracao,
   ModalCalendario,
   ModalDDI,
-  ModalDiaSemana,
   ModalSegmento,
 } from '../components/nova-venda/PickerModals';
 import ResumoVenda from '../components/nova-venda/ResumoVenda';
@@ -132,6 +131,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
       setFrequencia: form.setFrequencia,
       setDataPrimeiroVencimento: form.setDataPrimeiroVencimento,
       setDiaSemanaPagamento: form.setDiaSemanaPagamento,
+      setDiasSemanaPagamento: form.setDiasSemanaPagamento,
       setDiaMesPagamento: form.setDiaMesPagamento,
       setDiasMesFlexivel: form.setDiasMesFlexivel,
       setIniciarProximoMes: form.setIniciarProximoMes,
@@ -182,13 +182,16 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     [config.trabalhaDomingo, form.DIAS_SEMANA]
   );
 
-  // Se a rota não trabalha domingo e o formulário veio com domingo escolhido
-  // (default antigo ou termos de uma solicitação), reposiciona na segunda.
+  // Se a rota não trabalha domingo, domingo sai do conjunto — venha ele do
+  // default antigo ou dos termos de uma solicitação. Sobrando nada, cai na
+  // segunda: o Postgres também descarta domingo nessas rotas, e um conjunto
+  // vazio ali degeneraria para o semanal de um dia sem ninguém avisar.
   React.useEffect(() => {
-    if (!config.trabalhaDomingo && form.diaSemanaPagamento === '0') {
-      form.setDiaSemanaPagamento('1');
-    }
-  }, [config.trabalhaDomingo, form.diaSemanaPagamento]);
+    if (config.trabalhaDomingo) return;
+    if (!form.diasSemanaPagamento.includes(0)) return;
+    const resto = form.diasSemanaPagamento.filter((d: number) => d !== 0);
+    form.setDiasSemanaPagamento(resto.length > 0 ? resto : [1]);
+  }, [config.trabalhaDomingo, form.diasSemanaPagamento]);
 
   const isClienteReadOnly = !!(clienteExistente?.id || buscaDoc.clienteEncontradoId);
   const isDisabled = isRenegociacao || buscaDoc.isVendaAprovadaTravada || form.isRenovacaoTravada || !!(buscaDoc.solicitacaoRenovacaoDetectada);
@@ -221,6 +224,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
       taxaJuros: form.taxaJuros,
       frequencia: form.frequencia,
       diaSemanaPagamento: form.diaSemanaPagamento,
+      diasSemanaPagamento: form.diasSemanaPagamento,
       diaMesPagamento: form.diaMesPagamento,
       diasMesFlexivel: form.diasMesFlexivel,
       iniciarProximoMes: form.iniciarProximoMes,
@@ -353,7 +357,10 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                   taxaJuros={form.taxaJuros} setTaxaJuros={form.setTaxaJuros}
                   taxaJurosPersonalizada={form.taxaJurosPersonalizada} setTaxaJurosPersonalizada={form.setTaxaJurosPersonalizada}
                   frequencia={form.frequencia} setFrequencia={form.setFrequencia}
-                  diaSemanaPagamento={form.diaSemanaPagamento} setDiaSemanaPagamento={form.setDiaSemanaPagamento}
+                  diasSemanaPagamento={form.diasSemanaPagamento}
+                  alternarDiaSemana={form.alternarDiaSemana}
+                  definirDiaSemanaUnico={form.setDiaSemanaPagamento}
+                  diasSemanaDisponiveis={diasSemanaDisponiveis}
                   diaMesPagamento={form.diaMesPagamento} setDiaMesPagamento={form.setDiaMesPagamento}
                   diasMesFlexivel={form.diasMesFlexivel}
                   dataPrimeiroVencimento={form.dataPrimeiroVencimento} setDataPrimeiroVencimento={form.setDataPrimeiroVencimento}
@@ -365,8 +372,6 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                   camposComErro={form.camposComErro} lang={lang}
                   handleValorEmprestimoChange={form.handleValorEmprestimoChange}
                   limparErroCampo={form.limparErroCampo}
-                  getDiaSemanaLabel={form.getDiaSemanaLabel}
-                  onOpenDiaSemanaModal={() => form.setShowDiaSemanaModal(true)}
                   onOpenDatePicker={() => form.setShowDatePicker(true)}
                   onOpenCarrosselFlexivel={() => setCarrosselFlexivelVisible(true)}
                   dataOperacional={dataOperacional}
@@ -504,15 +509,6 @@ export default function NovaVendaScreen({ navigation, route }: any) {
         onClear={() => { form.setSegmentoId(null); form.setSegmentoNome(''); }}
         onSetBusca={form.setSegmentoBusca}
         onClose={() => form.setShowSegmentoModal(false)}
-      />
-
-      <ModalDiaSemana
-        visible={form.showDiaSemanaModal}
-        diasSemana={diasSemanaDisponiveis}
-        diaSemanaPagamento={form.diaSemanaPagamento}
-        t={t}
-        onSelect={form.setDiaSemanaPagamento}
-        onClose={() => form.setShowDiaSemanaModal(false)}
       />
 
       <ModalCalendario

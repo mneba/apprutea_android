@@ -36,6 +36,7 @@ import AnexosLista from '../components/AnexosLista';
 import Carregando from '../components/Carregando';
 import { useAuth } from '../contexts/AuthContext';
 import { buscarFicha, EventoFicha, Ficha } from '../services/fichaEmprestimo';
+import { mensagemErro } from '../utils/mensagemErro';
 
 type Lang = 'pt-BR' | 'es';
 
@@ -245,7 +246,7 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
       setFicha(await buscarFicha(emprestimoId));
     } catch (e: any) {
       console.error('❌ Ficha:', e);
-      setErro(e?.message || t.erro);
+      setErro(mensagemErro(e, t.erro));
     } finally {
       setCarregando(false);
     }

@@ -33,7 +33,6 @@ import MenuPagamento from '../components/MenuPagamento';
 import ConfirmModal, { LinhaConfirm } from '../components/ConfirmModal';
 import PagarMultiplasModal from '../components/PagarMultiplasModal';
 import ValorLivreModal from '../components/ValorLivreModal';
-import ResumoPagamentoModal from '../components/ResumoPagamentoModal';
 import ParcelasModal, { PagamentoDetalhe } from '../components/ParcelasModal';
 import ProximosDiasModal from '../components/ProximosDiasModal';
 import ReordenarModal from '../components/ReordenarModal';
@@ -45,6 +44,7 @@ import useGPSTracking from '../hooks/useGPSTracking';
 import { DIAS_SEMANA_CURTO } from '../constants/novaVendaConstants';
 import { buscarDiasSemana, MapaDiasSemana } from '../services/diasSemanaEmprestimos';
 import { supabase } from '../services/supabase';
+import { mensagemErro } from '../utils/mensagemErro';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DRAWER_WIDTH = SCREEN_WIDTH * 0.75;
 
@@ -213,6 +213,8 @@ const textos = {
     forma: 'Forma:', gpsOk: 'GPS OK', gpsErro: 'Sem GPS',
     pagarBtn: 'PAGAR', pendente: 'PENDENTE', vencimento: 'Vencimento:',
     processando: 'Processando...', sucesso: 'Pagamento registrado!',
+    registrando: 'Registrando...', emprestimoLbl: 'Empréstimo', jaPagoLbl: 'Já pago',
+    estePagamento: 'Este pagamento', novoSaldoLbl: 'Novo saldo',
     erro: 'Erro ao registrar pagamento',
     motivoEstorno: 'Motivo do estorno', estornarPagamento: 'Estornar Pagamento',
     confirmarEstorno: 'CONFIRMAR ESTORNO', cancelar: 'Cancelar',
@@ -308,6 +310,8 @@ const textos = {
     forma: 'Forma:', gpsOk: 'GPS OK', gpsErro: 'Sin GPS',
     pagarBtn: 'PAGAR', pendente: 'PENDIENTE', vencimento: 'Vencimiento:',
     processando: 'Procesando...', sucesso: '¡Pago registrado!',
+    registrando: 'Registrando...', emprestimoLbl: 'Préstamo', jaPagoLbl: 'Ya pagado',
+    estePagamento: 'Este pago', novoSaldoLbl: 'Nuevo saldo',
     erro: 'Error al registrar pago',
     motivoEstorno: 'Motivo de reversión', estornarPagamento: 'Reversar Pago',
     confirmarEstorno: 'CONFIRMAR REVERSIÓN', cancelar: 'Cancelar',
@@ -661,11 +665,6 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [loadingMultiplas, setLoadingMultiplas] = useState(false);
   // ⭐ Popup "Valor livre" (mínimo, 2 passos: campo + cenário)
   const [valorLivreVisible, setValorLivreVisible] = useState(false);
-  // ⭐ Resumo de pagamento (saldo/cheia/valor livre → confirma o cenário)
-  const [resumoVisible, setResumoVisible] = useState(false);
-  const [resumoValor, setResumoValor] = useState(0);
-  // Complemento em crédito do pagamento em curso (0 quando é só dinheiro).
-  const [resumoCredito, setResumoCredito] = useState(0);
   const [modalEstornoVisible, setModalEstornoVisible] = useState(false);
   const [parcelasModal, setParcelasModal] = useState<ParcelaModal[]>([]);
   const [loadingParcelas, setLoadingParcelas] = useState(false);
@@ -838,7 +837,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       setModoReordenar(false);
       setListaReordenar([]);
     } catch (e: any) {
-      Alert.alert('Erro', 'Não foi possível salvar a ordem: ' + (e.message || ''));
+      Alert.alert('Erro', mensagemErro(e, 'Não foi possível salvar a ordem.'));
     } finally {
       setSalvandoOrdem(false);
     }
@@ -909,7 +908,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         showAlert('Erro', res?.mensagem || 'Erro ao registrar');
       }
     } catch (e: any) {
-      showAlert('Erro', e.message || 'Erro ao registrar não pago');
+      showAlert('Erro', mensagemErro(e, 'Erro ao registrar não pago'));
     } finally {
       setSalvandoNaoPago(false);
     }
@@ -1294,7 +1293,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       } as ParcelaModal, clienteInfo);
     } catch (e: any) {
       console.error('❌ Próxima parcela para novo pagamento:', e);
-      Alert.alert(t.erroGenerico, e?.message || '');
+      Alert.alert(t.erroGenerico, mensagemErro(e));
     }
     // `abrirPagamento` é estável (useCallback abaixo); as demais são setters e
     // valores da própria tela.
@@ -1415,7 +1414,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         emprestimo_status: emprestimo.status,
       });
     } catch (e: any) {
-      Alert.alert(t.erroGenerico, e.message || 'Erro ao abrir pagamento');
+      Alert.alert(t.erroGenerico, mensagemErro(e, 'Erro ao abrir pagamento'));
     }
   }, [liqId, t, abrirPagamento]);
   // AÇÕES DO MENU DE PAGAMENTO (5 opções)
@@ -1451,10 +1450,9 @@ export default function ClientesScreen({ navigation, route }: any) {
         loadLiq();
       } else {
         Alert.alert(t.erroGenerico, res?.mensagem || 'Erro no pagamento');
-        setMenuPagamentoVisible(true);
       }
     } catch (e: any) {
-      Alert.alert(t.erroGenerico, e.message || 'Erro no pagamento');
+      Alert.alert(t.erroGenerico, mensagemErro(e, 'Erro no pagamento'));
     } finally {
       setProcessando(false);
     }
@@ -1484,7 +1482,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         Alert.alert(t.erroGenerico, res?.mensagem || 'Erro ao usar crédito');
       }
     } catch (e: any) {
-      Alert.alert(t.erroGenerico, e.message || 'Erro ao usar crédito');
+      Alert.alert(t.erroGenerico, mensagemErro(e, 'Erro ao usar crédito'));
     } finally {
       setProcessando(false);
     }
@@ -1494,19 +1492,14 @@ export default function ClientesScreen({ navigation, route }: any) {
   // O menu manda dinheiro E crédito. O crédito é o complemento quando o
   // dinheiro disponível não cobre a parcela inteira — sem ele a parcela ficava
   // PARCIAL com o crédito intacto (caso Maichel: $29 numa parcela de $36).
+  //
+  // O cenario e a confirmacao ficam DENTRO da folha (ver MenuPagamento): o
+  // toque no botao grava. Nao ha mais um segundo dialogo repetindo os mesmos
+  // numeros, e a folha so fecha quando `fn_registrar_pagamento` responde.
   const acaoPagarValor = useCallback((valorEspecie: number, valorCredito: number = 0) => {
     if (!parcelaPagamento) return;
-    setMenuPagamentoVisible(false);
-    setResumoValor(valorEspecie);
-    setResumoCredito(valorCredito);
-    setResumoVisible(true);
-  }, [parcelaPagamento]);
-
-  // Confirma o pagamento após o resumo
-  const handleResumoConfirmar = useCallback(() => {
-    setResumoVisible(false);
-    registrarPagamentoDireto(resumoValor, resumoCredito);
-  }, [resumoValor, resumoCredito, registrarPagamentoDireto]);
+    registrarPagamentoDireto(valorEspecie, valorCredito);
+  }, [parcelaPagamento, registrarPagamentoDireto]);
 
   // 2) Valor livre — abre o modal com campo editável
   const acaoValorLivre = useCallback(() => {
@@ -1561,7 +1554,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         valor_multa: 0,
       })));
     } catch (e: any) {
-      Alert.alert(t.erroGenerico, e.message || 'Erro ao carregar parcelas');
+      Alert.alert(t.erroGenerico, mensagemErro(e, 'Erro ao carregar parcelas'));
       setMultiplasVisible(false);
     } finally {
       setLoadingMultiplas(false);
@@ -1607,7 +1600,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       if (erros > 0) Alert.alert(t.atencao, `${ordenadas.length - erros} de ${ordenadas.length} parcelas pagas.`);
       loadLiq();
     } catch (e: any) {
-      Alert.alert(t.erroGenerico, e.message || 'Erro no pagamento múltiplo');
+      Alert.alert(t.erroGenerico, mensagemErro(e, 'Erro no pagamento múltiplo'));
     } finally {
       setProcessando(false);
     }
@@ -1659,7 +1652,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         showAlert(t.erroGenerico, res?.mensagem || 'Erro ao quitar');
       }
     } catch (e: any) {
-      showAlert(t.erroGenerico, e.message || 'Erro ao quitar');
+      showAlert(t.erroGenerico, mensagemErro(e, 'Erro ao quitar'));
     } finally {
       setProcessando(false);
     }
@@ -1793,7 +1786,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       }
     } catch (e: any) { 
       console.error('❌ Erro ao buscar próxima parcela:', e); 
-      Alert.alert(t.erroGenerico, e.message || t.erroBuscarParcela);
+      Alert.alert(t.erroGenerico, mensagemErro(e, t.erroBuscarParcela));
     }
     finally { setLoadingDadosPagamento(false); }
   }, [clienteModal]);
@@ -1877,7 +1870,7 @@ export default function ClientesScreen({ navigation, route }: any) {
           // Recarregar dados completos em background (sem bloquear UI)
           setTimeout(() => loadLiq(), 500);
         } else { showAlert(t.erroGenerico, res?.mensagem || t.erro); }
-      } catch (e: any) { console.error('Erro pagamento:', e); showAlert(t.erroGenerico, e.message || t.erro); }
+      } catch (e: any) { console.error('Erro pagamento:', e); showAlert(t.erroGenerico, mensagemErro(e, t.erro)); }
       finally { setProcessando(false); }
     };
     
@@ -2152,7 +2145,7 @@ export default function ClientesScreen({ navigation, route }: any) {
 
     } catch (e: any) {
       console.error('Erro ao verificar autorização estorno:', e);
-      showAlert(t.erroGenerico, e.message || 'Erro ao verificar autorização');
+      showAlert(t.erroGenerico, mensagemErro(e, 'Erro ao verificar autorização'));
     }
   }, [liqId, t, vendedor, configVendedor, clienteModal, lang, showAlert]);
 
@@ -2200,7 +2193,7 @@ export default function ClientesScreen({ navigation, route }: any) {
 
     } catch (e: any) {
       console.error('Erro ao criar solicitação:', e);
-      showAlert(t.erroGenerico, e.message || 'Erro ao enviar solicitação');
+      showAlert(t.erroGenerico, mensagemErro(e, 'Erro ao enviar solicitação'));
     } finally {
       setEnviandoSolicitacaoEstorno(false);
     }
@@ -2249,7 +2242,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       }
     } catch (e: any) { 
       console.error('Erro estorno:', e); 
-      Alert.alert(t.erroGenerico, e.message || t.estornoErro); 
+      Alert.alert(t.erroGenerico, mensagemErro(e, t.estornoErro)); 
     }
     finally { setProcessando(false); }
   }, [parcelaEstorno, motivoEstorno, vendedor, t, clienteModal, abrirParcelas, loadLiq, processando]);
@@ -2441,7 +2434,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         ...c,
         emprestimos: c.emprestimos.map(e => (
           e.frequencia_pagamento === 'SEMANAL' && diasSemana[e.emprestimo_id] != null
-            ? { ...e, dia_semana_cobranca: diasSemana[e.emprestimo_id] }
+            ? { ...e, dias_semana_cobranca: diasSemana[e.emprestimo_id] }
             : e
         )),
       }));
@@ -2449,7 +2442,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     // Mesmo corte por EMPRÉSTIMO do breadcrumb da aba Todos.
     if (filtroDiaSemana != null) {
       r = r
-        .map(c => ({ ...c, emprestimos: c.emprestimos.filter(e => diasSemana[e.emprestimo_id] === filtroDiaSemana) }))
+        .map(c => ({ ...c, emprestimos: c.emprestimos.filter(e => (diasSemana[e.emprestimo_id] || []).includes(filtroDiaSemana as any)) }))
         .filter(c => c.emprestimos.length > 0);
     }
 
@@ -2692,8 +2685,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       const dias = new Set<number>();
       for (const e of cli.emprestimos) {
         if (e.frequencia_pagamento !== 'SEMANAL') continue;
-        const d = diasSemana[e.id ?? e.emprestimo_id];
-        if (d != null) dias.add(d);
+        for (const d of (diasSemana[e.id ?? e.emprestimo_id] || [])) dias.add(d);
       }
       dias.forEach(d => { c[d] += 1; });
     }
@@ -2761,7 +2753,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         ...c,
         emprestimos: c.emprestimos.map(e => (
           e.frequencia_pagamento === 'SEMANAL' && diasSemana[e.id] != null
-            ? { ...e, dia_semana_cobranca: diasSemana[e.id] }
+            ? { ...e, dias_semana_cobranca: diasSemana[e.id] }
             : e
         )),
       }));
@@ -2771,7 +2763,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     // porque o mesmo cliente tem outro empréstimo naquele dia.
     if (filtroDiaSemana != null) {
       r = r
-        .map(c => ({ ...c, emprestimos: c.emprestimos.filter(e => diasSemana[e.id] === filtroDiaSemana) }))
+        .map(c => ({ ...c, emprestimos: c.emprestimos.filter(e => (diasSemana[e.id] || []).includes(filtroDiaSemana as any)) }))
         .filter(c => c.emprestimos.length > 0);
     }
     // Filtro por status do empréstimo
@@ -3343,20 +3335,8 @@ return (
         onUsarCredito={acaoUsarCredito}
         onPagarMultiplas={acaoPagarMultiplas}
         onQuitarEmprestimo={acaoQuitarEmprestimo}
-        t={t}
-      />
-
-      <ResumoPagamentoModal
-        visible={resumoVisible}
-        onClose={() => setResumoVisible(false)}
-        parcelaNumero={parcelaPagamento?.numero_parcela || 0}
-        clienteNome={clienteModal?.nome || ''}
-        valorPagamento={resumoValor}
-        saldoEmprestimo={Number(clienteModal?.saldo_emprestimo || 0)}
-        totalPagoEmprestimo={Number(emprestimoInfoPag?.total_pago || 0)}
-        valorTotalEmprestimo={Number(emprestimoInfoPag?.valor_total || 0)}
         processando={processando}
-        onConfirmar={handleResumoConfirmar}
+        valorTotalEmprestimo={Number(emprestimoInfoPag?.valor_total || 0)}
         t={t}
       />
 
@@ -3384,6 +3364,7 @@ return (
         saldoEmprestimo={Number(clienteModal?.saldo_emprestimo || 0)}
         totalPagoEmprestimo={Number(emprestimoInfoPag?.total_pago || 0)}
         valorTotalEmprestimo={Number(emprestimoInfoPag?.valor_total || 0)}
+        processando={processando}
         onConfirmar={handleMultiplasConfirmar}
         t={t}
       />
