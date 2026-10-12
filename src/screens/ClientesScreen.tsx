@@ -30,6 +30,7 @@ import LegendaCoresModal from '../components/LegendaCoresModal';
 import { ModalCriarNota, ModalNotasLista, buscarNotasCountPorClientes } from '../components/NotasComponent';
 import PagamentoModal from '../components/PagamentoModal';
 import MenuPagamento from '../components/MenuPagamento';
+import ReciboPagamento, { type DadosPagamentoRecibo } from '../components/ReciboPagamento';
 import ConfirmModal, { LinhaConfirm } from '../components/ConfirmModal';
 import PagarMultiplasModal from '../components/PagarMultiplasModal';
 import ValorLivreModal from '../components/ValorLivreModal';
@@ -719,7 +720,17 @@ export default function ClientesScreen({ navigation, route }: any) {
   const [motivoEstorno, setMotivoEstorno] = useState('');
 
   // Configurações do vendedor e autorização de estorno
-  const [configVendedor, setConfigVendedor] = useState<{ permitir_exclusao_parcelas: boolean } | null>(null);
+  const [configVendedor, setConfigVendedor] = useState<{
+    permitir_exclusao_parcelas: boolean;
+    imprimir_compartilhar_recibo: boolean;
+  } | null>(null);
+
+  // O RECIBO SÓ APARECE SE O ADMIN LIGOU.
+  //
+  // `imprimir_compartilhar_recibo` é a chave "Imprimir Recibos" do cadastro do
+  // vendedor no web — ela já existia e descrevia exatamente isto. Desligada, o
+  // pagamento termina como sempre terminou.
+  const [reciboDados, setReciboDados] = useState<DadosPagamentoRecibo | null>(null);
   const [modalAutorizacaoEstornoVisible, setModalAutorizacaoEstornoVisible] = useState(false);
   const [motivoSolicitacaoEstorno, setMotivoSolicitacaoEstorno] = useState('');
   const [enviandoSolicitacaoEstorno, setEnviandoSolicitacaoEstorno] = useState(false);
@@ -761,7 +772,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     try {
       const { data, error } = await supabase
         .from('configuracoes_vendedor')
-        .select('permitir_exclusao_parcelas')
+        .select('permitir_exclusao_parcelas, imprimir_compartilhar_recibo')
         .eq('vendedor_id', vendedor.id)
         .maybeSingle();
       
@@ -775,15 +786,21 @@ export default function ClientesScreen({ navigation, route }: any) {
           ? true
           : (raw === true || String(raw).toLowerCase() === 'true' || String(raw) === '1');
         console.log('[CONFIG] permitir_exclusao_parcelas raw =', raw, '→', permite);
-        setConfigVendedor({ permitir_exclusao_parcelas: permite });
+        // Recibo é o contrário do estorno: ausente (null) → DESLIGADO.
+        // Ligar sozinho faria aparecer uma tela nova no fim de cada
+        // pagamento para todo vendedor do sistema, sem ninguém ter pedido.
+        setConfigVendedor({
+          permitir_exclusao_parcelas: permite,
+          imprimir_compartilhar_recibo: (data as any).imprimir_compartilhar_recibo === true,
+        });
       } else {
         // Se não existir configuração, permitir por padrão
         console.log('[CONFIG] Sem config, usando default true');
-        setConfigVendedor({ permitir_exclusao_parcelas: true });
+        setConfigVendedor({ permitir_exclusao_parcelas: true, imprimir_compartilhar_recibo: false });
       }
     } catch (e) {
       console.log('[CONFIG] Erro ao carregar config vendedor:', e);
-      setConfigVendedor({ permitir_exclusao_parcelas: true });
+      setConfigVendedor({ permitir_exclusao_parcelas: true, imprimir_compartilhar_recibo: false });
     }
   }, [vendedor?.id]);
 
@@ -1441,6 +1458,26 @@ export default function ClientesScreen({ navigation, route }: any) {
       if (error) throw error;
       const res = Array.isArray(data) ? data[0] : data;
       if (res?.sucesso) {
+        // O comprovante é montado ANTES de limpar o estado: as linhas abaixo
+        // zeram `parcelaPagamento` e `clienteModal` continua, mas depender da
+        // ordem dos setters para ler dados do pagamento é o tipo de coisa que
+        // quebra no próximo refactor.
+        if (configVendedor?.imprimir_compartilhar_recibo && clienteModal?.emprestimo_id && vendedor) {
+          setReciboDados({
+            clienteNome: clienteModal.nome,
+            emprestimoId: clienteModal.emprestimo_id,
+            numeroParcela: parcelaPagamento.numero_parcela,
+            valorEspecie,
+            valorCredito,
+            // Data da LIQUIDAÇÃO, nunca o relógio do aparelho: o vendedor que
+            // recupera um dia atrasado entrega comprovante daquele dia.
+            dataOperacional: dataOperacionalTela,
+            vendedorId: vendedor.id,
+            vendedorNome: vendedor.nome,
+            empresaId: vendedor.empresa_id,
+          });
+        }
+
         setModalPagamentoVisible(false);
         setMenuPagamentoVisible(false);
         setParcelaPagamento(null);
@@ -1456,7 +1493,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     } finally {
       setProcessando(false);
     }
-  }, [parcelaPagamento, processando, coords, liqId, clienteModal, t]);
+  }, [parcelaPagamento, processando, coords, liqId, clienteModal, t, configVendedor, vendedor, dataOperacionalTela]);
 
   // Chama a RPC de crédito em cascata (declarada antes das ações que a usam)
   const usarCreditoCascata = useCallback(async () => {
@@ -3322,6 +3359,15 @@ return (
       />
 
       {/* MODAL PAGAMENTO - COM CRÉDITO E VALIDAÇÕES */}
+      {/* O recibo abre DEPOIS de o dinheiro estar gravado. Fechar sem
+          compartilhar não desfaz nada — é comprovante, não etapa. */}
+      <ReciboPagamento
+        visible={!!reciboDados}
+        dados={reciboDados}
+        idioma={lang}
+        onClose={() => setReciboDados(null)}
+      />
+
       <MenuPagamento
         visible={menuPagamentoVisible}
         onClose={() => setMenuPagamentoVisible(false)}
