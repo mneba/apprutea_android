@@ -646,8 +646,39 @@ ${msg}`); navigation.goBack(); }
   }, [vendaPendenteId, vendaPendenteCarregada]);
 
   // -----------------------------------------------------------
-  // CARREGAR EMPRÉSTIMO ORIGINAL (renegociação)
+  // CARREGAR O EMPRÉSTIMO DE REFERÊNCIA
   // -----------------------------------------------------------
+  //
+  // Pedido do Julio em 07/10/2026: "na renovação de um cliente seria muito
+  // funcional o formulário já abrir preenchido com as informações do último
+  // empréstimo — valor, juros, quantidade de parcelas e frequência. Se o
+  // último foi de 300 nas mesmas condições, ao clicar em Renovar esses dados
+  // já apareceriam como referência, e o cobrador só alteraria o necessário."
+  //
+  // Isto já existia, e falhava justamente no caso que ele descreve. Duas
+  // correções, em 12/10/2026:
+  //
+  // 1. A BUSCA SÓ OLHAVA EMPRÉSTIMO EM ABERTO. A renovação clássica — cliente
+  //    QUITOU e volta para pegar de novo — é detectada por
+  //    `temHistoricoQuitado`, e nesse cliente não há nada ATIVO nem VENCIDO.
+  //    A consulta voltava vazia e o formulário abria em branco. Agora, não
+  //    achando em aberto, procura o último quitado.
+  //
+  // 2. O VALOR VINHA DO SALDO DEVEDOR, e os dois casos querem números
+  //    diferentes:
+  //
+  //      renegociação  refinancia a dívida — o novo principal É o saldo que
+  //                    sobrou, e é isso que o vendedor espera ver;
+  //      renovação     é empréstimo novo de tamanho parecido — quem serve de
+  //                    referência é o PRINCIPAL do anterior, os 300 do
+  //                    exemplo, não os 40 que ainda faltavam.
+  //
+  //    `emprestimOrigemId` distingue os dois sem adivinhação: ele só é
+  //    preenchido nos caminhos que chamam `fn_renegociar_emprestimo`.
+  //
+  // Ordenado por `created_at` e não por `data_emprestimo`: cerca de 650
+  // empréstimos nasceram com data divergente da liquidação (ver CLAUDE.md), e
+  // "o último" tem de ser o último de verdade.
   useEffect(() => {
     const empIdParaCarregar = renegociacao?.emprestimo_id ||
       (tipoEmprestimoDetectado === 'RENOVACAO' && clienteEncontradoId ? '__buscar__' : null);
@@ -665,18 +696,38 @@ ${msg}`); navigation.goBack(); }
             .order('created_at', { ascending: false })
             .limit(1);
           empId = emps?.[0]?.id;
+
+          // Nada em aberto: é o cliente que quitou e voltou. O último quitado
+          // é a referência — sem isto, a renovação mais comum de todas abria
+          // com o formulário em branco.
+          if (!empId) {
+            const { data: quitados } = await supabase
+              .from('emprestimos')
+              .select('id')
+              .eq('cliente_id', clienteEncontradoId)
+              .eq('status', 'QUITADO')
+              .order('created_at', { ascending: false })
+              .limit(1);
+            empId = quitados?.[0]?.id;
+          }
         }
         if (!empId) return;
 
         const { data: emp } = await supabase
           .from('emprestimos')
-          .select('valor_saldo, valor_parcela, numero_parcelas, taxa_juros, frequencia_pagamento, dia_semana_cobranca, dias_semana_cobranca, dia_mes_cobranca, dias_mes_cobranca')
+          .select('valor_principal, valor_saldo, valor_parcela, numero_parcelas, taxa_juros, frequencia_pagamento, dia_semana_cobranca, dias_semana_cobranca, dia_mes_cobranca, dias_mes_cobranca')
           .eq('id', empId)
           .single();
 
         if (emp) {
-          const saldoStr = (emp.valor_saldo || 0).toFixed(2).replace('.00', '');
-          s.setValorEmprestimo(saldoStr);
+          // Renegociação parte do saldo; renovação parte do principal. Ver o
+          // porquê no comentário do topo deste efeito.
+          const ehRenegociacao = !!renegociacao?.emprestimo_id || !!emprestimOrigemId;
+          const base = ehRenegociacao
+            ? Number(emp.valor_saldo || 0)
+            : Number(emp.valor_principal || emp.valor_saldo || 0);
+
+          s.setValorEmprestimo(base.toFixed(2).replace('.00', ''));
           s.setNumeroParcelas(String(emp.numero_parcelas || 12));
           if (emp.taxa_juros != null) {
             s.setTaxaJuros(String(emp.taxa_juros));
@@ -696,7 +747,10 @@ ${msg}`); navigation.goBack(); }
           }
           if (emp.dia_mes_cobranca != null) s.setDiaMesPagamento(String(emp.dia_mes_cobranca));
           if (emp.dias_mes_cobranca) s.setDiasMesFlexivel(emp.dias_mes_cobranca);
-          console.log('📋 Dados do empréstimo original carregados:', { saldo: emp.valor_saldo, freq: emp.frequencia_pagamento, parcelas: emp.numero_parcelas });
+          console.log('📋 Referência carregada:', {
+            origem: ehRenegociacao ? 'saldo (renegociação)' : 'principal (renovação)',
+            valor: base, freq: emp.frequencia_pagamento, parcelas: emp.numero_parcelas,
+          });
         }
       } catch (e) { console.error('Erro ao carregar empréstimo original:', e); }
     })();

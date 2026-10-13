@@ -31,6 +31,7 @@ import { ModalCriarNota, ModalNotasLista, buscarNotasCountPorClientes } from '..
 import PagamentoModal from '../components/PagamentoModal';
 import MenuPagamento from '../components/MenuPagamento';
 import ReciboPagamento, { type DadosPagamentoRecibo } from '../components/ReciboPagamento';
+import { registrarAcao } from '../services/auditoriaApp';
 import ConfirmModal, { LinhaConfirm } from '../components/ConfirmModal';
 import PagarMultiplasModal from '../components/PagarMultiplasModal';
 import ValorLivreModal from '../components/ValorLivreModal';
@@ -1486,9 +1487,23 @@ export default function ClientesScreen({ navigation, route }: any) {
         if (clienteModal?.emprestimo_id) { atualizarSaldoLocalLiq(clienteModal.emprestimo_id); atualizarSaldoLocalTodos(clienteModal.emprestimo_id); }
         loadLiq();
       } else {
+        // Recusa da regra de negócio: a RPC respondeu e disse não. É o caso que
+        // nenhuma tabela registra — não há pagamento para ter `user_id`.
+        registrarAcao('PAGAMENTO_FALHOU', {
+          vendedorId: vendedor?.id || '',
+          registroId: parcelaPagamento.parcela_id,
+          detalhe: res?.mensagem || 'recusado sem mensagem',
+          dados: { valorEspecie, valorCredito, liquidacao_id: liqId },
+        });
         Alert.alert(t.erroGenerico, res?.mensagem || 'Erro no pagamento');
       }
     } catch (e: any) {
+      registrarAcao('PAGAMENTO_FALHOU', {
+        vendedorId: vendedor?.id || '',
+        registroId: parcelaPagamento.parcela_id,
+        detalhe: e?.message || 'erro sem mensagem',
+        dados: { valorEspecie, valorCredito, liquidacao_id: liqId, code: e?.code || null },
+      });
       Alert.alert(t.erroGenerico, mensagemErro(e, 'Erro no pagamento'));
     } finally {
       setProcessando(false);
@@ -2275,10 +2290,25 @@ export default function ClientesScreen({ navigation, route }: any) {
         await loadLiq(true);
       } else { 
         setModalEstornoVisible(false);
+        // Estorno recusado nao deixa rastro: `estornado_por` so e gravado
+        // quando da certo. Sem isto, "tentei estornar e nao deixou" nao tem
+        // onde ser conferido.
+        registrarAcao('ESTORNO_FALHOU', {
+          vendedorId: vendedor?.id || '',
+          registroId: parcelaEstorno?.parcela_id || null,
+          detalhe: res?.mensagem || 'recusado sem mensagem',
+          dados: { motivo: motivoEstorno },
+        });
         Alert.alert(t.erroGenerico, res?.mensagem || t.estornoErro); 
       }
     } catch (e: any) { 
       console.error('Erro estorno:', e); 
+      registrarAcao('ESTORNO_FALHOU', {
+        vendedorId: vendedor?.id || '',
+        registroId: parcelaEstorno?.parcela_id || null,
+        detalhe: e?.message || 'erro sem mensagem',
+        dados: { motivo: motivoEstorno, code: e?.code || null },
+      });
       Alert.alert(t.erroGenerico, mensagemErro(e, t.estornoErro)); 
     }
     finally { setProcessando(false); }

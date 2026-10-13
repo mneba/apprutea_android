@@ -3,6 +3,7 @@ import React, { createContext, ReactNode, useContext, useEffect, useState } from
 import { AppState } from 'react-native';
 import { supabase } from '../services/supabase';
 import { definirIdiomaDasMensagens } from '../utils/mensagemErro';
+import { esquecerAuditoria, registrarAcao } from '../services/auditoriaApp';
 
 interface VendedorAuth {
   id: string;
@@ -121,6 +122,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (error) {
       console.warn('Não foi possível refazer a sessão:', error.message);
+      registrarAcao('SESSAO_RECUPERADA', {
+        vendedorId: v.id,
+        detalhe: 'nao deu: ' + error.message,
+      });
       await AsyncStorage.removeItem('vendedor_data');
       if (typeof window !== 'undefined' && window.localStorage) {
         window.localStorage.removeItem('vendedor_data');
@@ -128,6 +133,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setVendedor(null);
       return false;
     }
+
+    // Chegou aqui: a sessao TINHA caido e foi refeita em silencio. E o evento
+    // por tras do "permission denied" que o vendedor viu em 09/10 — e o unico
+    // desta lista que nao da para derivar de tabela nenhuma, porque nada e
+    // gravado quando acontece.
+    registrarAcao('SESSAO_RECUPERADA', {
+      vendedorId: v.id,
+      detalhe: 'sessao refeita com o codigo guardado',
+    });
     return true;
   };
 
@@ -250,6 +264,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       await supabase.auth.signOut();
       setVendedor(null);
+      // A chave do proximo vendedor pode ser outra.
+      esquecerAuditoria();
     } catch (error) {
       console.error('Erro no logout:', error);
     }

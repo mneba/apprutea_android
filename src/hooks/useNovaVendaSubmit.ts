@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Alert, Platform } from 'react-native';
 import type { Lang, Textos } from '../constants/novaVendaConstants';
 import { supabase } from '../services/supabase';
+import { registrarAcao } from '../services/auditoriaApp';
 
 // ============================================================
 // HOOK: Submit (4 fluxos) + pedido alteração + fechar
@@ -465,6 +466,21 @@ export function useNovaVendaSubmit(ctx: SubmitContext) {
       setShowResultado(true);
     } catch (err: any) {
       console.error('❌ Erro ao registrar venda:', err);
+      // Venda que nao completou nao vira linha em `emprestimos`, entao nao ha
+      // `criado_por_user_id` para contar a historia. E o caso de "preenchi
+      // tudo e sumiu".
+      registrarAcao('VENDA_FALHOU', {
+        vendedorId: vendedorId || '',
+        registroId: ctx.clienteExistente?.id || null,
+        detalhe: err?.message || 'erro sem mensagem',
+        dados: {
+          valor: fv.valorPrincipal,
+          parcelas: fv.numeroParcelas,
+          frequencia: fv.frequencia,
+          tipo: ctx.tipoEmprestimoDetectado,
+          code: err?.code || null,
+        },
+      });
       const msg = err?.message || 'Erro inesperado ao registrar venda.';
       if (Platform.OS === 'web') window.alert(msg); else Alert.alert('Erro', msg);
     } finally {

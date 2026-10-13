@@ -88,6 +88,8 @@ const i18n: Record<Lang, Record<string, string>> = {
     totalCobrancas: 'TOTAL COBRANÇAS', totalMicroseguros: 'TOTAL MICROSEGUROS', totalOutrasReceitas: 'TOTAL OUTRAS RECEITAS',
     totalSaidas: 'TOTAL SAÍDAS', saldoFinal: 'SALDO FINAL',
     fimExtrato: '*** FIM DO EXTRATO ***', compartilhar: 'Compartilhar PDF',
+    reaberturas: 'DIA REABERTO', reaberta: 'Reaberta', fechadaDeNovo: 'Fechada novamente',
+    aposReabertura: 'Após a reabertura', semAlteracoes: 'Nenhuma alteração registrada.',
     detalheEntradas: 'DETALHES ENTRADAS', detalheSaidas: 'DETALHES SAÍDAS',
     cobrancasParcelas: 'COBRANÇAS', microsegurosVendas: 'MICROSEGUROS', outrasReceitas: 'OUTRAS RECEITAS',
     resumo: 'RESUMO',
@@ -136,6 +138,8 @@ const i18n: Record<Lang, Record<string, string>> = {
     totalCobrancas: 'TOTAL COBROS', totalMicroseguros: 'TOTAL MICROSEGUROS', totalOutrasReceitas: 'TOTAL OTROS INGRESOS',
     totalSaidas: 'TOTAL SALIDAS', saldoFinal: 'SALDO FINAL',
     fimExtrato: '*** FIN DEL EXTRACTO ***', compartilhar: 'Compartir PDF',
+    reaberturas: 'DÍA REABIERTO', reaberta: 'Reabierta', fechadaDeNovo: 'Cerrada de nuevo',
+    aposReabertura: 'Después de la reapertura', semAlteracoes: 'Ningún cambio registrado.',
     detalheEntradas: 'DETALLE ENTRADAS', detalheSaidas: 'DETALLE SALIDAS',
     cobrancasParcelas: 'COBROS', microsegurosVendas: 'MICROSEGUROS', outrasReceitas: 'OTROS INGRESOS',
     resumo: 'RESUMEN',
@@ -225,6 +229,15 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const [pagamentos, setPagamentos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [vendedorNome, setVendedorNome] = useState('');
+  // A REABERTURA NO CUPOM DO VENDEDOR — SEM O MOTIVO.
+  //
+  // O motivo é conversa entre quem administra: "reabri para corrigir a
+  // frequência do cliente tal" não diz nada a quem recebe o comprovante no
+  // celular, e o cupom é o papel que chega ao cliente. Ele fica só no extrato
+  // do web (ver ModalExtratoLiquidacao.tsx).
+  //
+  // O que vale aqui é o FATO: este dia foi reaberto, e isto mudou depois.
+  const [auditoria, setAuditoria] = useState<any[]>([]);
   const [dataLiquidacao, setDataLiquidacao] = useState('');
   const [caixaMicroInicial, setCaixaMicroInicial] = useState(0);
   const [caixaMicroFinal, setCaixaMicroFinal] = useState(0);
@@ -263,9 +276,20 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
       // Busca dados da liquidação (vendedor + data + microseguro)
       const { data: liqData } = await supabase
         .from('liquidacoes_diarias')
-        .select('data_liquidacao, data_abertura, status, data_fechamento, fechado_por, microseguro_inicial, microseguro_final, clientes_pagos, clientes_nao_pagos, clientes_novos, clientes_renovados, clientes_renegociados')
+        .select('data_liquidacao, data_abertura, status, data_fechamento, fechado_por, data_reabertura, microseguro_inicial, microseguro_final, clientes_pagos, clientes_nao_pagos, clientes_novos, clientes_renovados, clientes_renegociados')
         .eq('id', liquidacaoId)
         .single();
+
+      // Só busca a auditoria se o dia foi reaberto. Num dia normal, que é a
+      // esmagadora maioria, nem a chamada acontece.
+      if ((liqData as any)?.data_reabertura) {
+        const { data: audit } = await supabase.rpc('fn_auditoria_liquidacao', {
+          p_liquidacao_id: liquidacaoId,
+        });
+        setAuditoria((audit || []) as any[]);
+      } else {
+        setAuditoria([]);
+      }
 
       if (liqData) {
         const dataStr = liqData.data_liquidacao?.substring(0, 10) || liqData.data_abertura?.substring(0, 10) || '';
@@ -497,6 +521,15 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   // ⭐ CORREÇÃO: Usar totalPagamentos (de pagamentos_parcelas) pois inclui auto-quitações
   // O financeiro não registra parcelas quitadas automaticamente
   const totalCobrancas = totalPagamentos;
+
+  // O bloco da reabertura e o que veio depois dela. O FECHAMENTO_POS_REABERTURA
+  // sai das alteracoes: ele encerra o episodio, nao e uma alteracao.
+  const reaberturas = auditoria.filter(
+    (a: any) => a.tipo === 'REABERTURA' || a.tipo === 'FECHAMENTO_POS_REABERTURA'
+  );
+  const alteracoesPos = auditoria.filter(
+    (a: any) => a.depois_da_reabertura && a.tipo !== 'FECHAMENTO_POS_REABERTURA'
+  );
   const totalMicroseguros = entradasMicroseguro.reduce((s, r) => s + parseFloat(r.valor), 0);
   const totalOutrasReceitas = entradasOutras.reduce((s, r) => s + parseFloat(r.valor), 0);
 
@@ -704,6 +737,32 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   }).join('')}
   <hr class="sep">
   <div class="row"><span class="b" style="color:#F59E0B">${lang === 'es' ? 'TOTAL RENEGOCIACIONES' : 'TOTAL RENEGOCIAÇÕES'}</span><span class="r b" style="color:#F59E0B">${fmt(renegociacoesDia.reduce((s, e) => s + parseFloat(e.valor_principal || 0), 0))}</span></div>
+  ` : ''}
+
+  ${reaberturas.length > 0 ? `
+  <hr class="sep2">
+  <div class="c b" style="color:#2563EB">${t.reaberturas}</div>
+  <hr class="sep">
+  ${reaberturas.map((ev: any) => `
+    <div class="mov">
+      <div class="mov-row">
+        <span class="mov-cat">${ev.tipo === 'REABERTURA' ? t.reaberta : t.fechadaDeNovo}</span>
+        <span class="mov-val">${fmtHora(ev.momento)}</span>
+      </div>
+      <div class="mov-sub">${ev.usuario || '—'}</div>
+    </div>`).join('')}
+  <div class="c b" style="margin-top:6px">${t.aposReabertura}</div>
+  <hr class="sep">
+  ${alteracoesPos.length === 0
+    ? `<div class="mov"><div class="mov-sub">${t.semAlteracoes}</div></div>`
+    : alteracoesPos.map((ev: any) => `
+    <div class="mov">
+      <div class="mov-row">
+        <span class="mov-cat">${ev.descricao || ev.tipo}</span>
+        <span class="mov-val">${ev.impacto_caixa === null ? '—' : fmt(Number(ev.impacto_caixa))}</span>
+      </div>
+      <div class="mov-meta"><span>${fmtHora(ev.momento)} · ${ev.usuario || '—'}</span></div>
+    </div>`).join('')}
   ` : ''}
 
   <hr class="sep2">
@@ -1109,6 +1168,46 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                   <Text style={cupom.txtVerm}>{t.totalSaidas}</Text>
                   <Text style={cupom.txtVerm}>{fmt(totalSaidasDespesas)}</Text>
                 </View>
+
+                {/* ═══ DIA REABERTO ═══
+                    Sem o motivo: ele fica no extrato do web. Aqui vale o fato
+                    e o que mudou depois. */}
+                {reaberturas.length > 0 && (
+                  <>
+                    <Text style={cupom.div2}>{DDIV}</Text>
+                    <Text style={[cupom.centro, cupom.txtBold, { color: '#2563EB' }]}>{t.reaberturas}</Text>
+                    {reaberturas.map((ev: any, i: number) => (
+                      <View key={`reab-${i}`} style={{ marginTop: 4 }}>
+                        <View style={cupom.linha}>
+                          <Text style={cupom.txt}>
+                            {ev.tipo === 'REABERTURA' ? t.reaberta : t.fechadaDeNovo}
+                          </Text>
+                          <Text style={cupom.txt}>{fmtHora(ev.momento)}</Text>
+                        </View>
+                        <Text style={cupom.seloTxt}>{ev.usuario || '—'}</Text>
+                      </View>
+                    ))}
+
+                    <Text style={[cupom.centro, cupom.txtBold, { marginTop: 6 }]}>{t.aposReabertura}</Text>
+                    {alteracoesPos.length === 0 ? (
+                      <Text style={cupom.seloTxt}>{t.semAlteracoes}</Text>
+                    ) : (
+                      alteracoesPos.map((ev: any, i: number) => (
+                        <View key={`alt-${i}`} style={{ marginTop: 4 }}>
+                          <View style={cupom.linha}>
+                            <Text style={cupom.txt}>{ev.descricao || ev.tipo}</Text>
+                            <Text style={cupom.txt}>
+                              {ev.impacto_caixa === null ? '—' : fmt(Number(ev.impacto_caixa))}
+                            </Text>
+                          </View>
+                          <Text style={cupom.seloTxt}>
+                            {fmtHora(ev.momento)} · {ev.usuario || '—'}
+                          </Text>
+                        </View>
+                      ))
+                    )}
+                  </>
+                )}
 
                 {/* ═══ SALDO FINAL ═══ */}
                 <Text style={cupom.div2}>{DDIV}</Text>
