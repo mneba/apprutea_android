@@ -215,6 +215,7 @@ const textos = {
     forma: 'Forma:', gpsOk: 'GPS OK', gpsErro: 'Sem GPS',
     pagarBtn: 'PAGAR', pendente: 'PENDENTE', vencimento: 'Vencimento:',
     processando: 'Processando...', sucesso: 'Pagamento registrado!',
+    aguardeNaoFeche: 'Aguarde, nao feche o aplicativo',
     registrando: 'Registrando...', emprestimoLbl: 'Empréstimo', jaPagoLbl: 'Já pago',
     estePagamento: 'Este pagamento', novoSaldoLbl: 'Novo saldo',
     erro: 'Erro ao registrar pagamento',
@@ -312,6 +313,7 @@ const textos = {
     forma: 'Forma:', gpsOk: 'GPS OK', gpsErro: 'Sin GPS',
     pagarBtn: 'PAGAR', pendente: 'PENDIENTE', vencimento: 'Vencimiento:',
     processando: 'Procesando...', sucesso: '¡Pago registrado!',
+    aguardeNaoFeche: 'Espere, no cierre la aplicacion',
     registrando: 'Registrando...', emprestimoLbl: 'Préstamo', jaPagoLbl: 'Ya pagado',
     estePagamento: 'Este pago', novoSaldoLbl: 'Nuevo saldo',
     erro: 'Error al registrar pago',
@@ -557,26 +559,6 @@ export default function ClientesScreen({ navigation, route }: any) {
     // que é o "só funciona saindo e entrando do sistema" relatado pelo campo.
     onReload: liqCtx.recarregarTudo,
   });
-
-  // DEBUG TEMPORÁRIO - REMOVER DEPOIS
-  console.log('🔍 DEBUG ClientesScreen:', JSON.stringify({
-    build: 'v3-voltar-condicional',
-    liqId: liqId || 'NULL',
-    dataLiq,
-    isViz,
-    temSelecaoLiq,
-    enabledHook: !usarCacheCtx && temSelecaoLiq,
-    usarCacheCtx,
-    ctxAtualId: liqCtx.liquidacaoAtual?.id || 'NULL',
-    ctxAtualStatus: liqCtx.liquidacaoAtual?.status || 'NULL',
-    ctxTemAberta: liqCtx.temLiquidacaoAberta,
-    ctxIdViz: liqCtx.liquidacaoIdVisualizacao || 'NULL',
-    ctxModoViz: liqCtx.modoVisualizacao,
-    ctxDataViz: liqCtx.dataVisualizacao || 'NULL',
-    routeLiqId: route?.params?.liquidacaoId || 'NULL',
-    routeDataLiq: route?.params?.dataLiquidacao || 'NULL',
-    qtdRaw: raw.length,
-  }));
 
   const lang = liqCtx.language || 'pt-BR';
   // Se não há liquidação aberta, força tab "todos"
@@ -1438,6 +1420,32 @@ export default function ClientesScreen({ navigation, route }: any) {
   // AÇÕES DO MENU DE PAGAMENTO (5 opções)
   // ═══════════════════════════════════════════════════════════════════
 
+  /**
+   * Recarrega o dia e PODE SER AGUARDADO.
+   *
+   * O recarregar é a metade caruda da operação: medido em 15/10/2026,
+   * `fn_registrar_pagamento` leva 242 ms de média e
+   * `fn_liquidacao_dia_completa` leva 553 ms — ou seja, depois de a RPC do
+   * pagamento responder ainda falta mais da metade do trabalho.
+   *
+   * Antes, cada caminho chamava `loadLiq()` sem `await` e o `finally`
+   * soltava `processando` em seguida. A tela voltava a aceitar toque com a
+   * lista ainda velha, e era essa janela que deixava o vendedor apertar
+   * "pagar" de novo no cliente que acabou de pagar.
+   *
+   * O erro do recarregar é ENGOLIDO de propósito: o pagamento já foi
+   * gravado pelo servidor. Deixar a exceção subir cairia no `catch` do
+   * pagamento e mostraria "erro no pagamento" para uma cobrança que
+   * entrou — mentira pior que lista velha.
+   */
+  const recarregarAguardando = useCallback(async () => {
+    try {
+      await loadLiq();
+    } catch (e) {
+      console.warn('⚠️ Pagamento gravado, mas o recarregar do dia falhou:', e);
+    }
+  }, [loadLiq]);
+
   // Registra pagamento com valores EXPLÍCITOS (usado pelos popups do menu,
   // sem depender do state do input). valorEspecie = dinheiro, valorCredito = crédito.
   const registrarPagamentoDireto = useCallback(async (valorEspecie: number, valorCredito: number) => {
@@ -1484,8 +1492,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         setParcelaPagamento(null);
         setDadosPagamento(null);
         setUsarCredito(false);
-        if (clienteModal?.emprestimo_id) { atualizarSaldoLocalLiq(clienteModal.emprestimo_id); atualizarSaldoLocalTodos(clienteModal.emprestimo_id); }
-        loadLiq();
+        await recarregarAguardando();
       } else {
         // Recusa da regra de negócio: a RPC respondeu e disse não. É o caso que
         // nenhuma tabela registra — não há pagamento para ter `user_id`.
@@ -1508,7 +1515,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     } finally {
       setProcessando(false);
     }
-  }, [parcelaPagamento, processando, coords, liqId, clienteModal, t, configVendedor, vendedor, dataOperacionalTela]);
+  }, [parcelaPagamento, processando, coords, liqId, clienteModal, t, configVendedor, vendedor, dataOperacionalTela, recarregarAguardando]);
 
   // Chama a RPC de crédito em cascata (declarada antes das ações que a usam)
   const usarCreditoCascata = useCallback(async () => {
@@ -1527,9 +1534,8 @@ export default function ClientesScreen({ navigation, route }: any) {
         setMenuPagamentoVisible(false);
         setParcelaPagamento(null);
         setDadosPagamento(null);
-        if (clienteModal?.emprestimo_id) { atualizarSaldoLocalLiq(clienteModal.emprestimo_id); atualizarSaldoLocalTodos(clienteModal.emprestimo_id); }
         Alert.alert(t.sucesso || 'Sucesso', res.mensagem || 'Crédito aplicado');
-        loadLiq();
+        await recarregarAguardando();
       } else {
         Alert.alert(t.erroGenerico, res?.mensagem || 'Erro ao usar crédito');
       }
@@ -1538,7 +1544,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     } finally {
       setProcessando(false);
     }
-  }, [parcelaPagamento, processando, liqId, clienteModal, t]);
+  }, [parcelaPagamento, processando, liqId, clienteModal, t, recarregarAguardando]);
 
   // 1) Pagar 1 parcela — valor cheio, popup de confirmação
   // O menu manda dinheiro E crédito. O crédito é o complemento quando o
@@ -1648,15 +1654,14 @@ export default function ClientesScreen({ navigation, route }: any) {
       setMultiplasVisible(false);
       setParcelaPagamento(null);
       setDadosPagamento(null);
-      if (clienteModal?.emprestimo_id) { atualizarSaldoLocalLiq(clienteModal.emprestimo_id); atualizarSaldoLocalTodos(clienteModal.emprestimo_id); }
       if (erros > 0) Alert.alert(t.atencao, `${ordenadas.length - erros} de ${ordenadas.length} parcelas pagas.`);
-      loadLiq();
+      await recarregarAguardando();
     } catch (e: any) {
       Alert.alert(t.erroGenerico, mensagemErro(e, 'Erro no pagamento múltiplo'));
     } finally {
       setProcessando(false);
     }
-  }, [processando, coords, liqId, clienteModal, vendedor, t]);
+  }, [processando, coords, liqId, clienteModal, vendedor, t, recarregarAguardando]);
 
   // 5) Quitar empréstimo — valor = saldo total, popup de confirmação
   //
@@ -1696,10 +1701,8 @@ export default function ClientesScreen({ navigation, route }: any) {
         setMenuPagamentoVisible(false);
         setParcelaPagamento(null);
         setDadosPagamento(null);
-        atualizarSaldoLocalLiq(clienteModal.emprestimo_id);
-        atualizarSaldoLocalTodos(clienteModal.emprestimo_id);
         showAlert(t.sucesso || 'Sucesso', res.mensagem || 'Empréstimo quitado');
-        loadLiq();
+        await recarregarAguardando();
       } else {
         showAlert(t.erroGenerico, res?.mensagem || 'Erro ao quitar');
       }
@@ -1708,7 +1711,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     } finally {
       setProcessando(false);
     }
-  }, [clienteModal, processando, coords, liqId, t]);
+  }, [clienteModal, processando, coords, liqId, t, recarregarAguardando]);
 
   const acaoQuitarEmprestimo = useCallback(() => {
     if (!parcelaPagamento || !clienteModal) return;
@@ -1894,7 +1897,6 @@ export default function ClientesScreen({ navigation, route }: any) {
           setParcelaPagamento(null);
           setDadosPagamento(null);
           setUsarCredito(false);
-          if (clienteModal?.emprestimo_id) { atualizarSaldoLocalLiq(clienteModal.emprestimo_id); atualizarSaldoLocalTodos(clienteModal.emprestimo_id); }
 
           // ⭐ Atualização otimista: marcar parcela como paga imediatamente no estado local
           const parcelaId = parcelaPagamento.parcela_id;
@@ -1919,8 +1921,10 @@ export default function ClientesScreen({ navigation, route }: any) {
           setClienteModal(null);
           showAlert(t.sucessoGenerico || 'Sucesso', res.mensagem || t.sucesso);
 
-          // Recarregar dados completos em background (sem bloquear UI)
-          setTimeout(() => loadLiq(), 500);
+          // Era `setTimeout(() => loadLiq(), 500)`, "sem bloquear UI". Os 500
+          // ms de espera somavam-se à janela em que a tela aceitava toque com
+          // a lista velha — exatamente o atraso que se queria esconder.
+          await recarregarAguardando();
         } else { showAlert(t.erroGenerico, res?.mensagem || t.erro); }
       } catch (e: any) { console.error('Erro pagamento:', e); showAlert(t.erroGenerico, mensagemErro(e, t.erro)); }
       finally { setProcessando(false); }
@@ -1946,7 +1950,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     } else {
       executarPagamento();
     }
-  }, [parcelaPagamento, dadosPagamento, valorPagamento, usarCredito, formaPagamento, coords, liqId, t, clienteModal, abrirParcelas, loadLiq, processando]);
+  }, [parcelaPagamento, dadosPagamento, valorPagamento, usarCredito, formaPagamento, coords, liqId, t, clienteModal, abrirParcelas, recarregarAguardando, processando]);
 
   // ═══════════════════════════════════════════════════════════════════
   // PAGAMENTO MÚLTIPLO DE PARCELAS
@@ -2061,7 +2065,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         ]
       );
     }
-  }, [processando, liqId, clienteModal, coords, vendedor, lang, t, loadLiq, atualizarSaldoLocalLiq, atualizarSaldoLocalTodos]);
+  }, [processando, liqId, clienteModal, coords, vendedor, lang, t, recarregarAguardando]);
 
   const abrirEstorno = useCallback(async (parcela: ParcelaModal) => {
     console.log('[ESTORNO] abrirEstorno chamada, parcela:', parcela.parcela_id, 'numero:', parcela.numero_parcela);
@@ -3713,12 +3717,49 @@ return (
         dataLiq={dataLiq}
         lang={lang}
       />
+
+      {/* ═══ COBERTURA DO PROCESSAMENTO ═══
+          Fica por ÚLTIMO no JSX de propósito: no React Native quem vem
+          depois desenha em cima, e esta precisa cobrir inclusive os modais
+          irmãos.
+
+          Por que ela existe: os modais de pagamento já desabilitavam os
+          próprios botões enquanto `processando`, mas eles FECHAM antes de o
+          dia recarregar. O vendedor voltava para a lista — ainda velha, e
+          clicável — e conseguia abrir o mesmo cliente e pagar de novo.
+          Relato do campo em 15/10/2026.
+
+          `pointerEvents: 'auto'` num `absoluteFill` é o que engole o toque;
+          o visual é secundário. A `View` externa não tem `onPress` nenhum,
+          então toque aqui não faz nada — que é o objetivo. */}
+      {processando && (
+        <View style={S.cobertura} pointerEvents="auto">
+          <View style={S.coberturaCartao}>
+            <ActivityIndicator size="large" color="#2563EB" />
+            <Text style={S.coberturaTexto}>{t.processando}</Text>
+            <Text style={S.coberturaAviso}>{t.aguardeNaoFeche}</Text>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
 
 const S = StyleSheet.create({
   c: { flex: 1, backgroundColor: '#EEF2FF' },
+  cobertura: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(17, 24, 39, 0.55)',
+    justifyContent: 'center', alignItems: 'center',
+    zIndex: 9999, elevation: 9999,
+  },
+  coberturaCartao: {
+    backgroundColor: '#FFF', borderRadius: 16,
+    paddingVertical: 28, paddingHorizontal: 36,
+    alignItems: 'center', minWidth: 220,
+  },
+  coberturaTexto: { marginTop: 14, fontSize: 16, fontWeight: '700', color: '#1F2937' },
+  coberturaAviso: { marginTop: 4, fontSize: 12, color: '#6B7280', textAlign: 'center' },
   lW: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#EEF2FF' },
   lT: { marginTop: 12, color: '#6B7280', fontSize: 14 },
 

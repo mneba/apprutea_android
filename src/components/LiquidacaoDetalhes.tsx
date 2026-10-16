@@ -338,13 +338,17 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         .from('financeiro')
         .select('id, tipo, categoria, descricao, valor, data_lancamento, created_at, forma_pagamento, cliente_nome, status')
         .eq('liquidacao_id', liquidacaoId)
-        .eq('status', 'PAGO')
+        // ANULADO vem junto SÓ para aparecer riscado na lista de saídas, como
+        // no extrato do web. Toda soma abaixo o descarta explicitamente — ver
+        // `totalSaidasDespesas`, `totalEntradas`, `registrosEntradas` e o
+        // `retiroMicro` logo adiante.
+        .in('status', ['PAGO', 'ANULADO'])
         .order('created_at', { ascending: true });
 
       if (!error) {
         setRegistros(data || []);
         const retiroMicro = (data || [])
-          .filter((r: any) => r.tipo === 'PAGAR' && ['RETIRO_MICROSEGURO', 'SAIDA_MICROSEGURO'].includes(r.categoria))
+          .filter((r: any) => r.tipo === 'PAGAR' && r.status !== 'ANULADO' && ['RETIRO_MICROSEGURO', 'SAIDA_MICROSEGURO'].includes(r.categoria))
           .reduce((s: number, r: any) => s + parseFloat(r.valor), 0);
         setTotalRetiroMicro(retiroMicro);
       }
@@ -429,10 +433,10 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   // ⭐ Total de empréstimos/renovações (SAÍDA de caixa - exclui renegociações pois não sai dinheiro)
   const totalVendasEmprestimos = vendasDia.reduce((s, e) => s + parseFloat(e.valor_principal || 0), 0);
   
-  const totalSaidasDespesas = registros.filter(r => r.tipo === 'PAGAR' && r.categoria !== 'ESTORNO_PAGAMENTO' && r.categoria !== 'EMPRESTIMO' && !['RETIRO_MICROSEGURO', 'SAIDA_MICROSEGURO'].includes(r.categoria)).reduce((s, r) => s + parseFloat(r.valor), 0);
+  const totalSaidasDespesas = registros.filter(r => r.tipo === 'PAGAR' && r.status !== 'ANULADO' && r.categoria !== 'ESTORNO_PAGAMENTO' && r.categoria !== 'EMPRESTIMO' && !['RETIRO_MICROSEGURO', 'SAIDA_MICROSEGURO'].includes(r.categoria)).reduce((s, r) => s + parseFloat(r.valor), 0);
   // ⭐ Total de saídas = despesas + empréstimos/renovações (não inclui renegociações)
   const totalSaidas = totalSaidasDespesas + totalVendasEmprestimos;
-  const totalEntradas = registros.filter(r => r.tipo === 'RECEBER').reduce((s, r) => s + parseFloat(r.valor), 0);
+  const totalEntradas = registros.filter(r => r.tipo === 'RECEBER' && r.status !== 'ANULADO').reduce((s, r) => s + parseFloat(r.valor), 0);
   
   // ⭐ CORREÇÃO: Filtrar pagamentos que entraram dinheiro no caixa
   // Exclui pagamentos feitos APENAS com crédito (forma_pagamento = 'CREDITO')
@@ -511,7 +515,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
     return s + (valorPagoAtual - creditoUsado);
   }, 0);
   
-  const registrosEntradas = registros.filter(r => r.tipo === 'RECEBER' && r.status !== 'CANCELADO');
+  const registrosEntradas = registros.filter(r => r.tipo === 'RECEBER' && r.status !== 'CANCELADO' && r.status !== 'ANULADO');
   const registrosSaidas = registros.filter(r => r.tipo === 'PAGAR' && r.status !== 'CANCELADO' && r.categoria !== 'ESTORNO_PAGAMENTO' && r.categoria !== 'EMPRESTIMO' && !['RETIRO_MICROSEGURO', 'SAIDA_MICROSEGURO'].includes(r.categoria));
 
   // Separar entradas em 3 grupos
@@ -533,6 +537,20 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const totalMicroseguros = entradasMicroseguro.reduce((s, r) => s + parseFloat(r.valor), 0);
   const totalOutrasReceitas = entradasOutras.reduce((s, r) => s + parseFloat(r.valor), 0);
 
+  // Ajustes de saldo do dia — o valor já vem sinalizado, então a soma é
+  // direta: negativo reduz, positivo aumenta.
+  //
+  // AJUSTE_ABERTURA fica fora porque não é movimento do dia: é a diferença
+  // entre o caixa que o vendedor declarou na abertura e o saldo da conta, e
+  // já está embutida no `caixaInicial` que a linha de cima mostra. Contá-lo
+  // aqui o cobraria duas vezes.
+  const registrosAjustes = registros.filter(
+    r => r.tipo === 'AJUSTE' && r.status !== 'CANCELADO' && r.status !== 'ANULADO'
+      && r.categoria !== 'AJUSTE_ABERTURA'
+  );
+  const totalAjustes = registrosAjustes.reduce((s, r) => s + parseFloat(r.valor), 0);
+  const temAjustes = registrosAjustes.length > 0;
+
   // A diferença que as linhas não explicam.
   //
   // `caixaFinal` chega pronto: é o saldo REAL da conta da rota, que
@@ -547,7 +565,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   //
   // A linha não conserta a divergência — ela costuma ser legítima. Conserta o
   // silêncio: quem lê vê que o sistema sabe, em vez de descobrir subtraindo.
-  const somaDasLinhas = caixaInicial + totalCobrancas + totalOutrasReceitas
+  const somaDasLinhas = caixaInicial + totalCobrancas + totalOutrasReceitas + totalAjustes
     - totalSaidasDespesas - totalVendasEmprestimos;
   const diferencaNaoExplicada = caixaFinal - somaDasLinhas;
   const temDiferenca = Math.abs(diferencaNaoExplicada) > 0.01;
@@ -589,6 +607,8 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   .lg { font-size: 14px; font-weight: 700; }
   .verde { color: #059669; }
   .verm { color: #DC2626; }
+  .azul { color: #2563EB; }
+  .risc { color: #9CA3AF; text-decoration: line-through; }
   .cinza { color: #999; }
   .mov { margin-top: 5px; padding-bottom: 4px; border-bottom: 1px dotted #DDD; }
   .mov:last-child { border-bottom: none; }
@@ -617,6 +637,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   <div class="row"><span class="verde">(+) ${lang === 'es' ? 'Cobros del día' : 'Cobrança do dia'}</span><span class="r verde">${fmt(totalCobrancas)}</span></div>
   <div class="row"><span class="verde">(+) ${lang === 'es' ? 'Ingresos del día' : 'Receitas do dia'}</span><span class="r verde">${fmt(totalOutrasReceitas)}</span></div>
   <div class="row"><span class="verm">(-) ${lang === 'es' ? 'Gastos del día' : 'Despesas do dia'}</span><span class="r verm">${fmt(totalSaidasDespesas)}</span></div>
+  ${temAjustes ? `<div class="row"><span class="azul">(±) ${lang === 'es' ? 'Ajustes de saldo' : 'Ajustes de saldo'}</span><span class="r azul">${totalAjustes >= 0 ? '+' : ''}${fmt(totalAjustes)}</span></div>` : ''}
   ${totalVendasEmprestimos > 0 ? `<div class="row"><span class="verm">(-) ${lang === 'es' ? 'Préstamos del día' : 'Empréstimos do dia'}</span><span class="r verm">${fmt(totalVendasEmprestimos)}</span></div>` : ''}
   <hr class="sep2">
   ${temDiferenca ? `<div class="row"><span class="verm">(±) ${lang === 'es' ? 'Diferencia no explicada' : 'Diferença não explicada'}</span><span class="r verm">${fmt(diferencaNaoExplicada)}</span></div>` : ''}
@@ -669,11 +690,12 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   <hr class="sep">
   ${registrosSaidas.length === 0 ? `<div class="c cinza">${t.nenhunaSaida}</div>` :
     registrosSaidas.map((item, idx) => {
-      const principal = item.cliente_nome || formatarCategoria(item.categoria);
-      const sub = item.cliente_nome && item.descricao ? item.descricao : '';
+      const isAnulado = item.status === 'ANULADO';
+      const principal = (isAnulado ? '❌ ' : '') + (item.cliente_nome || formatarCategoria(item.categoria));
+      const sub = isAnulado ? t.anulado : (item.cliente_nome && item.descricao ? item.descricao : '');
       return `<div class="mov">
-        <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${principal}</span><span class="mov-val verm">-${fmt(parseFloat(item.valor))}</span></div>
-        ${sub ? `<div class="mov-sub">${sub}</div>` : ''}
+        <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat${isAnulado ? ' risc' : ''}">${principal}</span><span class="mov-val ${isAnulado ? 'risc' : 'verm'}">-${fmt(parseFloat(item.valor))}</span></div>
+        ${sub ? `<div class="mov-sub${isAnulado ? ' risc' : ''}">${sub}</div>` : ''}
         <div class="mov-meta"><span>${fmtHora(item.created_at)}</span>${item.forma_pagamento ? `<span>${item.forma_pagamento}</span>` : ''}</div>
       </div>`;
     }).join('')}
@@ -866,6 +888,12 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
               <Text style={cupom.txtVerm}>(-) {lang === 'es' ? 'Gastos del día' : 'Despesas do dia'}</Text>
               <Text style={cupom.txtVerm}>{fmt(totalSaidasDespesas)}</Text>
             </View>
+            {temAjustes && (
+              <View style={cupom.linha}>
+                <Text style={cupom.txtAzul}>(±) {lang === 'es' ? 'Ajustes de saldo' : 'Ajustes de saldo'}</Text>
+                <Text style={cupom.txtAzul}>{totalAjustes >= 0 ? '+' : ''}{fmt(totalAjustes)}</Text>
+              </View>
+            )}
             {totalVendasEmprestimos > 0 && (
               <View style={cupom.linha}>
                 <Text style={cupom.txtVerm}>(-) {lang === 'es' ? 'Préstamos del día' : 'Empréstimos do dia'}</Text>
@@ -1142,25 +1170,38 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                 {registrosSaidas.length === 0 ? (
                   <Text style={cupom.centro}>{t.nenhunaSaida}</Text>
                 ) : (
-                  registrosSaidas.map((item, idx) => (
+                  registrosSaidas.map((item, idx) => {
+                    // Anulado continua na lista, riscado: o vendedor lembra de
+                    // ter lançado, e sumir sem rastro é o que faz ele procurar
+                    // o dinheiro. Fora do total, porém — ver
+                    // `totalSaidasDespesas`.
+                    const isAnulado = item.status === 'ANULADO';
+                    return (
                     <View key={item.id}>
                       <View style={cupom.itemRow}>
                         <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
-                        <Text style={cupom.itemCat} numberOfLines={1} ellipsizeMode="tail">
-                          {item.cliente_nome || formatarCategoria(item.categoria)}
+                        <Text
+                          style={[cupom.itemCat, isAnulado && { color: '#9CA3AF', textDecorationLine: 'line-through' }]}
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                        >
+                          {isAnulado ? '❌ ' : ''}{item.cliente_nome || formatarCategoria(item.categoria)}
                         </Text>
-                        <Text style={[cupom.itemVal, { color: '#DC2626' }]}>-{fmt(parseFloat(item.valor))}</Text>
+                        <Text style={[cupom.itemVal, { color: isAnulado ? '#9CA3AF' : '#DC2626' }, isAnulado && { textDecorationLine: 'line-through' }]}>-{fmt(parseFloat(item.valor))}</Text>
                       </View>
-                      {item.cliente_nome && item.descricao && (
+                      {isAnulado ? (
+                        <Text style={[cupom.itemSub, { color: '#9CA3AF' }]} numberOfLines={1}>   {t.anulado}</Text>
+                      ) : item.cliente_nome && item.descricao ? (
                         <Text style={cupom.itemSub} numberOfLines={1}>   {item.descricao}</Text>
-                      )}
+                      ) : null}
                       <View style={cupom.itemMeta}>
                         <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
                         {item.forma_pagamento && <Text style={cupom.itemHora}>{item.forma_pagamento}</Text>}
                       </View>
                       {idx < registrosSaidas.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
                     </View>
-                  ))
+                    );
+                  })
                 )}
 
                 <Text style={cupom.div1}>{DIV}</Text>
@@ -1477,6 +1518,9 @@ const cupom = StyleSheet.create({
   txtBold: { fontSize: 12, color: '#1F2937', fontFamily: MONO, fontWeight: '700' },
   txtVerde: { fontSize: 11, color: '#059669', fontFamily: MONO },
   txtVerm: { fontSize: 11, color: '#DC2626', fontFamily: MONO },
+  // Azul, e não verde nem vermelho: o ajuste pode ir para os dois lados, e
+  // pintá-lo com a cor de uma das pontas sugeriria um sinal que ele não tem.
+  txtAzul: { fontSize: 11, color: '#2563EB', fontFamily: MONO },
   txtSmall: { fontSize: 10, color: '#1F2937', fontFamily: MONO, flex: 1 },
   txtSmallVerde: { fontSize: 10, color: '#059669', fontFamily: MONO, fontWeight: '600' },
   div1: { textAlign: 'center', fontSize: 9, color: '#D1D5DB', fontFamily: MONO, marginVertical: 3 },
