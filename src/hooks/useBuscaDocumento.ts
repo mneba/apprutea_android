@@ -251,7 +251,20 @@ ${msg}`);
       // Helper para preencher dados do cliente encontrado
       const preencherCliente = () => {
         s.setNome(cli.nome || '');
-        s.setTelefoneCelular(cli.telefone_celular || '');
+        // ⚠ SEM O DDI. O telefone é gravado como `${ddiCelular}${numero}`,
+        // e o seletor de DDI fica no `+55` padrão. Pôr aqui o valor
+        // GRAVADO — que já tem o `+55` — fazia a próxima gravação somar
+        // outro, e cada venda nova ao mesmo cliente acrescentava mais um:
+        // `+55+55+5511578406794`. Eram 301 dos 1.446 celulares em
+        // 19/10/2026, e 53 dos 84 clientes da Barcelona.
+        //
+        // O `+` é repetido de propósito na expressão: ela também limpa o
+        // que já está corrompido, em vez de só não piorar.
+        //
+        // A linha equivalente do fluxo de renovação (mais abaixo, com
+        // `vp.cliente_telefone`) sempre fez isso certo — foi dela que saiu
+        // o conserto.
+        s.setTelefoneCelular(String(cli.telefone_celular || '').replace(/^(\+\d{1,3})+/, ''));
         s.setDocumento(cli.documento || docBusca);
         s.setEndereco(cli.endereco || '');
         setClienteEncontradoId(cli.id);

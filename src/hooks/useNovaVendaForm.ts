@@ -1,5 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, TextInput } from 'react-native';
 import {
   amanha,
@@ -9,6 +9,8 @@ import {
   type Segmento,
   type Textos
 } from '../constants/novaVendaConstants';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../services/supabase';
 
 // ============================================================
 // HOOK: Estados do formulário + validação + handlers
@@ -65,9 +67,47 @@ export function useNovaVendaForm({
   // -----------------------------------------------------------
   const [nome, setNome] = useState(clienteExistente?.nome || renegociacao?.cliente_nome || '');
   const [documento, setDocumento] = useState(clienteExistente?.documento || '');
-  const [ddiCelular, setDdiCelular] = useState('+55');
+  // O DDI sugerido vem do PAÍS DA ROTA do vendedor, não de um padrão
+  // fixo. Era `+55` chumbado, e foi assim que as rotas colombianas
+  // ficaram com 100% dos telefones com DDI brasileiro.
+  //
+  // A consulta é feita AQUI, e não no login: a do login é a que decide se
+  // o vendedor entra no app, e um embed a mais ali transforma qualquer
+  // mudança de schema em "não consigo logar". Se esta falhar, o seletor
+  // simplesmente abre vazio — que é o comportamento combinado.
+  const { vendedor } = useAuth();
+  const [ddiSugerido, setDdiSugerido] = useState('');
+
+
+  // Abre VAZIO: sem país se não tiver país (decisão de 19/10/2026).
+  const [ddiCelular, setDdiCelular] = useState('');
   const [telefoneCelular, setTelefoneCelular] = useState(clienteExistente?.telefone_celular || renegociacao?.telefone_celular || '');
-  const [ddiFixo, setDdiFixo] = useState('+55');
+  const [ddiFixo, setDdiFixo] = useState('');
+
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const rotaId = vendedor?.rota_id;
+        if (!rotaId) return;
+        const { data } = await supabase
+          .from('rotas')
+          .select('empresas:empresa_id(cidades:cidade_id(hierarquias:hierarquia_id(pais)))')
+          .eq('id', rotaId)
+          .single();
+        const pais = (data as any)?.empresas?.cidades?.hierarquias?.pais;
+        const codigo = DDI_LIST.find((p) => p.pais === pais)?.codigo;
+        if (vivo && codigo) {
+          setDdiSugerido(codigo);
+          setDdiCelular((atual) => (atual ? atual : codigo));
+          setDdiFixo((atual) => (atual ? atual : codigo));
+        }
+      } catch {
+        // silêncio de propósito: sem país sugerido, abre vazio
+      }
+    })();
+    return () => { vivo = false; };
+  }, [vendedor?.rota_id]);
   const [telefoneFixo, setTelefoneFixo] = useState('');
   const [email, setEmail] = useState('');
   const [endereco, setEndereco] = useState(clienteExistente?.endereco || '');
@@ -380,8 +420,8 @@ export function useNovaVendaForm({
   // -----------------------------------------------------------
   const limparFormulario = () => {
     setNome(''); setDocumento('');
-    setDdiCelular('+55'); setTelefoneCelular('');
-    setDdiFixo('+55'); setTelefoneFixo('');
+    setDdiCelular(ddiSugerido); setTelefoneCelular('');
+    setDdiFixo(ddiSugerido); setTelefoneFixo('');
     setEmail(''); setEndereco(''); setEnderecoComercial('');
     setSegmentoId(null); setSegmentoNome('');
     setFotoCliente(null); setObservacoesCliente('');
