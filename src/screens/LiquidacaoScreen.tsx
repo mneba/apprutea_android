@@ -53,6 +53,9 @@ const textos = {
     progresso: 'PROGRESSO',
     resumoClientes: 'Resumo de Clientes',
     clientesIniciais: 'Clientes Iniciais:',
+    clientesDoDia: 'Do dia:',
+    clientesVencidos: 'Vencidos:',
+    deOutroDia: 'de parcelas de outro dia',
     clientesNovos: 'Clientes Novos:',
     clientesRenovados: 'Clientes Renovados:',
     clientesRenegociados: 'Clientes Renegociados:',
@@ -119,6 +122,9 @@ const textos = {
     verOutrasDatas: 'Ver Otras Fechas',
     notas: 'Notas',
     voltarHoje: 'Volver a Hoy',
+    clientesDoDia: 'Del dia:',
+    clientesVencidos: 'Vencidos:',
+    deOutroDia: 'de cuotas de otro dia',
     meta: 'META',
     atual: 'ACTUAL',
     progresso: 'PROGRESO',
@@ -847,13 +853,23 @@ export default function LiquidacaoScreen({ navigation }: any) {
     return d.toLocaleDateString('pt-BR');
   };
 
+  // ATENCAO: o resumo do contexto e do dia que o CONTEXTO carregou, e esta
+  // tela pode estar mostrando OUTRO dia (visualizacao retroativa) — o
+  // contexto so segue a liquidacao ABERTA. Sem esta guarda, um dia fechado
+  // exibiria os numeros de outro dia, que e exatamente a classe de erro que
+  // este trabalho veio consertar. Quando nao casa, a tela mostra "—" em vez
+  // de um numero errado.
+  const resumoValido = !!liquidacao?.id && liqCtx.liquidacaoAtual?.id === liquidacao.id;
+  const rd = liqCtx.resumoDia;
+
+  const clientesPagaram = rd.doDiaPagaram + rd.vencidosPagaram;
+  const clientesNaLista = rd.doDiaTotal + rd.vencidosTotal;
+
+  // Efetividade derivada dos dois grupos, e nao de `clientes_nao_pagos`. O
+  // campo gravado nao e confiavel: ver a nota em clientesLiquidacaoRepo.
   const calcularEfetividade = () => {
-    if (!liquidacao) return 0;
-    const pagos = (liquidacao as any).clientes_pagos || 0;
-    const naoPagos = (liquidacao as any).clientes_nao_pagos || 0;
-    const total = pagos + naoPagos;
-    if (total === 0) return 0;
-    return Math.round((pagos / total) * 100);
+    if (!resumoValido || clientesNaLista === 0) return null;
+    return Math.round((clientesPagaram / clientesNaLista) * 100);
   };
 
   const calcularTotalClientes = () => {
@@ -1742,10 +1758,17 @@ const confirmarConflitoAbertura = (
             {/* Card Meta/Atual/Progresso */}
             {(() => {
               const meta = liquidacao.valor_esperado_dia || 0;
-              // Recebido = cobranças de parcelas (valor_recebido_dia)
-              const recebido = liquidacao.valor_recebido_dia || 0;
-              const percentual = meta > 0 ? Math.round((recebido / meta) * 100) : 0;
-              const corProgresso = percentual >= 100 ? '#10B981' : percentual >= 70 ? '#3B82F6' : percentual >= 40 ? '#F59E0B' : '#EF4444';
+              // A META E SO DAS PARCELAS QUE VENCEM NO DIA — regra petrea
+              // (Mauricio, 21/10/2026). Antes aqui estava
+              // `valor_recebido_dia`, que soma TODO pagamento: parcela
+              // atrasada e quitacao (que paga parcelas futuras) inflavam o
+              // percentual contra um denominador que so conta o dia. Medido
+              // em 20/10/2026: 391 de 749 liquidacoes passavam de 100%, com
+              // maximo de 9010%.
+              const recebido = resumoValido ? rd.recebidoDoDia : null;
+              const percentual = (recebido !== null && meta > 0) ? Math.round((recebido / meta) * 100) : null;
+              const corProgresso = percentual === null ? '#9CA3AF'
+                : percentual >= 100 ? '#10B981' : percentual >= 70 ? '#3B82F6' : percentual >= 40 ? '#F59E0B' : '#EF4444';
               return (
                 <View style={styles.card}>
                   <View style={styles.metaRow}>
@@ -1755,16 +1778,24 @@ const confirmarConflitoAbertura = (
                     </View>
                     <View style={styles.metaItem}>
                       <Text style={styles.metaLabel}>{t.atual}</Text>
-                      <Text style={[styles.metaValue, { color: corProgresso }]}>{formatarMoeda(recebido)}</Text>
+                      <Text style={[styles.metaValue, { color: corProgresso }]}>{recebido === null ? '—' : formatarMoeda(recebido)}</Text>
                     </View>
                     <View style={styles.metaItem}>
                       <Text style={styles.metaLabel}>{t.progresso}</Text>
-                      <Text style={[styles.metaValue, { color: corProgresso }]}>{percentual}%</Text>
+                      <Text style={[styles.metaValue, { color: corProgresso }]}>{percentual === null ? '—' : percentual + '%'}</Text>
                     </View>
                   </View>
                   <View style={styles.progressBar}>
-                    <View style={[styles.progressFill, { width: `${Math.min(percentual, 100)}%`, backgroundColor: corProgresso }]} />
+                    <View style={[styles.progressFill, { width: `${Math.min(percentual ?? 0, 100)}%`, backgroundColor: corProgresso }]} />
                   </View>
+                  {/* O dinheiro que entrou e a meta NAO espera. Sem esta linha
+                      o vendedor some com o que cobrou de atraso, que e
+                      justamente o trabalho extra do dia. */}
+                  {resumoValido && (rd.recebidoVencidas > 0 || rd.recebidoFuturas > 0) && (
+                    <Text style={styles.metaExtra}>
+                      + {formatarMoeda(rd.recebidoVencidas + rd.recebidoFuturas)} {t.deOutroDia}
+                    </Text>
+                  )}
                 </View>
               );
             })()}
@@ -1772,7 +1803,18 @@ const confirmarConflitoAbertura = (
             {/* Resumo de Clientes */}
             <View style={styles.card}>
               <Text style={styles.sectionTitle}>{t.resumoClientes}</Text>
-              <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesIniciais}</Text><Text style={styles.clienteValue}>{liquidacao.clientes_iniciais || 0}</Text></View>
+              {/* DOIS GRUPOS, e nao um total — decisao do Mauricio em
+                  21/10/2026. E a mesma divisao do filtro 'dia' / 'atrasados'
+                  de ClientesScreen, pela mesma regua (ver ResumoDoDia), para
+                  as duas telas nunca discordarem. */}
+              {resumoValido ? (
+                <>
+                  <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesDoDia}</Text><Text style={styles.clienteValue}>{rd.doDiaPagaram}/{rd.doDiaTotal}</Text></View>
+                  <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesVencidos}</Text><Text style={styles.clienteValue}>{rd.vencidosPagaram}/{rd.vencidosTotal}</Text></View>
+                </>
+              ) : (
+                <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesIniciais}</Text><Text style={styles.clienteValue}>{liquidacao.clientes_iniciais || 0}</Text></View>
+              )}
               <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesNovos}</Text><Text style={styles.clienteValue}>{liquidacao.clientes_novos || 0}</Text></View>
               <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesRenovados}</Text><Text style={styles.clienteValue}>{liquidacao.clientes_renovados || 0}</Text></View>
               <View style={styles.clienteRow}><Text style={styles.clienteLabel}>{t.clientesRenegociados}</Text><Text style={styles.clienteValue}>{liquidacao.clientes_renegociados || 0}</Text></View>
@@ -1800,8 +1842,8 @@ const confirmarConflitoAbertura = (
               <View style={styles.financeiroContent}>
                 <View>
                   <Text style={styles.financeiroLabel}>{t.pagamentos}</Text>
-                  <Text style={styles.financeiroValor}>{(liquidacao as any).clientes_pagos || 0} {t.pagos}</Text>
-                  <Text style={styles.financeiroDetalhe}>{t.naoPagos} {(liquidacao as any).clientes_nao_pagos || 0} | {t.efetividade} {calcularEfetividade()}%</Text>
+                  <Text style={styles.financeiroValor}>{resumoValido ? clientesPagaram : ((liquidacao as any).clientes_pagos || 0)} {t.pagos}</Text>
+                  <Text style={styles.financeiroDetalhe}>{t.naoPagos} {resumoValido ? Math.max(0, clientesNaLista - clientesPagaram) : ((liquidacao as any).clientes_nao_pagos || 0)} | {t.efetividade} {calcularEfetividade() === null ? '—' : calcularEfetividade() + '%'}</Text>
                   <Text style={[styles.financeiroDetalhe, { color: '#059669', fontWeight: '600', marginTop: 2 }]}>{t.recebido || 'Recebido:'} {formatarMoeda(totalParcelasPagas)}</Text>
                 </View>
                 <View style={styles.indicadorVermelho} />
@@ -2422,6 +2464,7 @@ const styles = StyleSheet.create({
   verDatasText: { color: '#3B82F6', fontSize: 13, fontWeight: '500' },
   metaRow: { flexDirection: 'row', marginBottom: 12 },
   metaItem: { flex: 1, alignItems: 'center' },
+  metaExtra: { fontSize: 11, color: '#6B7280', marginTop: 6, textAlign: 'center' },
   metaLabel: { fontSize: 10, color: '#6B7280', fontWeight: '600', textTransform: 'uppercase', marginBottom: 4 },
   metaValue: { fontSize: 14, fontWeight: '700', color: '#1F2937' },
   metaProgresso: { color: '#3B82F6' },

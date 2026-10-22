@@ -32,6 +32,52 @@ export interface ClientesDiaParams {
   liqId: string | null;
 }
 
+// ─── O resumo contado do dia ─────────────────────────────────────────────────
+//
+// ⚠ DUAS REGRAS DO NEGÓCIO MORAM AQUI, e as duas foram ditas pelo Mauricio em
+// 20 e 21/10/2026 depois de o web mostrar números que não se sustentavam:
+//
+// 1. A META É SÓ DAS PARCELAS QUE VENCEM NO DIA — "regra pétrea". Os DOIS
+//    lados do percentual têm de ser do mesmo universo. O que estava errado:
+//    `valor_esperado_dia` conta só as parcelas do dia, mas
+//    `valor_recebido_dia` soma TODO pagamento — inclusive de parcela atrasada
+//    e de quitação, que paga parcelas futuras. Medido em 20/10/2026 no banco:
+//    **391 de 749 liquidações passavam de 100%**, com máximo de 9010%.
+//
+// 2. CLIENTE SÃO DOIS GRUPOS: os do dia e os vencidos. Não é um total com
+//    ressalva — são duas populações, e a lista já as separa no filtro
+//    'dia' | 'atrasados' de ClientesScreen.
+//
+// A régua de "é do dia" é a MESMA de `idsVencDia` em ClientesScreen:
+// `data_vencimento` igual à data da liquidação. Está aqui, e não na tela, para
+// existir uma definição só — duas divergem, e aí o resumo contradiz a lista.
+// Quem mexer em `idsVencDia` tem de mexer aqui, e vice-versa; melhor ainda
+// seria ClientesScreen passar a ler `idsDoDia` deste resultado.
+export interface ResumoDoDia {
+  // os dois grupos de cliente
+  doDiaTotal: number;    doDiaPagaram: number;
+  vencidosTotal: number; vencidosPagaram: number;
+  idsDoDia: Set<string>;
+
+  // o dinheiro, separado pelo VENCIMENTO da parcela que o recebeu.
+  // Só `recebidoDoDia` entra na meta.
+  recebidoDoDia: number;
+  recebidoVencidas: number;
+  recebidoFuturas: number;   // vem de quitação: parcela que ainda não venceu
+
+  // parcelas mexidas NESTA liquidação
+  parcelasPagas: number;
+  parcelasQuitadas: number;
+  creditoUsado: number;      // não é dinheiro novo: crédito que o cliente tinha
+}
+
+export const RESUMO_DIA_VAZIO: ResumoDoDia = {
+  doDiaTotal: 0, doDiaPagaram: 0, vencidosTotal: 0, vencidosPagaram: 0,
+  idsDoDia: new Set(),
+  recebidoDoDia: 0, recebidoVencidas: 0, recebidoFuturas: 0,
+  parcelasPagas: 0, parcelasQuitadas: 0, creditoUsado: 0,
+};
+
 export interface ClientesDiaResult {
   raw: ClienteRotaDia[];
   pagasSet: Set<string>;
@@ -39,6 +85,7 @@ export interface ClientesDiaResult {
   clientesPagosNaLiq: Set<string>;
   // null = não há ordem para aplicar; o chamador NÃO deve sobrescrever o map atual
   ordemRotaMap: Map<string, number> | null;
+  resumo: ResumoDoDia;
 }
 
 const RESULTADO_VAZIO: ClientesDiaResult = {
@@ -47,6 +94,7 @@ const RESULTADO_VAZIO: ClientesDiaResult = {
   pagMap: new Map(),
   clientesPagosNaLiq: new Set(),
   ordemRotaMap: null,
+  resumo: RESUMO_DIA_VAZIO,
 };
 
 // ─── Função principal de leitura ──────────────────────────────────────────────
@@ -96,6 +144,12 @@ export async function getClientesDia(
   const clientesPagosNaLiq = new Set<string>();
   const ordemTmp = new Map<string, number>();
   let temAlgumaOrdem = false;
+
+  // acumuladores do resumo — montados na MESMA passada, sem segunda consulta
+  const idsDoDia = new Set<string>();
+  const todosOsClientes = new Set<string>();
+  let recebidoDoDia = 0, recebidoVencidas = 0, recebidoFuturas = 0;
+  let parcelasPagas = 0, parcelasQuitadas = 0, creditoUsado = 0;
 
   for (const r of rows) {
     // 1) linha do cliente/parcela (formato ClienteRotaDia)
@@ -161,7 +215,63 @@ export async function getClientesDia(
       ordemTmp.set(r.cliente_id, Number(r.ordem_visita_dia));
       temAlgumaOrdem = true;
     }
+
+    // 6) resumo do dia
+    const vencDia = String(r.data_vencimento || '').substring(0, 10);
+    todosOsClientes.add(r.cliente_id);
+    if (dataLiq && vencDia === dataLiq) idsDoDia.add(r.cliente_id);
+
+    // `valor_pago_nesta_liq` é o que entrou NESTE dia — e não
+    // `valor_pago_atual`, que é o acumulado da parcela. Com o acumulado, uma
+    // parcela paga em três dias seria contada inteira em cada um deles.
+    const pagoNaLiq = Number(r.valor_pago_nesta_liq ?? 0);
+    if (pagoNaLiq > 0) {
+      parcelasPagas++;
+      // `parcela_paga` é a mesma bandeira que alimenta o `pagasSet` usado
+      // pelas telas para marcar parcela quitada.
+      if (r.parcela_paga) parcelasQuitadas++;
+
+      const credito = Number(r.valor_credito_usado_nesta_liq ?? 0);
+      creditoUsado += credito;
+      // Crédito usado sai do líquido: não é dinheiro novo, é crédito que o
+      // cliente já tinha sendo consumido. Mesma fórmula de
+      // `valor_recebido_dia`, para os dois concordarem.
+      const liquido = pagoNaLiq - credito;
+
+      // Comparação de 'YYYY-MM-DD' como texto: a ordem lexicográfica é a
+      // cronológica, e não há fuso para deslocar nada. Parcela sem vencimento
+      // não entra em nenhuma das três gavetas.
+      if (!dataLiq || !vencDia) {
+        // fora das três
+      } else if (vencDia === dataLiq) {
+        recebidoDoDia += liquido;
+      } else if (vencDia < dataLiq) {
+        recebidoVencidas += liquido;
+      } else {
+        recebidoFuturas += liquido;
+      }
+    }
   }
+
+  // Os dois grupos, por CLIENTE. O payload vem por parcela, então um cliente
+  // com três empréstimos aparece três vezes — agrupar antes de contar não é
+  // otimização, é correção.
+  let doDiaTotal = 0, doDiaPagaram = 0, vencidosTotal = 0, vencidosPagaram = 0;
+  todosOsClientes.forEach((id) => {
+    // Sem data de liquidação não há "do dia" que signifique algo, e
+    // `ehDoDiaCli` de ClientesScreen devolve true para todos nesse caso —
+    // aqui vale o mesmo, para os dois não divergirem.
+    const doDia = !dataLiq || idsDoDia.has(id);
+    const pagou = clientesPagosNaLiq.has(id);
+    if (doDia) { doDiaTotal++; if (pagou) doDiaPagaram++; }
+    else { vencidosTotal++; if (pagou) vencidosPagaram++; }
+  });
+
+  const resumo: ResumoDoDia = {
+    doDiaTotal, doDiaPagaram, vencidosTotal, vencidosPagaram, idsDoDia,
+    recebidoDoDia, recebidoVencidas, recebidoFuturas,
+    parcelasPagas, parcelasQuitadas, creditoUsado,
+  };
 
   // null = sem ordem para aplicar (o contexto não deve sobrescrever o map atual)
   const ordemRotaMap: Map<string, number> | null = temAlgumaOrdem ? ordemTmp : null;
@@ -173,5 +283,5 @@ export async function getClientesDia(
     `   → clientes: ${raw.length}`
   );
 
-  return { raw, pagasSet, pagMap, clientesPagosNaLiq, ordemRotaMap };
+  return { raw, pagasSet, pagMap, clientesPagosNaLiq, ordemRotaMap, resumo };
 }

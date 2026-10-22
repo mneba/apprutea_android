@@ -7,6 +7,8 @@ import {
   ClienteRotaDia,
   getClientesDia,
   PagamentoParcela,
+  RESUMO_DIA_VAZIO,
+  ResumoDoDia,
 } from '../services/clientesLiquidacaoRepo';
 
 export type Language = 'pt-BR' | 'es';
@@ -26,6 +28,12 @@ interface LiquidacaoContextType {
   pagMap: Map<string, PagamentoParcela>;
   clientesPagosNaLiq: Set<string>;
   ordemRotaMap: Map<string, number>;
+  /**
+   * Os números CONTADOS do dia, derivados do mesmo payload — dois grupos de
+   * cliente (do dia / vencidos) e o dinheiro separado pelo vencimento da
+   * parcela que o recebeu. Ver `ResumoDoDia` em clientesLiquidacaoRepo.
+   */
+  resumoDia: ResumoDoDia;
   carregandoClientes: boolean;
   clientesUpdatedAt: number;
   /**
@@ -96,6 +104,7 @@ const LiquidacaoContext = createContext<LiquidacaoContextType>({
   pagMap: new Map(),
   clientesPagosNaLiq: new Set(),
   ordemRotaMap: new Map(),
+  resumoDia: RESUMO_DIA_VAZIO,
   carregandoClientes: false,
   clientesUpdatedAt: 0,
   solicitacoesUpdatedAt: 0,
@@ -138,6 +147,7 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
   const [clientesRaw, setClientesRaw] = useState<ClienteRotaDia[]>([]);
   const [pagasSet, setPagasSet] = useState<Set<string>>(new Set());
   const [pagMap, setPagMap] = useState<Map<string, PagamentoParcela>>(new Map());
+  const [resumoDia, setResumoDia] = useState<ResumoDoDia>(RESUMO_DIA_VAZIO);
   const [clientesPagosNaLiq, setClientesPagosNaLiq] = useState<Set<string>>(new Set());
   const [ordemRotaMap, setOrdemRotaMap] = useState<Map<string, number>>(new Map());
   const [carregandoClientes, setCarregandoClientes] = useState(false);
@@ -278,6 +288,7 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
       setPagMap(res.pagMap);
       setPagasSet(res.pagasSet);
       setClientesPagosNaLiq(res.clientesPagosNaLiq);
+      setResumoDia(res.resumo);
       if (res.ordemRotaMap) setOrdemRotaMap(res.ordemRotaMap);
       setClientesUpdatedAt(Date.now());
       chaveCarregadaRef.current = `${liqId}|${dataLiq}`;
@@ -493,6 +504,7 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
     pagMap,
     clientesPagosNaLiq,
     ordemRotaMap,
+    resumoDia,
     carregandoClientes,
     clientesUpdatedAt,
     solicitacoesUpdatedAt,
@@ -525,6 +537,7 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
     pagMap,
     clientesPagosNaLiq,
     ordemRotaMap,
+    resumoDia,
     carregandoClientes,
     clientesUpdatedAt,
     solicitacoesUpdatedAt,
