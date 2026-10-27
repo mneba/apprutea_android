@@ -180,7 +180,7 @@ interface Props {
   cliente: ClienteInfo | null;
   lang?: Language;
   onNovoEmprestimo?: (cliente: ClienteInfo) => void;
-  /** `statusSolic` decide se o formulário abre travado — aqui é sempre PENDENTE */
+  /** `statusSolic` decide se o formulário abre travado: APROVADO trava no valor liberado, PENDENTE deixa editar. Este modal passa os dois desde 27/10/2026 — antes mandava `'PENDENTE'` fixo. */
   onAlterarSolicitacaoRenovacao?: (cliente: ClienteInfo, solicitacaoId: string, emprestimoQuitadoId: string, valorSolicitado: number, statusSolic: string) => void;
   onCancelarSolicitacaoRenovacao?: (solicitacaoId: string) => void;
   onRenegociar?: (cliente: ClienteInfo, emprestimo: Emprestimo) => void;
@@ -254,6 +254,11 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
     adicional: boolean;
     // ⭐ Renovação excede anterior
     renovacao_excede: boolean;
+    // O STATUS tem de vir junto. Sem ele a tela nao sabe se a renovacao esta
+    // esperando o admin ou se ele JA liberou, e os dois casos pedem telas
+    // diferentes: pendente abre o dialogo de opcoes, aprovada vai direto para
+    // o formulario travado nos termos autorizados.
+    renovacao_status: string | null;
     renovacao_solic_id: string | null;
     renovacao_valor_solicitado: number | null;
     renovacao_valor_limite: number | null;
@@ -264,6 +269,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
     aprovacao_emprestimo_id: null,
     adicional: false,
     renovacao_excede: false,
+    renovacao_status: null,
     renovacao_solic_id: null,
     renovacao_valor_solicitado: null,
     renovacao_valor_limite: null,
@@ -503,6 +509,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       let aprovEmpId: string | null = null;
       let temAdicional = false;
       let renovacaoExcede = false;
+      let renovacaoStatus: string | null = null;
       let renovacaoSolicId: string | null = null;
       let renovacaoValorSolicitado: number | null = null;
       let renovacaoValorLimite: number | null = null;
@@ -519,8 +526,23 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           }
         } else if (s.tipo_solicitacao === 'EMPRESTIMO_ADICIONAL' && s.status === 'PENDENTE') {
           temAdicional = true;
-        } else if (s.tipo_solicitacao === 'RENOVACAO_EXCEDE_ANTERIOR' && s.status === 'PENDENTE') {
+        } else if (s.tipo_solicitacao === 'RENOVACAO_EXCEDE_ANTERIOR' && !renovacaoExcede) {
+          // ⚠ APROVADO TAMBEM ENTRA AQUI, e antes nao entrava.
+          //
+          // A condicao era `s.status === 'PENDENTE'`, enquanto a consulta
+          // acima pede `.in('status', ['PENDENTE','APROVADO'])`. Resultado:
+          // uma renovacao JA LIBERADA pelo admin, aberta pelos detalhes do
+          // cliente, caia no "Novo emprestimo" comum — formulario em branco,
+          // destravado, e o vendedor digitava o valor na mao. O card da aba
+          // Todos sempre tratou os dois status; esta tela, nao.
+          //
+          // `!renovacaoExcede` fica com a PRIMEIRA linha, e a consulta vem
+          // `created_at` DESC, entao e a mais recente. Sem a guarda, o forEach
+          // deixava a ULTIMA vencer, ou seja a mais ANTIGA — e ha cliente com
+          // cinco solicitacoes (Julio Cesar Jaramillo, Paola 2, 13/10/2026),
+          // porque cada tentativa de finalizar cria uma nova.
           renovacaoExcede = true;
+          renovacaoStatus = s.status;
           renovacaoSolicId = s.id;
           renovacaoValorSolicitado = s.valor_solicitado || null;
           renovacaoValorLimite = s.valor_limite || null;
@@ -534,6 +556,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
         aprovacao_emprestimo_id: aprovEmpId,
         adicional: temAdicional,
         renovacao_excede: renovacaoExcede,
+        renovacao_status: renovacaoStatus,
         renovacao_solic_id: renovacaoSolicId,
         renovacao_valor_solicitado: renovacaoValorSolicitado,
         renovacao_valor_limite: renovacaoValorLimite,
@@ -1475,12 +1498,24 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           solicitacoesPendentes.renovacao_excede && solicitacoesPendentes.renovacao_solic_id ? (
             // Há solicitação de renovação pendente — mostrar opções
             <TouchableOpacity
-              style={[S.btnNovoEmprestimo, { backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#F59E0B' }]}
+              style={[S.btnNovoEmprestimo, solicitacoesPendentes.renovacao_status === 'APROVADO'
+                ? { backgroundColor: '#D1FAE5', borderWidth: 1, borderColor: '#10B981' }
+                : { backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#F59E0B' }]}
               onPress={() => {
                 const solicId = solicitacoesPendentes.renovacao_solic_id!;
                 const empId = solicitacoesPendentes.renovacao_emprestimo_id!;
                 const valorSolic = solicitacoesPendentes.renovacao_valor_solicitado || 0;
                 const valorLimite = solicitacoesPendentes.renovacao_valor_limite || 0;
+                const statusSolic = solicitacoesPendentes.renovacao_status || 'PENDENTE';
+                // Aprovada vai DIRETO para o formulario, como no card da aba
+                // Todos: o admin ja decidiu os termos, nao ha o que perguntar.
+                // E o status tem de ser repassado, senao o formulario nao
+                // trava nos valores autorizados.
+                if (statusSolic !== 'PENDENTE') {
+                  onClose();
+                  onAlterarSolicitacaoRenovacao?.(cliente, solicId, empId, valorSolic, statusSolic);
+                  return;
+                }
                 const msgOpcoes = lang === 'es'
                   ? `Hay una solicitud pendiente de renovación por $ ${valorSolic} (límite: $ ${valorLimite}).`
                   : `Há uma solicitação pendente de renovação por $ ${valorSolic} (limite: $ ${valorLimite}).`;
@@ -1491,7 +1526,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                   const alterar = window.confirm(msgWeb);
                   if (alterar) {
                     onClose();
-                    onAlterarSolicitacaoRenovacao?.(cliente, solicId, empId, valorSolic, 'PENDENTE');
+                    onAlterarSolicitacaoRenovacao?.(cliente, solicId, empId, valorSolic, statusSolic);
                   } else {
                     const msgCancelar = lang === 'es' ? 'Cancelar la solicitud pendiente?' : 'Cancelar a solicitacao pendente?';
                     const cancelar = window.confirm(msgCancelar);
@@ -1511,7 +1546,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                         text: lang === 'es' ? 'Alterar y cancelar' : 'Alterar e cancelar',
                         onPress: () => {
                           onClose();
-                          onAlterarSolicitacaoRenovacao?.(cliente, solicId, empId, valorSolic, 'PENDENTE');
+                          onAlterarSolicitacaoRenovacao?.(cliente, solicId, empId, valorSolic, statusSolic);
                         },
                       },
                       { text: lang === 'es' ? 'Cerrar' : 'Fechar', style: 'cancel' },
@@ -1521,9 +1556,17 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
               }}
               activeOpacity={0.7}
             >
-              <Ionicons name="time-outline" size={16} color="#92400E" />
-              <Text style={[S.btnNovoEmprestimoText, { color: '#92400E' }]}>
-                {lang === 'es' ? 'Solicitud pendiente' : 'Solicitação pendente'}
+              {/* Mesmas cores e mesmos rotulos do card da aba Todos: o
+                  vendedor nao pode ver dois nomes para o mesmo estado. */}
+              <Ionicons
+                name={solicitacoesPendentes.renovacao_status === 'APROVADO' ? 'checkmark-circle-outline' : 'time-outline'}
+                size={16}
+                color={solicitacoesPendentes.renovacao_status === 'APROVADO' ? '#059669' : '#92400E'}
+              />
+              <Text style={[S.btnNovoEmprestimoText, { color: solicitacoesPendentes.renovacao_status === 'APROVADO' ? '#059669' : '#92400E' }]}>
+                {solicitacoesPendentes.renovacao_status === 'APROVADO'
+                  ? (lang === 'es' ? 'Renovación aprobada' : 'Renovação aprovada')
+                  : (lang === 'es' ? 'Solicitud pendiente' : 'Solicitação pendente')}
               </Text>
             </TouchableOpacity>
           ) : (

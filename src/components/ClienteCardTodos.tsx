@@ -21,6 +21,9 @@ export interface EmprestimoTodos {
   valor_parcela: number; numero_parcelas: number; numero_parcela_atual: number;
   status: string; frequencia_pagamento: string; tipo_emprestimo: string;
   total_parcelas_vencidas: number; valor_total_vencido: number;
+  /** Crédito acumulado. ⚠ `saldo_emprestimo` JÁ está líquido dele — este
+   *  campo é para MOSTRAR, nunca para subtrair. Ver useClientesTodos. */
+  credito_disponivel?: number;
   /** Vencimento da parcela em aberto mais antiga. Base dos dias de atraso,
    *  que decidem a cor. Vem de useClientesTodos. */
   data_vencimento_mais_antiga?: string | null;
@@ -152,6 +155,7 @@ interface ClienteCardTodosProps {
   t: {
     parcela: string;
     saldoEmprestimo: string;
+    creditoDisponivel: string;
     parcelasVencidas: string;
     totalAtraso: string;
     emprestimo: string;
@@ -379,6 +383,15 @@ function ClienteCardTodos({
               <View style={S.sCol}>
                 <Text style={S.pValBig}>{fmt(emp.valor_parcela)}</Text>
                 <Text style={S.sLbl}>{t.saldoEmprestimo} {fmt(emp.saldo_emprestimo)}</Text>
+                {/* O saldo acima JÁ está líquido do crédito. Esta linha existe
+                    para o cobrador ver de onde vem a diferença sem abrir o
+                    cliente — pedido do campo, e a outra metade do relato de
+                    22/10/2026. Cor do crédito, a mesma do resto do app. */}
+                {(emp.credito_disponivel || 0) > 0 && (
+                  <Text style={S.creditoLbl}>
+                    {t.creditoDisponivel} {fmt(emp.credito_disponivel || 0)}
+                  </Text>
+                )}
                 {/* Composição do empréstimo: emprestado + juros + total.
                     valor_total = valor_parcela × numero_parcelas (mesmo cálculo
                     do ramo quitado). Juros = total − principal. */}
@@ -696,6 +709,7 @@ const S = StyleSheet.create({
   compEmpLine: { fontSize: 11, color: '#6B7280' },
   compEmpStrong: { color: '#374151', fontWeight: '700' },
   sLbl: { fontSize: 11, color: '#6B7280', marginBottom: 2 },
+  creditoLbl: { fontSize: 11, color: '#7C3AED', fontWeight: '600', marginBottom: 2 },
   exp: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
   aR: { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', borderRadius: 8, padding: 10, marginBottom: 10 },
   aRT: { fontSize: 12, fontWeight: '600', color: '#DC2626' },

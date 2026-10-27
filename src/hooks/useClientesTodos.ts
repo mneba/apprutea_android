@@ -8,6 +8,18 @@ export interface EmprestimoTodos {
   valor_parcela: number; numero_parcelas: number; numero_parcela_atual: number;
   status: string; frequencia_pagamento: string; tipo_emprestimo: string;
   total_parcelas_vencidas: number; valor_total_vencido: number;
+  /**
+   * Crédito acumulado do empréstimo (soma de `saldo_excedente` das parcelas).
+   *
+   * ⚠ **NÃO subtrair de `saldo_emprestimo`** — aquele campo é
+   * `emprestimos.valor_saldo`, que JÁ vem líquido: o gatilho
+   * `atualizar_saldo_emprestimo` faz
+   * `v_total_saldo := GREATEST(0, v_total_saldo - v_total_credito)`.
+   * Este valor existe para ser MOSTRADO ao lado do saldo, que foi o pedido
+   * original do campo: "essa informação não aparece na tela principal do
+   * cobrador".
+   */
+  credito_disponivel?: number;
   /** Vencimento da parcela em aberto mais antiga — base dos dias de atraso. */
   data_vencimento_mais_antiga?: string | null;
   data_emprestimo?: string;
@@ -131,8 +143,27 @@ export default function useClientesTodos({ rotaId, dataOperacional, setOrdemRota
       // dias no diário e três meses no mensal. O cálculo em si fica em
       // src/utils/diasCobranca.ts, onde domingo e feriado são descontados; aqui
       // só escolhemos a data.
+      //
+      // ⚠ `parcelaAtual` E A MENOR EM ABERTO, e nao a maior de todas.
+      //
+      // Aqui havia `maxParcela`, `max(numero_parcela)` sobre TODAS as
+      // parcelas do emprestimo — que e o TOTAL, nao a atual. Entao o card da
+      // aba Todos mostrava "Parcela 20/20" em emprestimo de 20 que tinha
+      // pagado 3, e "4/4" em emprestimo de 4 que nao devia nada ainda.
+      //
+      // Relatado pelo Julio em 21/10/2026, e nao era caso de borda:
+      // MEDIDO em 27/10, os 1.856 emprestimos ABERTOS do sistema mostravam
+      // TODOS o maximo. Em 1.317 deles o numero certo e outro; nos 539
+      // restantes a parcela em aberto de fato e a ultima.
+      //
+      // As abas Liquidacao e Pagos sempre estiveram certas porque usam outra
+      // regra: o agrupamento de ClientesScreen "prefere parcela PENDENTE
+      // sobre PAGO, e entre pendentes a de MENOR numero". E essa regra que
+      // passa a valer aqui — "em aberto" medido pelo mesmo `emAberto` que
+      // este hook ja usa para contar vencidas, para nao nascer uma segunda
+      // definicao de parcela paga dentro do mesmo arquivo.
       const parcMap = new Map<string, {
-        maxParcela: number; vencidas: number; totalVencido: number;
+        parcelaAtual: number; vencidas: number; totalVencido: number;
         vencimentoMaisAntigo: string | null;
       }>();
       // Montado na mesma passagem das parcelas — ver o comentário no topo.
@@ -145,11 +176,15 @@ export default function useClientesTodos({ rotaId, dataOperacional, setOrdemRota
         }
         let info = parcMap.get(p.emprestimo_id);
         if (!info) {
-          info = { maxParcela: 0, vencidas: 0, totalVencido: 0, vencimentoMaisAntigo: null };
+          info = { parcelaAtual: 0, vencidas: 0, totalVencido: 0, vencimentoMaisAntigo: null };
           parcMap.set(p.emprestimo_id, info);
         }
-        if (p.numero_parcela > info.maxParcela) info.maxParcela = p.numero_parcela;
         const emAberto = p.status !== 'PAGO' && p.status !== 'CANCELADO';
+        // A MENOR em aberto. `0` e o "ainda nao achei nenhuma", e nao um
+        // numero de parcela — parcela comeca em 1.
+        if (emAberto && (info.parcelaAtual === 0 || p.numero_parcela < info.parcelaAtual)) {
+          info.parcelaAtual = p.numero_parcela;
+        }
         const venc = p.data_vencimento ? String(p.data_vencimento).substring(0, 10) : null;
         const venceu = !!venc && venc < dataOperacional;
         if (emAberto && venc && (!info.vencimentoMaisAntigo || venc < info.vencimentoMaisAntigo)) {
@@ -189,7 +224,7 @@ export default function useClientesTodos({ rotaId, dataOperacional, setOrdemRota
         // diriam.
         const encerrado = e.status === 'QUITADO' || e.status === 'RENEGOCIADO';
         const info = parcMap.get(e.id) || {
-          maxParcela: encerrado ? (e.numero_parcelas || 1) : 1,
+          parcelaAtual: encerrado ? (e.numero_parcelas || 1) : 1,
           vencidas: 0,
           totalVencido: 0,
           vencimentoMaisAntigo: null,
@@ -202,27 +237,44 @@ export default function useClientesTodos({ rotaId, dataOperacional, setOrdemRota
           saldo_emprestimo: e.valor_saldo,
           valor_parcela: e.valor_parcela,
           numero_parcelas: e.numero_parcelas,
-          numero_parcela_atual: info.maxParcela,
+          // `parcelaAtual === 0` significa que as parcelas foram baixadas e
+          // nenhuma esta em aberto — emprestimo pago enquanto o status ainda
+          // nao virou. Ai a atual E a ultima, como nos encerrados.
+          numero_parcela_atual: info.parcelaAtual > 0 ? info.parcelaAtual : (e.numero_parcelas || 1),
           status: e.status,
           frequencia_pagamento: e.frequencia_pagamento,
           tipo_emprestimo: (e as any).tipo_emprestimo || 'NOVO',
           total_parcelas_vencidas: info.vencidas,
           valor_total_vencido: info.totalVencido,
+          // Exposto, nunca subtraído. Ver a nota no tipo.
+          credito_disponivel: creditoMapTodos.get(e.id) || 0,
           data_vencimento_mais_antiga: info.vencimentoMaisAntigo,
           data_emprestimo: (e as any).data_emprestimo || null,
         });
       }
 
-      // Descontar crédito acumulado do saldo de cada empréstimo. O mapa já veio
-      // da passagem acima; antes custava uma consulta inteira a mais.
-      if (creditoMapTodos.size > 0) {
-        Array.from(cliMap.values()).forEach(cli => {
-          cli.emprestimos.forEach(emp => {
-            const credito = creditoMapTodos.get(emp.id) || 0;
-            if (credito > 0) emp.saldo_emprestimo = Math.max(0, emp.saldo_emprestimo - credito);
-          });
-        });
-      }
+      // ⚠ AQUI HAVIA UM DESCONTO DE CRÉDITO, E ERA O SEGUNDO.
+      //
+      // O bloco fazia `saldo_emprestimo = saldo_emprestimo - credito` sobre
+      // `emprestimos.valor_saldo`, que JÁ vem líquido — o gatilho
+      // `atualizar_saldo_emprestimo` desconta o crédito antes de gravar, e o
+      // comentário dele diz "é a definição correta e o app depende dela".
+      // Conferido em 27/10/2026: dos 230 empréstimos com crédito, TODOS os 230
+      // têm `valor_saldo` = soma das parcelas abertas − crédito. Nenhum bruto.
+      //
+      // Com isto, a aba Todos mostrava um terceiro número: com saldo 450 e
+      // crédito 30 ela dizia 420 — nem o bruto nem o líquido. São 230
+      // empréstimos em 32 rotas, e em 7 o crédito cobre o saldo: o card
+      // mostrava ZERO num empréstimo que ainda deve.
+      //
+      // O próprio arquivo se contradizia — `atualizarSaldoLocal`, logo abaixo,
+      // relê `valor_saldo` SEM o desconto extra, então o saldo SUBIA sozinho
+      // depois de cobrar.
+      //
+      // Relatado pelo Julio em 22/10/2026 como "o saldo não desconta o
+      // crédito" — e a Liquidação descontava certo desde sempre; era só esta
+      // aba, e para o lado contrário. O crédito agora vai no payload e o card
+      // o mostra em linha própria.
       setTodosList(Array.from(cliMap.values()));
       setTodosUpdatedAt(Date.now());
 

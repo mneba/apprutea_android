@@ -263,13 +263,26 @@ const textos = {
     creditoUsado: 'Crédito usado',
     toqueDetalhes: 'Toque para ver detalhes',
     legendaTitulo: 'Significado das Cores',
-    legendaSubtitulo: 'Borda esquerda de cada card. A cor pega o pior entre cobranças perdidas e tempo sem pagar.',
+    // "tempo sem pagar" era FALSO, e o campo pegou: a conta mede o atraso da
+    // parcela em aberto mais ANTIGA, nao o tempo desde o ultimo pagamento.
+    // Medido em 27/10/2026: 13 clientes passam de 15 dias por essa conta
+    // tendo pagado nos ultimos 2 dias. A legenda prometia uma coisa e a cor
+    // mostrava outra. A conta esta certa -- quem paga 1 de 20 parcelas
+    // diarias nao esta em dia --, o texto e que mentia.
+    legendaSubtitulo: 'Borda esquerda de cada card. A cor pega o pior entre cobranças perdidas e dias de atraso da parcela mais antiga em aberto.',
     legendaEntendido: 'Entendido',
-    legPagoLabel: 'Pago / Em dia', legPagoDesc: 'Sem cobranças vencidas',
+    // Relato do Juan em 24/10/2026: cliente com 2 ou 3 dias de atraso em
+    // verde. Nao era a cor -- era o dia. A liquidacao e a regua do tempo
+    // (CLAUDE.md), e com o dia 26 aberto o cliente que vence em 26 esta EM
+    // DIA, embora hoje seja 27. Medido em 27/10: 106 clientes em 16 rotas
+    // nessa situacao, so porque a rota ainda nao chegou no dia de hoje.
+    // A tela nunca dizia contra qual dia media. Agora diz.
+    legendaDataRef: 'Contado até o dia da liquidação aberta ({data}), não até hoje.',
+    legPagoLabel: 'Pago / Em dia', legPagoDesc: 'Nada vencido até o dia da liquidação',
     legPendenteLabel: 'Pendente', legPendenteDesc: 'Ainda não é dia de cobrança',
-    legLeveLabel: 'Atraso leve', legLeveDesc: 'Até 3 cobranças perdidas e até 15 dias sem pagar',
-    legModeradoLabel: 'Atraso moderado', legModeradoDesc: '4 a 7 cobranças perdidas, ou mais de 15 dias sem pagar',
-    legCriticoLabel: 'Atraso crítico', legCriticoDesc: '8 ou mais cobranças perdidas, ou mais de 30 dias sem pagar',
+    legLeveLabel: 'Atraso leve', legLeveDesc: 'Até 3 cobranças perdidas e até 15 dias de atraso',
+    legModeradoLabel: 'Atraso moderado', legModeradoDesc: '4 a 7 cobranças perdidas, ou mais de 15 dias de atraso',
+    legCriticoLabel: 'Atraso crítico', legCriticoDesc: '8 ou mais cobranças perdidas, ou mais de 30 dias de atraso',
   },  'es': {
     titulo: 'Mis Clientes', hoje: 'Hoy', clientes: 'clientes',
     liquidacao: 'Liquidación', todosList: 'Todos', buscar: 'Buscar...',
@@ -359,13 +372,14 @@ const textos = {
     pagoAdiantado: 'Adelantado',
     toqueDetalhes: 'Toque para ver detalles',
     legendaTitulo: 'Significado de los Colores',
-    legendaSubtitulo: 'Borde izquierdo de cada tarjeta. El color toma lo peor entre cobros perdidos y tiempo sin pagar.',
+    legendaSubtitulo: 'Borde izquierdo de cada tarjeta. El color toma lo peor entre cobros perdidos y días de atraso de la cuota más antigua abierta.',
     legendaEntendido: 'Entendido',
-    legPagoLabel: 'Pago / Al día', legPagoDesc: 'Sin cobros vencidos',
+    legendaDataRef: 'Contado hasta el día de la liquidación abierta ({data}), no hasta hoy.',
+    legPagoLabel: 'Pago / Al día', legPagoDesc: 'Nada vencido hasta el día de la liquidación',
     legPendenteLabel: 'Pendiente', legPendenteDesc: 'Aún no es día de cobro',
-    legLeveLabel: 'Atraso leve', legLeveDesc: 'Hasta 3 cobros perdidos y hasta 15 días sin pagar',
-    legModeradoLabel: 'Atraso moderado', legModeradoDesc: '4 a 7 cobros perdidos, o más de 15 días sin pagar',
-    legCriticoLabel: 'Atraso crítico', legCriticoDesc: '8 o más cobros perdidos, o más de 30 días sin pagar',
+    legLeveLabel: 'Atraso leve', legLeveDesc: 'Hasta 3 cobros perdidos y hasta 15 días de atraso',
+    legModeradoLabel: 'Atraso moderado', legModeradoDesc: '4 a 7 cobros perdidos, o más de 15 días de atraso',
+    legCriticoLabel: 'Atraso crítico', legCriticoDesc: '8 o más cobros perdidos, o más de 30 días de atraso',
   },
 };
 
@@ -376,26 +390,22 @@ const FREQ: Record<Language, Record<string, string>> = {
 const getIni = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase() || '').join('');
 const fmt = (v: number) => '$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-// Busca crédito acumulado (saldo_excedente) por empréstimo
-// Saldo real = valor_saldo - credito_acumulado
 // ⭐ Normaliza texto para busca: remove acentos + lowercase
 const normalizarBusca = (texto: string): string =>
   texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 
-const buscarCreditoMap = async (empIds: string[]): Promise<Map<string, number>> => {
-  if (empIds.length === 0) return new Map();
-  const { data } = await supabase
-    .from('emprestimo_parcelas')
-    .select('emprestimo_id, saldo_excedente')
-    .in('emprestimo_id', empIds)
-    .gt('saldo_excedente', 0);
-  const creditoMap = new Map<string, number>();
-  (data || []).forEach((p: any) => {
-    const atual = creditoMap.get(p.emprestimo_id) || 0;
-    creditoMap.set(p.emprestimo_id, atual + parseFloat(p.saldo_excedente || 0));
-  });
-  return creditoMap;
-};
+// AQUI VIVIA `buscarCreditoMap`, SEM NENHUMA CHAMADA, sob o comentário
+// "Saldo real = valor_saldo - credito_acumulado".
+//
+// A frase é FALSA: `emprestimos.valor_saldo` já vem líquido do crédito (o
+// gatilho `atualizar_saldo_emprestimo` desconta antes de gravar, e CLAUDE.md
+// registra a invariante). Subtrair de novo desconta duas vezes — foi o bug do
+// Talles Alan Pineiros na quitação, consertado em 24/08/2026, e voltou na aba
+// Todos, consertado em 27/10/2026.
+//
+// A função morta guardava a premissa errada à mão, pronta para a terceira
+// reincidência. Quem precisar do crédito: ele vem no payload de
+// `useClientesTodos` como `credito_disponivel`, para ser MOSTRADO.
 const fmtData = (d: string | null | undefined) => { 
   if (!d) return ''; 
   // Se é só data (YYYY-MM-DD), formata direto
@@ -2563,6 +2573,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   const cntAtraso = useMemo(() => montarItens(baseLiq, 'atrasados').length, [baseLiq, montarItens]);
   const cntPagas = useMemo(() => montarItens(baseLiq, 'pagas').length, [baseLiq, montarItens]);
   const cntTotalGeral = grouped.length;
+
   const clientesLiqIds = useMemo(() => new Set(grouped.map(c => c.cliente_id)), [grouped]);
   const eIdx = (cid: string) => empIdxMap[cid] || 0;
   const eSet = (cid: string, i: number) => setEmpIdxMap(p => ({ ...p, [cid]: i }));
@@ -2947,6 +2958,14 @@ export default function ClientesScreen({ navigation, route }: any) {
               taxa_juros: termos?.taxa_juros || 20,
               frequencia: termos?.frequencia || 'DIARIO',
               dia_semana_cobranca: termos?.dia_semana_cobranca ?? null,
+              // ⚠ O PLURAL TAMBEM, senao a autorizacao perde os dias.
+              //
+              // Faltava `dias_semana_cobranca` nos dois handlers daqui.
+              // `useBuscaDocumento` sempre repassou, e o formulario prefere o
+              // plural quando ele vem preenchido — entao uma renovacao semanal
+              // aprovada para terca E quinta, aberta pelo card, chegava com o
+              // escalar e cobrava um dia so. O admin autorizou dois.
+              dias_semana_cobranca: termos?.dias_semana_cobranca ?? null,
               dia_mes_cobranca: termos?.dia_mes_cobranca ?? null,
               dias_mes_cobranca: termos?.dias_mes_cobranca ?? null,
               iniciar_proximo_mes: termos?.iniciar_proximo_mes ?? false,
@@ -2992,6 +3011,7 @@ return (
       <LegendaCoresModal
         visible={modalLegendaVisible}
         onClose={() => setModalLegendaVisible(false)}
+        dataReferencia={fmtData(dataLiq)}
         t={t}
       />
 
@@ -3120,7 +3140,12 @@ return (
           >
             <Ionicons name="people-outline" size={14} color={tab === 'todos' ? '#fff' : '#374151'} />
             <Text style={[S.segmentBtnText, tab === 'todos' && S.segmentBtnTextActive]}>
-              {lang === 'es' ? 'Todos' : 'Todos'} {todosList.length > 0 ? todosList.length : ''}
+              {/* `todosFilt`, nao `todosList`: o badge tem de ser o numero de
+                  cards que a aba mostra, como os outros dois ja sao. Medido na
+                  Madrid em 26/10/2026: 49 clientes com algum emprestimo e 29
+                  com emprestimo ativo — com "Ativos" marcado a tela listava 29
+                  e o botao dizia 49. */}
+              {lang === 'es' ? 'Todos' : 'Todos'} {todosFilt.length > 0 ? todosFilt.length : ''}
             </Text>
           </TouchableOpacity>
         </View>
@@ -3621,6 +3646,14 @@ return (
               taxa_juros: termos?.taxa_juros || 20,
               frequencia: termos?.frequencia || 'DIARIO',
               dia_semana_cobranca: termos?.dia_semana_cobranca ?? null,
+              // ⚠ O PLURAL TAMBEM, senao a autorizacao perde os dias.
+              //
+              // Faltava `dias_semana_cobranca` nos dois handlers daqui.
+              // `useBuscaDocumento` sempre repassou, e o formulario prefere o
+              // plural quando ele vem preenchido — entao uma renovacao semanal
+              // aprovada para terca E quinta, aberta pelo card, chegava com o
+              // escalar e cobrava um dia so. O admin autorizou dois.
+              dias_semana_cobranca: termos?.dias_semana_cobranca ?? null,
               dia_mes_cobranca: termos?.dia_mes_cobranca ?? null,
               dias_mes_cobranca: termos?.dias_mes_cobranca ?? null,
               iniciar_proximo_mes: termos?.iniciar_proximo_mes ?? false,

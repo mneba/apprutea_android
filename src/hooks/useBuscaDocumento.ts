@@ -693,6 +693,49 @@ ${msg}`); navigation.goBack(); }
   // empréstimos nasceram com data divergente da liquidação (ver CLAUDE.md), e
   // "o último" tem de ser o último de verdade.
   useEffect(() => {
+    // ⚠ REFERÊNCIA NÃO PASSA NA FRENTE DE AUTORIZAÇÃO.
+    //
+    // Havendo solicitação de renovação em mão, os termos que valem são os
+    // que o ADMIN liberou — já preenchidos pelo efeito da solicitação ou
+    // pelo parâmetro do card. Este efeito rodava junto e os
+    // SOBRESCREVIA pelo último empréstimo, porque só olhava
+    // `tipoEmprestimoDetectado === 'RENOVACAO'`.
+    //
+    // E perdia sempre, porque é o último a terminar: a solicitação grava
+    // o valor ao fim da própria busca, que é quem acende
+    // `tipoEmprestimoDetectado` e `clienteEncontradoId` — as duas
+    // dependências daqui. Então a tela mostrava o valor aprovado e, uma
+    // fração de segundo depois, ele virava o valor do empréstimo
+    // anterior. Com o campo TRAVADO (`renovacaoAprovadaTravada`), o
+    // vendedor não tinha como corrigir.
+    //
+    // O estrago não parava na tela: `fn_renovar_emprestimo` só exige
+    // autorização quando `p_valor_principal > valor do anterior`. Com o
+    // valor sobrescrito para exatamente o do anterior, a comparação dá
+    // falso, a função cria o empréstimo pelo valor VELHO e a aprovação
+    // nunca é consumida — fica `APROVADO` para sempre, e o card continua
+    // oferecendo.
+    //
+    // Relatado pelo Mauricio em 26/10/2026. MEDIDO na Paola 2, com o
+    // relógio, três casos em cinco dias:
+    //
+    //   Lucho          26/10 19:22:21 pediu · 19:22:40 aprovado 600,00
+    //                        19:23:02 empréstimo de 100,00  (ATIVO)
+    //   Marcos Oliveira 26/10 19:09:58 pediu · 19:10:32 aprovado 2.000,00
+    //                        19:11:05 empréstimo de 200,00  (anulado)
+    //   Juan Carlos     22/10 15:16:28 pediu · 15:16:57 aprovado 1.000,00
+    //                        15:17:29 empréstimo de 700,00  (ATIVO)
+    //
+    // Os três valores criados são, ao centavo, o `valor_principal` do
+    // último empréstimo QUITADO de cada cliente — que é exatamente o que
+    // a consulta deste efeito busca.
+    //
+    // A guarda cobre os DOIS caminhos de entrada porque
+    // `solicitacaoRenovacaoDetectada` nasce do parâmetro do card e
+    // também é gravada pela busca por documento. `renegociacao` segue
+    // passando: ali o alvo é explícito e o número certo é o saldo.
+    if (solicitacaoRenovacaoDetectada && !renegociacao?.emprestimo_id) return;
+
     const empIdParaCarregar = renegociacao?.emprestimo_id ||
       (tipoEmprestimoDetectado === 'RENOVACAO' && clienteEncontradoId ? '__buscar__' : null);
     if (!empIdParaCarregar) return;
@@ -767,7 +810,8 @@ ${msg}`); navigation.goBack(); }
         }
       } catch (e) { console.error('Erro ao carregar empréstimo original:', e); }
     })();
-  }, [isRenegociacao, renegociacao?.emprestimo_id, tipoEmprestimoDetectado, clienteEncontradoId]);
+  }, [isRenegociacao, renegociacao?.emprestimo_id, tipoEmprestimoDetectado, clienteEncontradoId,
+      solicitacaoRenovacaoDetectada]);
 
   return {
     // Estados
