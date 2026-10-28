@@ -177,6 +177,31 @@ export const styles = StyleSheet.create({
   },
 
   // Banner venda aprovada
+  // Rascunho recuperado depois de o Android matar o app no meio do cadastro.
+  // Amarelo de propósito: é aviso para CONFERIR, não confirmação de que deu
+  // certo — o verde do banner de venda aprovada, logo abaixo, diria o
+  // contrário.
+  bannerRascunho: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FCD34D',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  bannerRascunhoTitulo: { fontSize: 13, fontWeight: '700' as const, color: '#92400E', marginBottom: 2 },
+  bannerRascunhoTexto: { fontSize: 11.5, color: '#92400E', lineHeight: 16 },
+  bannerRascunhoBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    backgroundColor: '#FDE68A',
+  },
+  bannerRascunhoBtnTexto: { fontSize: 12, fontWeight: '700' as const, color: '#92400E' },
+
   bannerAprovada: {
     backgroundColor: '#ECFDF5',
     borderWidth: 1,

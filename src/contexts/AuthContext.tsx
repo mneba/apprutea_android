@@ -110,6 +110,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * SE FALHAR, derruba. Código trocado ou vendedor desativado têm de levar ao
    * login; seguir com a tela carregada e as escritas negadas é o pior dos
    * mundos, que foi exatamente o que aconteceu.
+   *
+   * ⚠ MAS FALTA DE REDE NÃO É CREDENCIAL INVÁLIDA, e tratar as duas igual
+   * é pior que o problema original. Derrubar sem rede põe o cobrador numa
+   * tela de login que ele NÃO CONSEGUE PASSAR — entrar exige rede tanto
+   * quanto refazer a sessão. Ele fica preso do lado de fora, na rua, com o
+   * cliente na frente. Desde 27/10/2026, erro de transporte mantém o
+   * vendedor e tenta de novo na próxima volta do segundo plano; só recusa
+   * do servidor (4xx) derruba.
    */
   const garantirSessao = async (v: VendedorAuth): Promise<boolean> => {
     const { data } = await supabase.auth.getSession();
@@ -121,6 +129,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     if (error) {
+      // O que distingue as duas: uma recusa de credencial tem status 4xx do
+      // servidor. Sem rede, o `fetch` nem chega lá — vem sem status, ou com
+      // 5xx, ou com AuthRetryableFetchError. Na dúvida, MANTÉM: o pior caso
+      // de manter é uma tela que não grava e avisa; o pior caso de derrubar
+      // é um cobrador trancado fora do app.
+      const status = (error as any)?.status;
+      const recusaDoServidor = typeof status === 'number' && status >= 400 && status < 500;
+
+      if (!recusaDoServidor) {
+        console.warn('Sessão não refeita agora (parece rede):', error.message);
+        registrarAcao('SESSAO_RECUPERADA', {
+          vendedorId: v.id,
+          detalhe: 'adiada, falha de transporte: ' + error.message,
+        });
+        return false;
+      }
+
       console.warn('Não foi possível refazer a sessão:', error.message);
       registrarAcao('SESSAO_RECUPERADA', {
         vendedorId: v.id,

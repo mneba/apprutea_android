@@ -11,6 +11,7 @@ import {
 } from '../constants/novaVendaConstants';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
+import { useRascunho } from './useRascunho';
 
 // ============================================================
 // HOOK: Estados do formulário + validação + handlers
@@ -416,9 +417,87 @@ export function useNovaVendaForm({
   };
 
   // -----------------------------------------------------------
+  // RASCUNHO: O QUE FOI DIGITADO SOBREVIVE AO APP SER MORTO
+  // -----------------------------------------------------------
+  //
+  // Relato do Julio em 27/10/2026: o cobrador sai para a câmera ou para o
+  // WhatsApp no meio do cadastro, o Android mata o app por memória, e ele
+  // volta com o formulário em branco. São 24 campos digitados à vista do
+  // cliente — e a câmera, que este formulário abre, é justamente o momento
+  // de maior pressão de memória.
+  //
+  // A CHAVE CARREGA O CONTEXTO. Rascunho de uma rota aparecendo em outra, ou
+  // de um cliente no formulário de outro, devolveria dado plausível no lugar
+  // errado — pior que devolver nada.
+  const chaveRascunho = vendedor?.rota_id
+    ? `novaVenda:${vendedor.rota_id}:${clienteExistente?.id || renegociacao?.emprestimo_id || 'novo'}`
+    : null;
+
+  // ⚠ DESLIGADO NA RENOVAÇÃO APROVADA, de propósito.
+  // Ali o valor e a taxa vieram do ADMIN e o campo está travado. Restaurar um
+  // rascunho por cima repetiria o bug de 26/10/2026, em que o formulário
+  // sobrescrevia o valor liberado pelo do empréstimo anterior e a venda saía
+  // pelo número errado — com a agravante de que ninguém conseguia corrigir,
+  // porque o campo não aceita digitação.
+  const { restaurado: rascunhoRestaurado, descartar: descartarRascunho } = useRascunho(
+    chaveRascunho,
+    {
+      nome, documento,
+      ddiCelular, telefoneCelular, ddiFixo, telefoneFixo, email,
+      endereco, enderecoComercial,
+      segmentoId, segmentoNome, fotoCliente, observacoesCliente,
+      valorEmprestimo, numeroParcelas, taxaJuros, taxaJurosPersonalizada,
+      frequencia, diasSemanaPagamento, diaMesPagamento, diasMesFlexivel,
+      dataPrimeiroVencimento, observacoesEmprestimo, valorMicroseguro,
+    },
+    (d) => {
+      // `!= null` e não `if (d.x)`: string vazia e `false` são valores que o
+      // usuário pode ter deixado de propósito, e com `if` truthy eles seriam
+      // descartados — a caixa reapareceria marcada depois de desmarcada.
+      if (d.nome != null) setNome(d.nome);
+      if (d.documento != null) setDocumento(d.documento);
+      if (d.ddiCelular != null) setDdiCelular(d.ddiCelular);
+      if (d.telefoneCelular != null) setTelefoneCelular(d.telefoneCelular);
+      if (d.ddiFixo != null) setDdiFixo(d.ddiFixo);
+      if (d.telefoneFixo != null) setTelefoneFixo(d.telefoneFixo);
+      if (d.email != null) setEmail(d.email);
+      if (d.endereco != null) setEndereco(d.endereco);
+      if (d.enderecoComercial != null) setEnderecoComercial(d.enderecoComercial);
+      if (d.segmentoId !== undefined) setSegmentoId(d.segmentoId);
+      if (d.segmentoNome != null) setSegmentoNome(d.segmentoNome);
+      if (d.fotoCliente !== undefined) setFotoCliente(d.fotoCliente);
+      if (d.observacoesCliente != null) setObservacoesCliente(d.observacoesCliente);
+      if (d.valorEmprestimo != null) setValorEmprestimo(d.valorEmprestimo);
+      if (d.numeroParcelas != null) setNumeroParcelas(d.numeroParcelas);
+      if (d.taxaJuros != null) setTaxaJuros(d.taxaJuros);
+      if (d.taxaJurosPersonalizada != null) setTaxaJurosPersonalizada(d.taxaJurosPersonalizada);
+      if (d.frequencia != null) setFrequencia(d.frequencia);
+      if (Array.isArray(d.diasSemanaPagamento)) setDiasSemanaPagamento(d.diasSemanaPagamento);
+      if (d.diaMesPagamento != null) setDiaMesPagamento(d.diaMesPagamento);
+      if (Array.isArray(d.diasMesFlexivel)) setDiasMesFlexivel(d.diasMesFlexivel);
+      if (d.dataPrimeiroVencimento != null) setDataPrimeiroVencimento(d.dataPrimeiroVencimento);
+      if (d.observacoesEmprestimo != null) setObservacoesEmprestimo(d.observacoesEmprestimo);
+      if (d.valorMicroseguro != null) setValorMicroseguro(d.valorMicroseguro);
+    },
+    {
+      ativo: !isRenovacaoAprovada,
+      // Sem nada digitado não há o que salvar — e assim abrir e fechar a tela
+      // não deixa rascunho vazio para tropeçar depois.
+      temConteudo: (d) => !!(d.nome || d.documento || d.telefoneCelular ||
+        d.valorEmprestimo || d.endereco || d.fotoCliente),
+      // A foto vai em base64 e é de longe o maior campo. Passando do teto,
+      // o rascunho é gravado sem ela em vez de não ser gravado.
+      campoPesado: 'fotoCliente',
+    },
+  );
+
+  // -----------------------------------------------------------
   // LIMPAR FORMULÁRIO
   // -----------------------------------------------------------
   const limparFormulario = () => {
+    // Venda gravada: o rascunho cumpriu o papel e some. Sem isto, ele volta
+    // na próxima abertura do formulário e o vendedor reenvia o que já fez.
+    descartarRascunho();
     setNome(''); setDocumento('');
     setDdiCelular(ddiSugerido); setTelefoneCelular('');
     setDdiFixo(ddiSugerido); setTelefoneFixo('');
@@ -503,6 +582,14 @@ export function useNovaVendaForm({
 
     // --- Reset ---
     limparFormulario,
+
+    // --- Rascunho ---
+    // A tela PRECISA avisar que restaurou. Rascunho que reaparece calado é
+    // pior que rascunho nenhum: o vendedor abre "Novo Cliente" para outra
+    // pessoa, encontra o formulário preenchido, não repara, e grava um
+    // cadastro com dado de quem desistiu meia hora antes.
+    rascunhoRestaurado,
+    descartarRascunho,
 
     // --- Solicitação de renovação ---
     isRenovacaoTravada,

@@ -290,6 +290,36 @@ export default function NovaVendaScreen({ navigation, route }: any) {
             </View>
           )}
 
+          {/* Aviso de rascunho recuperado.
+              O app foi morto pelo Android no meio do cadastro e o que estava
+              digitado voltou. O aviso não é cortesia: sem ele, o formulário
+              preenchido sozinho parece dado do cliente ATUAL, e o vendedor
+              grava o cadastro de outra pessoa sem perceber. Por isso tem
+              botão de limpar ao lado. */}
+          {form.rascunhoRestaurado && (
+            <View style={styles.bannerRascunho}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.bannerRascunhoTitulo}>
+                  {lang === 'es' ? 'Borrador recuperado' : 'Rascunho recuperado'}
+                </Text>
+                <Text style={styles.bannerRascunhoTexto}>
+                  {lang === 'es'
+                    ? 'Recuperamos lo que estaba escrito antes de cerrarse la app. Revise si es del cliente correcto.'
+                    : 'Recuperamos o que estava preenchido antes de o app fechar. Confira se é do cliente certo.'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.bannerRascunhoBtn}
+                onPress={form.limparFormulario}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.bannerRascunhoBtnTexto}>
+                  {lang === 'es' ? 'Limpiar' : 'Limpar'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {/* ===== SEÇÃO CLIENTE ===== */}
           <View style={styles.section}>
             <TouchableOpacity

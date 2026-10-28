@@ -1,14 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer, useNavigationState } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import React, { useEffect, useState } from 'react';
+import Constants from 'expo-constants';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SolicitacoesWidget } from '../components/SolicitacoesWidget';
 import { useAuth } from '../contexts/AuthContext';
 import { LiquidacaoProvider, useLiquidacaoContext } from '../contexts/LiquidacaoContext';
+import { limparRascunhosVencidos } from '../hooks/useRascunho';
 
 // Screens
 import ClientesScreen from '../screens/ClientesScreen';
@@ -526,10 +529,95 @@ const styles = StyleSheet.create({
   },
 });
 
+// ════════════════════════════════════════════════════════════
+// A PILHA DE TELAS SOBREVIVE AO APP SER MORTO
+// ════════════════════════════════════════════════════════════
+//
+// Relato do Julio em 27/10/2026: sair para o WhatsApp ou para a câmera e
+// voltar devolvia o cobrador à Home. A causa é o Android matar o app em
+// segundo plano por memória — o processo morre, o JavaScript reinicia e a
+// pilha nasce na rota inicial.
+//
+// Guardar o estado resolve, mas RESTAURAR CEGAMENTE SERIA PIOR. Três
+// guardas, e cada uma existe por um motivo diferente:
+//
+//  . VALIDADE  depois de meia hora, o dia operacional provavelmente virou
+//    e a liquidação pode ter fechado. Voltar para a Home é a resposta certa.
+//  . VERSÃO  estado gravado por uma versão anterior pode apontar para tela
+//    que não existe mais, e aí o app quebra NA ABERTURA, que é o pior lugar
+//    possível. A chave carrega a versão do app; update invalida sozinho.
+//  . TELAS  retomar um Pagamento aberto há vinte minutos confunde mais do
+//    que recomeçar: o valor na tela pode já ter sido cobrado. A poda corta a
+//    pilha na primeira tela não restaurável e devolve o que vem antes dela.
+const CHAVE_NAV = 'nav_estado';
+const NAV_VALIDADE_MS = 30 * 60 * 1000;
+const VERSAO_APP = Constants.expoConfig?.version ?? 'dev';
+
+/** Telas de AÇÃO sobre dinheiro: não se retoma, recomeça-se. */
+const TELAS_NAO_RESTAURAVEIS = new Set(['Pagamento']);
+
+function podarEstado(estado: any): any | undefined {
+  const rotas = estado?.routes;
+  if (!Array.isArray(rotas) || rotas.length === 0) return undefined;
+  // A pilha tem de começar onde sempre começa. Qualquer outra coisa é estado
+  // de uma versão que não é esta.
+  if (rotas[0]?.name !== 'MainTabs') return undefined;
+
+  const mantidas: any[] = [];
+  for (const rota of rotas) {
+    if (TELAS_NAO_RESTAURAVEIS.has(rota?.name)) break;
+    mantidas.push(rota);
+  }
+  if (mantidas.length === 0) return undefined;
+  return { ...estado, routes: mantidas, index: mantidas.length - 1 };
+}
+
 export default function AppNavigator() {
   const { isAuthenticated, isLoading } = useAuth();
 
-  if (isLoading) {
+  // TODOS OS HOOKS ANTES DE QUALQUER RETORNO ANTECIPADO. O retorno de
+  // carregamento abaixo muda de lado conforme a sessão resolve, e hook
+  // declarado depois dele faria a contagem variar entre renders -- React #310.
+  const [navPronto, setNavPronto] = useState(false);
+  const [estadoInicial, setEstadoInicial] = useState<any>(undefined);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const cru = await AsyncStorage.getItem(CHAVE_NAV);
+        if (cru) {
+          const guardado = JSON.parse(cru);
+          const recente = Date.now() - (guardado?.gravadoEm ?? 0) <= NAV_VALIDADE_MS;
+          const mesmaVersao = guardado?.versao === VERSAO_APP;
+          if (recente && mesmaVersao) {
+            const podado = podarEstado(guardado?.estado);
+            if (podado) {
+              setEstadoInicial(podado);
+              console.log('Pilha de telas restaurada');
+            }
+          } else {
+            await AsyncStorage.removeItem(CHAVE_NAV);
+          }
+        }
+      } catch (err) {
+        console.warn('Não deu para restaurar a navegação:', err);
+      } finally {
+        setNavPronto(true);
+      }
+    })();
+    // Aproveita a abertura para varrer rascunho vencido.
+    void limparRascunhosVencidos();
+  }, []);
+
+  const aoMudarEstado = useCallback((estado: any) => {
+    if (!estado) return;
+    AsyncStorage.setItem(
+      CHAVE_NAV,
+      JSON.stringify({ gravadoEm: Date.now(), versao: VERSAO_APP, estado }),
+    ).catch(() => {});
+  }, []);
+
+  if (isLoading || !navPronto) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1E40AF' }}>
         <ActivityIndicator size="large" color="#fff" />
@@ -538,7 +626,12 @@ export default function AppNavigator() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer
+      // Só restaura para quem já estava dentro. Quem chega pelo login começa
+      // na Home, como sempre -- e aí o estado guardado é de outra sessão.
+      initialState={isAuthenticated ? estadoInicial : undefined}
+      onStateChange={isAuthenticated ? aoMudarEstado : undefined}
+    >
       {isAuthenticated ? <AppStack /> : <AuthStack />}
     </NavigationContainer>
   );
