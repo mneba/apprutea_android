@@ -789,19 +789,26 @@ ${msg}`); navigation.goBack(); }
             s.setTaxaJuros(String(emp.taxa_juros));
             s.setTaxaJurosPersonalizada(true);
           }
+          // ⚠ A frequência vem do empréstimo anterior, mas a DATA e o DIA DO
+          // MÊS **não**: a sugestão é sempre a liquidação + 1, em qualquer
+          // tipo de empréstimo (Mauricio, 03/11/2026), e o formulário já
+          // nasce assim. Sobrescrever aqui era o defeito.
+          //
+          // O que havia: para DIARIO, `new Date()` — o RELÓGIO DO APARELHO,
+          // não a liquidação. E logo abaixo, `dia_mes_cobranca` copiado do
+          // empréstimo antigo. Juntos criaram o caso do Anderson Santana:
+          // data em "amanhã" (25/10) com dia 19 herdado, e o banco, que
+          // decide pelo dia, agendou a cobrança em 19/10 — cinco dias ANTES
+          // da venda de 24/10.
           if (emp.frequencia_pagamento) {
             s.setFrequencia(emp.frequencia_pagamento);
-            if (emp.frequencia_pagamento === 'DIARIO') {
-              const d = new Date(); d.setDate(d.getDate() + 1);
-              s.setDataPrimeiroVencimento(d.toISOString().split('T')[0]);
-            }
           }
           if (emp.dias_semana_cobranca && emp.dias_semana_cobranca.length > 0) {
             s.setDiasSemanaPagamento([...emp.dias_semana_cobranca].sort((a, b) => a - b));
           } else if (emp.dia_semana_cobranca != null) {
             s.setDiaSemanaPagamento(String(emp.dia_semana_cobranca));
           }
-          if (emp.dia_mes_cobranca != null) s.setDiaMesPagamento(String(emp.dia_mes_cobranca));
+          // `dia_mes_cobranca` NÃO é copiado — ver o comentário acima.
           if (emp.dias_mes_cobranca) s.setDiasMesFlexivel(emp.dias_mes_cobranca);
           console.log('📋 Referência carregada:', {
             origem: ehRenegociacao ? 'saldo (renegociação)' : 'principal (renovação)',

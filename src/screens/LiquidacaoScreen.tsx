@@ -21,7 +21,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
 import { buscarConflitos, ConflitoAbertura, diaCurto, encerrarConflitos } from '../services/solicitacoesAbertura';
-import { LiquidacaoDiaria } from '../types';
+import { LiquidacaoDiaria } from '../types';
 import { mensagemErro } from '../utils/mensagemErro';
 
 type Language = 'pt-BR' | 'es';
@@ -828,14 +828,29 @@ export default function LiquidacaoScreen({ navigation }: any) {
   };
 
   // ==================== FORMATADORES ====================
+  // `\u00A0` e espaco NAO-SEPARAVEL, e nao enfeite: com espaco comum,
+  // "$ 1.900,00" quebra no espaco quando a coluna aperta e o vendedor ve
+  // so o "$", com o numero numa segunda linha. O cifrao e o valor sao uma
+  // coisa so e nao podem ser separados por quebra de linha.
   const formatarMoeda = (valor: number | null) => {
-    if (valor === null || valor === undefined) return '$ 0,00';
-    return `$ ${(valor).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    if (valor === null || valor === undefined) return '$\u00A00,00';
+    return `$\u00A0${(valor).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
   const formatarMoedaCompacta = (valor: number | null) => {
-    if (valor === null || valor === undefined) return '$ 0';
-    return `$ ${valor.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+    if (valor === null || valor === undefined) return '$\u00A00';
+    return `$\u00A0${valor.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  };
+
+  // A linha META / ATUAL / PROGRESSO sao tres colunas de 1/3 da largura do
+  // cartao. "PROGRESSO" e "$ 1.900,00" nao tem onde quebrar, entao em tela
+  // estreita o Android CORTA em vez de ajustar. Com isto o texto ENCOLHE
+  // para caber -- e `adjustsFontSizeToFit` so funciona com `numberOfLines`.
+  // (`minimumFontScale` e so do iOS; no Android o piso e do proprio sistema.)
+  const cabeNaColuna = {
+    numberOfLines: 1 as const,
+    adjustsFontSizeToFit: true,
+    minimumFontScale: 0.7,
   };
 
   const formatarData = (data: string | Date | null) => {
@@ -1538,8 +1553,17 @@ const confirmarConflitoAbertura = (
           onRequestClose={() => setModalValidacaoVisible(false)}
         >
           <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
+            <View style={[styles.modalContent, styles.modalContentRolavel]}>
               <Text style={styles.modalTitle}>🔒 {t.validacaoTitulo}</Text>
+              {/* ⚠ O miolo ROLA e os botões ficam FORA dele. A lista de dias
+                  faltantes não tem teto: em 03/11/2026, ao abrir o dia 3 com
+                  35 dias em aberto, o cartão passou da tela nas DUAS pontas
+                  (o overlay centraliza) e Enviar/Cancelar ficaram abaixo da
+                  borda, sem rolagem nenhuma -- o app prendia com o modal
+                  aberto e sem saída.
+                  Os botões NÃO entram no ScrollView de propósito: com o
+                  teclado aberto eles têm de continuar à vista. */}
+              <ScrollView style={styles.modalCorpoRolavel} keyboardShouldPersistTaps="handled">
               
               {/* Tipo de bloqueio */}
               <View style={[styles.modalAtencao, { marginBottom: 16 }]}>
@@ -1590,6 +1614,7 @@ const confirmarConflitoAbertura = (
                 multiline
                 numberOfLines={3}
               />
+              </ScrollView>
               
               {/* Botões */}
               <View style={styles.modalButtons}>
@@ -1773,16 +1798,16 @@ const confirmarConflitoAbertura = (
                 <View style={styles.card}>
                   <View style={styles.metaRow}>
                     <View style={styles.metaItem}>
-                      <Text style={styles.metaLabel}>{t.meta}</Text>
-                      <Text style={styles.metaValue}>{formatarMoeda(meta)}</Text>
+                      <Text style={styles.metaLabel} {...cabeNaColuna}>{t.meta}</Text>
+                      <Text style={styles.metaValue} {...cabeNaColuna}>{formatarMoeda(meta)}</Text>
                     </View>
                     <View style={styles.metaItem}>
-                      <Text style={styles.metaLabel}>{t.atual}</Text>
-                      <Text style={[styles.metaValue, { color: corProgresso }]}>{recebido === null ? '—' : formatarMoeda(recebido)}</Text>
+                      <Text style={styles.metaLabel} {...cabeNaColuna}>{t.atual}</Text>
+                      <Text style={[styles.metaValue, { color: corProgresso }]} {...cabeNaColuna}>{recebido === null ? '—' : formatarMoeda(recebido)}</Text>
                     </View>
                     <View style={styles.metaItem}>
-                      <Text style={styles.metaLabel}>{t.progresso}</Text>
-                      <Text style={[styles.metaValue, { color: corProgresso }]}>{percentual === null ? '—' : percentual + '%'}</Text>
+                      <Text style={styles.metaLabel} {...cabeNaColuna}>{t.progresso}</Text>
+                      <Text style={[styles.metaValue, { color: corProgresso }]} {...cabeNaColuna}>{percentual === null ? '—' : percentual + '%'}</Text>
                     </View>
                   </View>
                   <View style={styles.progressBar}>
@@ -2088,6 +2113,13 @@ const confirmarConflitoAbertura = (
       {/* Modais dos cards */}
       {liquidacao && (
         <>
+          {/* REABERTO entra no `isLiquidacaoAberta`, e nao e detalhe:
+              reabrir o dia existe PARA corrigir, entao esconder o
+              "Resetar cliente" tira justamente a ferramenta do motivo da
+              reabertura. Era o unico dos quatro modais que excluia
+              REABERTO -- os tres ModalFinanceiro ja passavam os dois. E o
+              banco sempre aceitou: fn_reset_cliente_liquidacao recusa so
+              quem nao esta em ('ABERTO','REABERTO'). Julio, 27/10/2026. */}
           <ModalExtrato
             visible={modalExtratoVisible}
             onClose={() => { setModalExtratoVisible(false); setTimeout(() => carregarLiquidacoes(), 300); }}
@@ -2096,7 +2128,7 @@ const confirmarConflitoAbertura = (
             caixaFinal={liquidacao.caixa_final || liquidacao.caixa_inicial || 0}
             rotaNome={(vendedor as any)?.rota_nome || ''}
             vendedorNomeExterno={vendedor?.nome || ''}
-            isLiquidacaoAberta={isAberto}
+            isLiquidacaoAberta={isAberto || isReaberto}
           />
           <ModalPagamentos
             visible={modalPagamentosVisible}
@@ -2180,8 +2212,14 @@ const confirmarConflitoAbertura = (
         onRequestClose={() => setModalValidacaoVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, styles.modalContentRolavel]}>
             <Text style={styles.modalTitle}>🔒 {t.validacaoTitulo}</Text>
+            {/* Mesma correção da cópia do calendário -- ver o comentário lá.
+                ⚠ Este modal existe DUAS vezes no arquivo, uma em cada ramo
+                de render (`mostrarCalendario` e o principal), com o mesmo
+                `modalValidacaoVisible`. Quem mexer num tem de mexer no
+                outro, senão o defeito volta por um dos dois caminhos. */}
+            <ScrollView style={styles.modalCorpoRolavel} keyboardShouldPersistTaps="handled">
             
             {/* Tipo de bloqueio */}
             <View style={[styles.modalAtencao, { marginBottom: 16 }]}>
@@ -2232,6 +2270,7 @@ const confirmarConflitoAbertura = (
               multiline
               numberOfLines={3}
             />
+            </ScrollView>
             
             {/* Botões */}
             <View style={styles.modalButtons}>
@@ -2449,10 +2488,12 @@ const styles = StyleSheet.create({
   avatarText: { fontSize: 20 },
   vendedorNome: { fontSize: 16, fontWeight: '600', color: '#1F2937', flex: 1 },
   statusRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
-  dataContainer: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  // Mesma regra da `clienteRow`: a data encolhe, o selo de status nao. Sem
+  // isto o selo perde letra ("ABERT") quando a data ocupa a linha inteira.
+  dataContainer: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
   statusIcon: { fontSize: 14 },
   dataText: { fontSize: 12, color: '#6B7280', fontWeight: '500' },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, flexShrink: 0 },
   statusText: { fontSize: 11, fontWeight: '700' },
   notasLabel: { flexDirection: 'row', alignItems: 'center', marginTop: 12, paddingVertical: 10, paddingHorizontal: 12, backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 8 },
   notasLabelIcon: { fontSize: 14, marginRight: 6 },
@@ -2472,12 +2513,16 @@ const styles = StyleSheet.create({
   progressFill: { height: '100%', backgroundColor: '#3B82F6', borderRadius: 4 },
   sectionTitle: { fontSize: 14, fontWeight: '600', color: '#1F2937', marginBottom: 12 },
   sectionTitleOutside: { fontSize: 14, fontWeight: '600', color: '#1F2937', marginBottom: 12, marginLeft: 4 },
-  clienteRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8 },
+  // `gap` + rotulo com `flex: 1` + valor com `flexShrink: 0`: o rotulo
+  // QUEBRA LINHA quando falta largura, em vez de ser cortado. O padrao do
+  // React Native e `flexShrink: 0`, o inverso da web -- sem isto
+  // "Clientes Renegociados:" sai pela borda do cartao e o Android corta.
+  clienteRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, paddingVertical: 8 },
   clienteRowTotal: { borderTopWidth: 1, borderTopColor: '#E5E7EB', marginTop: 8, paddingTop: 12 },
-  clienteLabel: { fontSize: 14, color: '#6B7280' },
-  clienteValue: { fontSize: 14, fontWeight: '600', color: '#1F2937' },
-  clienteLabelTotal: { fontSize: 14, fontWeight: '600', color: '#1F2937' },
-  clienteValueTotal: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
+  clienteLabel: { fontSize: 14, color: '#6B7280', flex: 1 },
+  clienteValue: { fontSize: 14, fontWeight: '600', color: '#1F2937', flexShrink: 0, textAlign: 'right' },
+  clienteLabelTotal: { fontSize: 14, fontWeight: '600', color: '#1F2937', flex: 1 },
+  clienteValueTotal: { fontSize: 16, fontWeight: '700', color: '#1F2937', flexShrink: 0, textAlign: 'right' },
   cardCaixa: { borderLeftWidth: 4, borderLeftColor: '#10B981' },
   cardPagamentos: { borderLeftWidth: 4, borderLeftColor: '#EF4444' },
   financeiroContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
@@ -2522,6 +2567,14 @@ const styles = StyleSheet.create({
   iniciarText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 16 },
   modalContent: { backgroundColor: '#fff', borderRadius: 16, padding: 24, width: '100%', maxWidth: 400 },
+  // Para modal cujo conteúdo não tem tamanho previsível. `modalOverlay` tem
+  // `justifyContent: 'center'`, então conteúdo maior que a tela transborda
+  // pelas DUAS pontas e não há como alcançar o que ficou fora -- não existe
+  // rolagem no overlay. O teto segura o cartão e o `flexShrink` deixa o
+  // ScrollView encolher dentro dele (sem o flexShrink ele toma o tamanho do
+  // conteúdo e o teto não tem o que cortar).
+  modalContentRolavel: { maxHeight: '85%' },
+  modalCorpoRolavel: { flexShrink: 1 },
   modalTitle: { fontSize: 20, fontWeight: '700', color: '#1F2937', marginBottom: 16, textAlign: 'center' },
   modalDescricao: { fontSize: 14, color: '#6B7280', textAlign: 'center', marginBottom: 16 },
   modalAtencao: { backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 8, padding: 12, marginBottom: 20 },

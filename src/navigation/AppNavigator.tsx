@@ -5,8 +5,8 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer, useNavigationState } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import Constants from 'expo-constants';
-import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, AppState, Image, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SolicitacoesWidget } from '../components/SolicitacoesWidget';
 import { useAuth } from '../contexts/AuthContext';
@@ -580,6 +580,9 @@ export default function AppNavigator() {
   // declarado depois dele faria a contagem variar entre renders -- React #310.
   const [navPronto, setNavPronto] = useState(false);
   const [estadoInicial, setEstadoInicial] = useState<any>(undefined);
+  // Ultimo estado que o React Navigation reportou, para o listener de
+  // AppState ter o que regravar sem depender de um novo evento de navegacao.
+  const estadoAtualRef = useRef<any>(null);
 
   useEffect(() => {
     (async () => {
@@ -609,13 +612,37 @@ export default function AppNavigator() {
     void limparRascunhosVencidos();
   }, []);
 
-  const aoMudarEstado = useCallback((estado: any) => {
+  // ⚠ `gravadoEm` tem de ser a hora em que o cobrador SAIU, nao a da ultima
+  // navegacao dele. Sao coisas diferentes, e a validade de 30 min mede a
+  // primeira: quem fica 25 min lendo a ficha de um cliente e depois sai 2
+  // min para o WhatsApp voltava para a Home, tendo ficado fora 2 minutos.
+  // Por isso o estado e regravado tambem na ida para segundo plano.
+  const gravar = useCallback((estado: any) => {
     if (!estado) return;
     AsyncStorage.setItem(
       CHAVE_NAV,
       JSON.stringify({ gravadoEm: Date.now(), versao: VERSAO_APP, estado }),
     ).catch(() => {});
   }, []);
+
+  // ⚠ NÃO grava aqui. Isto roda a CADA passo de navegação, e gravar significa
+  // `JSON.stringify` da pilha inteira mais uma escrita no SQLite do
+  // AsyncStorage — custo que a 1.1.5 não tinha e que entrou na 1.1.91 junto
+  // com o teto de fonte. O único instante que importa é a ida para segundo
+  // plano, e o listener de `AppState` abaixo cobre exatamente esse. Aqui fica
+  // só a atribuição ao ref, que é de graça.
+  const aoMudarEstado = useCallback((estado: any) => {
+    estadoAtualRef.current = estado;
+  }, []);
+
+  useEffect(() => {
+    const assinatura = AppState.addEventListener('change', (estado) => {
+      // 'inactive' entra junto: no Android e o que chega ao abrir a bandeja
+      // de recentes, que e exatamente o gesto de sair para outro app.
+      if (estado !== 'active') gravar(estadoAtualRef.current);
+    });
+    return () => assinatura.remove();
+  }, [gravar]);
 
   if (isLoading || !navPronto) {
     return (

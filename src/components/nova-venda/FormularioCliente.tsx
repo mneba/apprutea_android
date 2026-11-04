@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  ActivityIndicator,
   Image,
   Text,
   TextInput,
@@ -20,6 +21,10 @@ interface Props {
   enderecoComercial: string; setEnderecoComercial: (v: string) => void;
   segmentoNome: string;
   fotoCliente: string | null;
+  /** A foto vai para o Storage antes de virar URL, entao ha espera de
+   *  rede entre tirar a foto e ela aparecer. Sem aviso, o vendedor toca de
+   *  novo achando que nao pegou. */
+  subindoFoto: boolean;
   observacoesCliente: string; setObservacoesCliente: (v: string) => void;
   // Flags
   isReadOnly: boolean; // clienteExistente || clienteEncontradoId
@@ -42,7 +47,7 @@ export default function FormularioCliente(props: Props) {
     telefoneCelular, setTelefoneCelular, telefoneFixo, setTelefoneFixo,
     email, setEmail, endereco, setEndereco,
     enderecoComercial, setEnderecoComercial,
-    segmentoNome, fotoCliente, observacoesCliente, setObservacoesCliente,
+    segmentoNome, fotoCliente, subindoFoto, observacoesCliente, setObservacoesCliente,
     isReadOnly, isDisabled, camposComErro,
     limparErroCampo, getDdiLabel, openDdiModal,
     onOpenSegmentoModal, handlePhotoOptions, setFotoCliente,
@@ -237,11 +242,15 @@ export default function FormularioCliente(props: Props) {
         <Text style={styles.fieldLabel}>{t.fotoCliente}</Text>
         <TouchableOpacity
           style={[styles.photoContainer, isDisabled && { opacity: 0.6 }]}
-          onPress={() => { if (!isDisabled) handlePhotoOptions(); }}
-          activeOpacity={isDisabled ? 1 : 0.7}
-          disabled={isDisabled}
+          onPress={() => { if (!isDisabled && !subindoFoto) handlePhotoOptions(); }}
+          activeOpacity={isDisabled || subindoFoto ? 1 : 0.7}
+          disabled={isDisabled || subindoFoto}
         >
-          {fotoCliente ? (
+          {subindoFoto ? (
+            <View style={styles.photoPlaceholder}>
+              <ActivityIndicator color="#2563EB" />
+            </View>
+          ) : fotoCliente ? (
             <View style={styles.photoPreviewWrapper}>
               <Image source={{ uri: fotoCliente }} style={styles.photoPreview} />
               {!isDisabled && (

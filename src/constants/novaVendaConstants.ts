@@ -94,6 +94,20 @@ export const amanha = (dataBase: string | undefined): string => {
   return `${y}-${m}-${day}`;
 };
 
+/** Dia do mes da sugestao de 1o vencimento -- ou seja, de `amanha(dataBase)`.
+ *
+ *  Regra do Mauricio, 03/11/2026: **a sugestao de primeira cobranca e SEMPRE
+ *  a data da liquidacao + 1**, em qualquer frequencia e em qualquer tipo de
+ *  emprestimo. No MENSAL o "dia do mes" tem de sair da MESMA data, senao os
+ *  dois campos se contradizem -- e quem decide no banco e o dia do mes
+ *  (`fn_datas_parcelas`), entao a data escolhida ficaria por nada.
+ *
+ *  Antes nascia `'15'` fixo, sem relacao nenhuma com a venda: era isso que
+ *  fazia uma venda de 03/11 sugerir cobranca em 15/11.
+ */
+export const diaMesDe = (dataBase: string | undefined): string =>
+  String(Number(amanha(dataBase).slice(8, 10)));
+
 /** Dia da semana de uma data operacional, como `'0'`..`'6'` (0 = domingo).
  *
  *  Pedido do Julio em 23/09/2026: ao escolher SEMANAL, sugerir o dia em que o

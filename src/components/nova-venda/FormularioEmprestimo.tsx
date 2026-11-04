@@ -8,6 +8,7 @@ import {
 import {
   amanha,
   calcularDataMensal,
+  diaMesDe,
   diaSemanaDe,
   formatarData,
   type Lang,
@@ -230,10 +231,21 @@ export default function FormularioEmprestimo(props: Props) {
               onPress={() => {
                 setFrequencia(freq.value);
                 limparErroCampo('frequencia');
-                if (freq.value === 'DIARIO') {
-                  setDataPrimeiroVencimento(amanha(dataOperacional));
-                } else if (freq.value === 'MENSAL' && diaMesPagamento) {
-                  setDataPrimeiroVencimento(calcularDataMensal(parseInt(diaMesPagamento), dataOperacional));
+                // A SUGESTÃO É SEMPRE A LIQUIDAÇÃO + 1, em toda frequência
+                // (Mauricio, 03/11/2026). Antes só o DIARIO voltava para
+                // amanhã e o MENSAL recalculava a partir do dia do mês, que
+                // nascia '15' — venda de 03/11 sugeria cobrança em 15/11.
+                //
+                // É sugestão, não trava: logo abaixo, digitar outro dia do
+                // mês move a data junto.
+                setDataPrimeiroVencimento(amanha(dataOperacional));
+                if (freq.value === 'MENSAL') {
+                  // O dia do mês ACOMPANHA a data. Se os dois discordarem,
+                  // quem decide no banco é o dia (`fn_datas_parcelas`), e a
+                  // data sugerida ficaria por nada — foi assim que o
+                  // empréstimo do Anderson Santana nasceu com cobrança cinco
+                  // dias ANTES da venda.
+                  setDiaMesPagamento(diaMesDe(dataOperacional));
                 } else if (freq.value === 'SEMANAL' && frequencia !== 'SEMANAL') {
                   // Sugere o dia em que o vendedor está operando, em vez de
                   // cair sempre em segunda. Pedido do Julio em 23/09/2026.

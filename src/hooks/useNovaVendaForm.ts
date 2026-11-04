@@ -4,12 +4,14 @@ import { Alert, TextInput } from 'react-native';
 import {
   amanha,
   DDI_LIST,
+  diaMesDe,
   parseMoeda,
   type DDIOption,
   type Segmento,
   type Textos
 } from '../constants/novaVendaConstants';
 import { useAuth } from '../contexts/AuthContext';
+import { subirFotoCliente } from '../services/fotoCliente';
 import { supabase } from '../services/supabase';
 import { useRascunho } from './useRascunho';
 
@@ -115,7 +117,11 @@ export function useNovaVendaForm({
   const [enderecoComercial, setEnderecoComercial] = useState('');
   const [segmentoId, setSegmentoId] = useState<string | null>(null);
   const [segmentoNome, setSegmentoNome] = useState('');
+  // `fotoCliente` guarda a URL do Storage, NUNCA a imagem. Ver
+  // `services/fotoCliente.ts`: até 03/11/2026 guardava o base64 e ia
+  // inteiro para `clientes.foto_url`.
   const [fotoCliente, setFotoCliente] = useState<string | null>(null);
+  const [subindoFoto, setSubindoFoto] = useState(false);
   const [observacoesCliente, setObservacoesCliente] = useState('');
 
   // Validação visual
@@ -193,8 +199,16 @@ export function useNovaVendaForm({
     });
     limparErroCampo('diaSemanaPagamento');
   };
+  // A sugestão sai da LIQUIDAÇÃO + 1, nunca de um número fixo (Mauricio,
+  // 03/11/2026). Nascia `'15'`, e por isso uma venda de 03/11 sugeria cobrança
+  // em 15/11 — a data obedecia ao dia, e o dia não obedecia a nada.
+  //
+  // A solicitação autorizada continua mandando: ali os termos foram APROVADOS
+  // por um admin, e sobrescrevê-los desfaria a autorização.
   const [diaMesPagamento, setDiaMesPagamento] = useState(
-    solicitacaoRenovacao?.dia_mes_cobranca != null ? String(solicitacaoRenovacao.dia_mes_cobranca) : '15'
+    solicitacaoRenovacao?.dia_mes_cobranca != null
+      ? String(solicitacaoRenovacao.dia_mes_cobranca)
+      : diaMesDe(dataOperacional)
   );
   const [diasMesFlexivel, setDiasMesFlexivel] = useState<number[]>(
     solicitacaoRenovacao?.dias_mes_cobranca || []
@@ -318,12 +332,30 @@ export function useNovaVendaForm({
         allowsEditing: true, aspect: [1, 1], quality: 0.6, base64: true,
       });
       if (!result.canceled && result.assets[0]?.base64) {
-        const asset = result.assets[0];
-        setFotoCliente(`data:${asset.mimeType || 'image/jpeg'};base64,${asset.base64}`);
+        await guardarFoto(result.assets[0]);
       }
     } catch (err) {
       console.error('Erro ao capturar foto:', err);
       Alert.alert(t.erro, t.erroFoto);
+    }
+  };
+
+  /** Sobe a foto e guarda a URL. Regra única das duas origens (câmera e
+   *  galeria), para não existirem dois jeitos de gravar a mesma coisa —
+   *  foi exatamente isso que deixou a base com 24 MB de base64.
+   *
+   *  Falha de upload NÃO para a venda: avisa e segue sem foto. Voltar a
+   *  gravar base64 como plano B traria o problema de volta pela porta dos
+   *  fundos, e foto é cosmético — a cobrança não é. */
+  const guardarFoto = async (asset: { base64?: string | null; uri?: string }) => {
+    if (!asset.base64) return;
+    setSubindoFoto(true);
+    try {
+      const url = await subirFotoCliente(asset.base64, asset.uri);
+      if (url) setFotoCliente(url);
+      else Alert.alert(t.erro, t.erroFoto);
+    } finally {
+      setSubindoFoto(false);
     }
   };
 
@@ -339,8 +371,7 @@ export function useNovaVendaForm({
         allowsEditing: true, aspect: [1, 1], quality: 0.6, base64: true,
       });
       if (!result.canceled && result.assets[0]?.base64) {
-        const asset = result.assets[0];
-        setFotoCliente(`data:${asset.mimeType || 'image/jpeg'};base64,${asset.base64}`);
+        await guardarFoto(result.assets[0]);
       }
     } catch (err) {
       console.error('Erro ao selecionar foto:', err);
@@ -529,7 +560,7 @@ export function useNovaVendaForm({
     enderecoComercial, setEnderecoComercial,
     segmentoId, setSegmentoId,
     segmentoNome, setSegmentoNome,
-    fotoCliente, setFotoCliente,
+    fotoCliente, setFotoCliente, subindoFoto,
     observacoesCliente, setObservacoesCliente,
     camposComErro, setCamposComErro,
 

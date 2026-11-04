@@ -345,7 +345,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                   endereco={form.endereco} setEndereco={form.setEndereco}
                   enderecoComercial={form.enderecoComercial} setEnderecoComercial={form.setEnderecoComercial}
                   segmentoNome={form.segmentoNome}
-                  fotoCliente={form.fotoCliente}
+                  fotoCliente={form.fotoCliente} subindoFoto={form.subindoFoto}
                   observacoesCliente={form.observacoesCliente} setObservacoesCliente={form.setObservacoesCliente}
                   isReadOnly={isClienteReadOnly}
                   isDisabled={isDisabled}
