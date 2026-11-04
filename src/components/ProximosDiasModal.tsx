@@ -426,7 +426,7 @@ const S = StyleSheet.create({
   diaCard: { backgroundColor: '#FAFAFA', borderRadius: 12, marginBottom: 8, borderWidth: 1, borderColor: '#E5E7EB', overflow: 'hidden' },
   diaHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12 },
   diaHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  diaHeaderText: { fontSize: 14, fontWeight: '600', color: '#1F2937' },
+  diaHeaderText: { fontSize: 14, fontWeight: '600', color: '#1F2937', flexShrink: 1 },
   diaHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   diaBadge: { backgroundColor: '#DBEAFE', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10 },
   diaBadgeText: { fontSize: 12, fontWeight: '600', color: '#2563EB' },

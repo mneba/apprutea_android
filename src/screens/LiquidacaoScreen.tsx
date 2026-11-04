@@ -842,16 +842,27 @@ export default function LiquidacaoScreen({ navigation }: any) {
     return `$\u00A0${valor.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
   };
 
-  // A linha META / ATUAL / PROGRESSO sao tres colunas de 1/3 da largura do
-  // cartao. "PROGRESSO" e "$ 1.900,00" nao tem onde quebrar, entao em tela
-  // estreita o Android CORTA em vez de ajustar. Com isto o texto ENCOLHE
-  // para caber -- e `adjustsFontSizeToFit` so funciona com `numberOfLines`.
-  // (`minimumFontScale` e so do iOS; no Android o piso e do proprio sistema.)
-  const cabeNaColuna = {
-    numberOfLines: 1 as const,
-    adjustsFontSizeToFit: true,
-    minimumFontScale: 0.7,
-  };
+  // ⚠ NAO VOLTE A POR `adjustsFontSizeToFit` AQUI.
+  //
+  // Estava exatamente neste lugar, com `numberOfLines: 1` e
+  // `minimumFontScale: 0.7`, e foi o que fez o texto encolher de forma
+  // imprevisivel no aparelho do Julio. Dois motivos: no Android a medicao
+  // e inconsistente dentro de coluna `flex: 1` sem largura fixa, e
+  // `minimumFontScale` -- o unico freio -- e SO DO iOS, entao no Android o
+  // piso e o que o sistema quiser.
+  //
+  // O que resolve e o outro lado: nao deixar a fonte CRESCER. Por padrao o
+  // `Text` do React Native multiplica o tamanho pela escala de fonte do
+  // SISTEMA, que o usuario poe em 1,3x ou mais nas Configuracoes de
+  // acessibilidade. Num cartao de tres colunas com dinheiro, 1,3x ja
+  // estoura -- e isso explica por que a mesma tela cabe num aparelho e nao
+  // cabe no outro, com a mesma largura.
+  //
+  // `maxFontSizeMultiplier` e prop estavel e previsivel, e limita o
+  // crescimento sem desligar acessibilidade (o que `allowFontScaling={false}`
+  // faria). E sem `numberOfLines` o pior caso passa a ser DUAS LINHAS em
+  // vez de texto cortado -- feio e legivel em vez de bonito e errado.
+  const tetoDeFonte = { maxFontSizeMultiplier: 1.2 };
 
   const formatarData = (data: string | Date | null) => {
     if (!data) return '-';
@@ -1798,16 +1809,16 @@ const confirmarConflitoAbertura = (
                 <View style={styles.card}>
                   <View style={styles.metaRow}>
                     <View style={styles.metaItem}>
-                      <Text style={styles.metaLabel} {...cabeNaColuna}>{t.meta}</Text>
-                      <Text style={styles.metaValue} {...cabeNaColuna}>{formatarMoeda(meta)}</Text>
+                      <Text style={styles.metaLabel} {...tetoDeFonte}>{t.meta}</Text>
+                      <Text style={styles.metaValue} {...tetoDeFonte}>{formatarMoeda(meta)}</Text>
                     </View>
                     <View style={styles.metaItem}>
-                      <Text style={styles.metaLabel} {...cabeNaColuna}>{t.atual}</Text>
-                      <Text style={[styles.metaValue, { color: corProgresso }]} {...cabeNaColuna}>{recebido === null ? '—' : formatarMoeda(recebido)}</Text>
+                      <Text style={styles.metaLabel} {...tetoDeFonte}>{t.atual}</Text>
+                      <Text style={[styles.metaValue, { color: corProgresso }]} {...tetoDeFonte}>{recebido === null ? '—' : formatarMoeda(recebido)}</Text>
                     </View>
                     <View style={styles.metaItem}>
-                      <Text style={styles.metaLabel} {...cabeNaColuna}>{t.progresso}</Text>
-                      <Text style={[styles.metaValue, { color: corProgresso }]} {...cabeNaColuna}>{percentual === null ? '—' : percentual + '%'}</Text>
+                      <Text style={styles.metaLabel} {...tetoDeFonte}>{t.progresso}</Text>
+                      <Text style={[styles.metaValue, { color: corProgresso }]} {...tetoDeFonte}>{percentual === null ? '—' : percentual + '%'}</Text>
                     </View>
                   </View>
                   <View style={styles.progressBar}>
@@ -1853,10 +1864,10 @@ const confirmarConflitoAbertura = (
             {/* Caixa */}
             <TouchableOpacity style={[styles.card, styles.cardCaixa]} onPress={() => setModalExtratoVisible(true)} activeOpacity={0.7}>
               <View style={styles.financeiroContent}>
-                <View>
-                  <Text style={styles.financeiroLabel}>{t.caixa}</Text>
-                  <Text style={styles.financeiroValor}>{formatarMoeda(liquidacao.caixa_final || liquidacao.caixa_inicial)}</Text>
-                  <Text style={styles.financeiroDetalhe}>{t.inicial} {formatarMoeda(liquidacao.caixa_inicial)}</Text>
+                <View style={styles.financeiroTexto}>
+                  <Text style={styles.financeiroLabel} {...tetoDeFonte}>{t.caixa}</Text>
+                  <Text style={styles.financeiroValor} {...tetoDeFonte}>{formatarMoeda(liquidacao.caixa_final || liquidacao.caixa_inicial)}</Text>
+                  <Text style={styles.financeiroDetalhe} {...tetoDeFonte}>{t.inicial} {formatarMoeda(liquidacao.caixa_inicial)}</Text>
                 </View>
                 <View style={styles.indicadorVerde} />
               </View>
@@ -1865,11 +1876,11 @@ const confirmarConflitoAbertura = (
             {/* Pagamentos */}
             <TouchableOpacity style={[styles.card, styles.cardPagamentos]} onPress={() => setModalPagamentosVisible(true)} activeOpacity={0.7}>
               <View style={styles.financeiroContent}>
-                <View>
-                  <Text style={styles.financeiroLabel}>{t.pagamentos}</Text>
-                  <Text style={styles.financeiroValor}>{resumoValido ? clientesPagaram : ((liquidacao as any).clientes_pagos || 0)} {t.pagos}</Text>
-                  <Text style={styles.financeiroDetalhe}>{t.naoPagos} {resumoValido ? Math.max(0, clientesNaLista - clientesPagaram) : ((liquidacao as any).clientes_nao_pagos || 0)} | {t.efetividade} {calcularEfetividade() === null ? '—' : calcularEfetividade() + '%'}</Text>
-                  <Text style={[styles.financeiroDetalhe, { color: '#059669', fontWeight: '600', marginTop: 2 }]}>{t.recebido || 'Recebido:'} {formatarMoeda(totalParcelasPagas)}</Text>
+                <View style={styles.financeiroTexto}>
+                  <Text style={styles.financeiroLabel} {...tetoDeFonte}>{t.pagamentos}</Text>
+                  <Text style={styles.financeiroValor} {...tetoDeFonte}>{resumoValido ? clientesPagaram : ((liquidacao as any).clientes_pagos || 0)} {t.pagos}</Text>
+                  <Text style={styles.financeiroDetalhe} {...tetoDeFonte}>{t.naoPagos} {resumoValido ? Math.max(0, clientesNaLista - clientesPagaram) : ((liquidacao as any).clientes_nao_pagos || 0)} | {t.efetividade} {calcularEfetividade() === null ? '—' : calcularEfetividade() + '%'}</Text>
+                  <Text style={[styles.financeiroDetalhe, { color: '#059669', fontWeight: '600', marginTop: 2 }]} {...tetoDeFonte}>{t.recebido || 'Recebido:'} {formatarMoeda(totalParcelasPagas)}</Text>
                 </View>
                 <View style={styles.indicadorVermelho} />
               </View>
@@ -1880,17 +1891,17 @@ const confirmarConflitoAbertura = (
             <View style={styles.operacoesRow}>
               <TouchableOpacity style={[styles.operacaoCard, styles.operacaoVendas]} onPress={() => setModalVendasVisible(true)} activeOpacity={0.7}>
                 <Text style={styles.opLabelVerde}>{t.vendas}</Text>
-                <Text style={styles.opValorVerde}>{formatarMoedaCompacta(vendasReal)}</Text>
+                <Text style={styles.opValorVerde} {...tetoDeFonte}>{formatarMoedaCompacta(vendasReal)}</Text>
                 <Text style={styles.opDetalheVerde}>{qtdVendasReal} emp.</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.operacaoCard, styles.operacaoReceitas]} onPress={() => setModalReceitasVisible(true)} activeOpacity={0.7}>
                 <Text style={styles.opLabelAzul}>{t.receitas}</Text>
-                <Text style={styles.opValorAzul}>{formatarMoedaCompacta(receitasFinanceiras.total)}</Text>
+                <Text style={styles.opValorAzul} {...tetoDeFonte}>{formatarMoedaCompacta(receitasFinanceiras.total)}</Text>
                 <Text style={styles.opDetalheAzul}>{receitasFinanceiras.qtd} lanç.</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.operacaoCard, styles.operacaoDespesas]} onPress={() => setModalDespesasVisible(true)} activeOpacity={0.7}>
                 <Text style={styles.opLabelVermelho}>{t.despesas}</Text>
-                <Text style={styles.opValorVermelho}>{formatarMoedaCompacta(liquidacao.total_despesas_dia)}</Text>
+                <Text style={styles.opValorVermelho} {...tetoDeFonte}>{formatarMoedaCompacta(liquidacao.total_despesas_dia)}</Text>
                 <Text style={styles.opDetalheVermelho}>{liquidacao.qtd_despesas_dia || 0} desp.</Text>
               </TouchableOpacity>
             </View>
@@ -2525,7 +2536,19 @@ const styles = StyleSheet.create({
   clienteValueTotal: { fontSize: 16, fontWeight: '700', color: '#1F2937', flexShrink: 0, textAlign: 'right' },
   cardCaixa: { borderLeftWidth: 4, borderLeftColor: '#10B981' },
   cardPagamentos: { borderLeftWidth: 4, borderLeftColor: '#EF4444' },
-  financeiroContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  financeiroContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 },
+  // ⚠ ESTE `flex: 1` E O CONSERTO DOS VALORES CORTADOS.
+  //
+  // A coluna de texto era um `<View>` pelado ao lado de um indicador de 40px
+  // fixos. Sem `flex`, no React Native ela nasce com `flexShrink: 0` -- o
+  // INVERSO da web --, entao `$ 125.400,00` em fontSize 24 nao tinha como
+  // encolher nem quebrar: passava da borda e o Android cortava. Caixa e
+  // Pagamentos sao os dois maiores numeros da tela, e eram exatamente os
+  // dois sem esta protecao.
+  //
+  // E a mesma correcao de `clienteRow`, cujo comentario acima ja descrevia
+  // o padrao -- aplicada ali e esquecida aqui.
+  financeiroTexto: { flex: 1 },
   financeiroLabel: { fontSize: 14, color: '#6B7280', marginBottom: 4 },
   financeiroValor: { fontSize: 24, fontWeight: '700', color: '#1F2937' },
   financeiroDetalhe: { fontSize: 12, color: '#9CA3AF', marginTop: 8 },

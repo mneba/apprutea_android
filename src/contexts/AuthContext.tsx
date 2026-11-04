@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, ReactNode, useContext, useEffect, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
+import Constants from 'expo-constants';
 import { supabase } from '../services/supabase';
 import { definirIdiomaDasMensagens } from '../utils/mensagemErro';
 import { esquecerAuditoria, registrarAcao } from '../services/auditoriaApp';
@@ -49,6 +50,29 @@ const errorTexts = {
     inactive: 'Vendedor inactivo. Contacte al soporte.',
     noRoute: 'No tiene una ruta vinculada. Contacte al administrador.',
   }
+};
+
+/**
+ * Conta ao painel de controle do web que o app abriu, e em que versão.
+ *
+ * Antes de 04/11/2026 a versão só existia no aparelho, e não havia como
+ * saber quem ainda rodava build antiga. Quem é o vendedor sai de
+ * `auth.uid()` no banco, por isso só chama com sessão garantida — como
+ * `anon` a função é negada.
+ *
+ * NUNCA atrapalha a abertura: não espera, e toda falha é engolida.
+ */
+const registrarAcessoApp = () => {
+  void (async () => {
+    try {
+      await supabase.rpc('fn_registrar_acesso_app', {
+        p_versao: Constants.expoConfig?.version ?? null,
+        p_plataforma: Platform.OS,
+      });
+    } catch {
+      // sem rede ou função ausente: o painel só fica sem a informação
+    }
+  })();
 };
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -186,7 +210,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (vendedorRaw) {
         const v: VendedorAuth = JSON.parse(vendedorRaw);
         setVendedor(v);
-        await garantirSessao(v);
+        if (await garantirSessao(v)) registrarAcessoApp();
       }
 
       if (idiomaRaw === 'pt-BR' || idiomaRaw === 'es') {
@@ -273,6 +297,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         window.localStorage.setItem('vendedor_data', JSON.stringify(vendedorAuth));
       }
       setVendedor(vendedorAuth);
+      registrarAcessoApp();
 
       return { success: true };
     } catch (error: any) {

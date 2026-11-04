@@ -211,7 +211,7 @@ export default function PagarMultiplasModal({
                 <View key={p.parcela_id} style={[S.linha, S.linhaPaga]}>
                   <View style={S.linhaEsq}>
                     <Text style={S.checkPaga}>✓</Text>
-                    <View>
+                    <View style={{ flex: 1 }}>
                       <Text style={S.linhaLbl}>{t.parcela} {p.numero_parcela}</Text>
                       {!!fmtVenc(p.data_vencimento) && (
                         <Text style={S.linhaVenc}>{t.vencLbl || 'Venc.'} {fmtVenc(p.data_vencimento)}</Text>
@@ -258,7 +258,7 @@ export default function PagarMultiplasModal({
                           {sel && <Text style={S.checkboxIcon}>✓</Text>}
                         </View>
                       )}
-                      <View>
+                      <View style={{ flex: 1 }}>
                         <Text style={[S.linhaLbl, isCredito && { color: '#4F46E5' }]}>
                           {t.parcela} {p.numero_parcela}
                           {Number(p.valor_pago || 0) > 0 && (
@@ -400,11 +400,15 @@ const S = StyleSheet.create({
   closeX: { fontSize: 15, color: '#6B7280' },
   cliente: { fontSize: 13, color: '#6B7280', paddingHorizontal: 16, marginBottom: 8 },
   creditoBox: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#EEF2FF', borderRadius: 8, padding: 12, marginBottom: 14 },
-  creditoBoxLbl: { fontSize: 13, color: '#4F46E5' },
+  creditoBoxLbl: { fontSize: 13, color: '#4F46E5', flexShrink: 1 },
   creditoBoxVal: { fontSize: 13, fontWeight: '700', color: '#4F46E5' },
   hint: { fontSize: 12, color: '#9CA3AF', marginBottom: 8 },
   linha: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 11, borderRadius: 8, marginBottom: 6 },
-  linhaEsq: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  // `flex: 1` para a coluna da esquerda CEDER dentro de `linha`, e o
+  // `<View style={{ flex: 1 }}>` de dentro dela para o rotulo da
+  // parcela poder quebrar. Sem os dois, a largura e a soma dos
+  // conteudos e o Android corta -- ver scripts/conferir-linhas-que-cortam.mjs.
+  linhaEsq: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
   linhaPaga: { backgroundColor: '#F9FAFB', opacity: 0.6 },
   linhaOff: { borderWidth: 0.5, borderColor: '#E5E7EB' },
   linhaSel: { borderWidth: 1.5, borderColor: '#6366F1' },
@@ -423,10 +427,10 @@ const S = StyleSheet.create({
   pagoParcial: { fontSize: 12, color: '#9CA3AF', fontWeight: '400' },
   rodape: { borderTopWidth: 1, borderTopColor: '#E5E7EB', padding: 16 },
   rodapeRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
-  rodapeLbl: { fontSize: 14, color: '#6B7280' },
+  rodapeLbl: { fontSize: 14, color: '#6B7280', flexShrink: 1 },
   rodapeVal: { fontSize: 14, color: '#1F2937' },
   rodapeTotalRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 6, paddingTop: 8, borderTopWidth: 0.5, borderTopColor: '#E5E7EB' },
-  rodapeTotalLbl: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
+  rodapeTotalLbl: { fontSize: 16, fontWeight: '700', color: '#1F2937', flexShrink: 1 },
   rodapeTotalVal: { fontSize: 20, fontWeight: '700', color: '#1F2937' },
   btnAvancar: { backgroundColor: '#10B981', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 14 },
   btnAvancarTx: { fontSize: 15, fontWeight: '700', color: '#fff' },
@@ -434,11 +438,11 @@ const S = StyleSheet.create({
   confTitulo: { fontSize: 17, fontWeight: '700', color: '#1F2937', marginBottom: 14 },
   confBloco: { backgroundColor: '#F9FAFB', borderRadius: 10, padding: 12, marginBottom: 10 },
   confLinha: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
-  confLinhaLbl: { fontSize: 14, color: '#6B7280' },
+  confLinhaLbl: { fontSize: 14, color: '#6B7280', flexShrink: 1 },
   confLinhaVenc: { fontSize: 12, color: '#9CA3AF' },
   confLinhaVal: { fontSize: 14, color: '#1F2937' },
   confBlocoTit: { fontSize: 12, fontWeight: '700', color: '#6B7280', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 6 },
-  confSubTotLbl: { fontSize: 14, fontWeight: '600', color: '#374151' },
+  confSubTotLbl: { fontSize: 14, fontWeight: '600', color: '#374151', flexShrink: 1 },
   confSubTotVal: { fontSize: 14, fontWeight: '700', color: '#1F2937' },
   confDestaque: { backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', borderRadius: 10, padding: 14, marginBottom: 10, alignItems: 'center' },
   confDestaqueLbl: { fontSize: 12, fontWeight: '700', color: '#047857', textTransform: 'uppercase', letterSpacing: 0.3 },
@@ -446,7 +450,7 @@ const S = StyleSheet.create({
   confCtx: { fontSize: 11, color: '#9CA3AF', textAlign: 'center', marginBottom: 16 },
   confCenario: { backgroundColor: '#F9FAFB', borderRadius: 10, padding: 14, marginBottom: 10 },
   confDivider: { height: 1, backgroundColor: '#D1D5DB', marginVertical: 6 },
-  confNovoLbl: { fontSize: 15, fontWeight: '700', color: '#1F2937' },
+  confNovoLbl: { fontSize: 15, fontWeight: '700', color: '#1F2937', flexShrink: 1 },
   confNovoVal: { fontSize: 18, fontWeight: '700', color: '#1F2937' },
   confBotoes: { flexDirection: 'row', gap: 10 },
   btnVoltar: { flex: 1, borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },

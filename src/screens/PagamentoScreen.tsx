@@ -292,6 +292,7 @@ const styles = StyleSheet.create({
   valorLabel: {
     color: '#6B7280',
     fontSize: 14,
+    flexShrink: 1,
   },
   valorText: {
     color: '#1F2937',
@@ -310,6 +311,7 @@ const styles = StyleSheet.create({
     color: '#1F2937',
     fontSize: 16,
     fontWeight: '600',
+    flexShrink: 1,
   },
   valorDestaque: {
     color: '#2563EB',

@@ -373,7 +373,14 @@ function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
       {/* === LINHA 2: [breadcrumb tipo·status] + Parcela + Valores === */}
       {(!compacto || ex) && (
         <View style={S.pRow}>
-          <View>
+          {/* ⚠ `flex: 1` AQUI E O QUE IMPEDE O CORTE.
+              `pRow` e `space-between` com duas colunas de texto, e no React
+              Native filho sem `flex` nasce com `flexShrink: 0` -- o INVERSO
+              da web. Sem isto, a largura da linha e a soma dos conteudos, e
+              o que passa da borda o Android CORTA em silencio. E o mesmo
+              defeito de `financeiroContent` em LiquidacaoScreen, consertado
+              em 03/11/2026, e de `clienteRow` antes dele. */}
+          <View style={S.pColEsq}>
             {/* ⭐ Breadcrumb: tipo do empréstimo · dias de atraso. "ok" quando em
                 dia; "N dias" a partir do 1º dia de atraso (para TODOS os clientes
                 com parcela vencida, sem depender do status VENCIDO formal).
@@ -920,7 +927,7 @@ const S = StyleSheet.create({
   bWarnNewI: { fontSize: 10, color: '#EF4444' },
   bWarnNewT: { fontSize: 10, fontWeight: '700', color: '#EF4444' },
   sub: { fontSize: 11, color: '#6B7280', marginTop: 2 },
-  pRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+  pRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', gap: 10, marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
   pLblR: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
   pLbl: { fontSize: 11, color: '#6B7280' },
   fBdg: { backgroundColor: '#EDE9FE', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 },
@@ -930,7 +937,16 @@ const S = StyleSheet.create({
   pRecebidoLbl: { fontSize: 10, color: '#9CA3AF', textAlign: 'right', marginTop: -2 },
   pCreditoLbl: { fontSize: 11, color: '#7C3AED', textAlign: 'right', marginTop: 2, fontWeight: '600' },
   pParcelaDiscreta: { fontSize: 11, color: '#6B7280', textAlign: 'right', marginTop: 2 },
-  sCol: { alignItems: 'flex-end' },
+  // As duas colunas de `pRow`. A da esquerda CEDE largura (`flex: 1`); a da
+  // direita, do dinheiro, pode ENCOLHER (`flexShrink: 1`) para a linha
+  // discreta -- "3 parcelas de $ 1.900,00" -- QUEBRAR em vez de ser
+  // cortada. O valor em destaque e curto e continua numa linha so.
+  //
+  // Nenhuma das duas tem largura fixa, de proposito: e isso que torna a
+  // linha imune a fonte grande do sistema e a tela estreita. O pior caso
+  // passa a ser o cartao mais ALTO, nao o numero cortado.
+  pColEsq: { flex: 1 },
+  sCol: { alignItems: 'flex-end', flexShrink: 1 },
   sLbl: { fontSize: 11, color: '#6B7280', marginBottom: 2 },
   exp: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
   expActRow: { flexDirection: 'row', gap: 8, marginBottom: 6, alignItems: 'center' },

@@ -11,7 +11,8 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { supabase } from '../services/supabase';
+import { supabase } from '../services/supabase';
+
 import { mensagemErro } from '../utils/mensagemErro';
 
 // ==================== TIPOS ====================
@@ -453,7 +454,11 @@ export function ModalNotasLista({
         <View style={S.modalContainer}>
           {/* Header */}
           <View style={S.modalHeader}>
-            <View>
+            {/* `flex: 1`: o titulo leva o NOME DO CLIENTE, que nao tem
+                tamanho maximo, e o X de fechar ao lado e rigido. Sem isto
+                a largura da linha e a soma dos dois e o Android corta o
+                titulo. Ver scripts/conferir-linhas-que-cortam.mjs. */}
+            <View style={{ flex: 1 }}>
               <Text style={S.modalTitle}>📝 {clienteNome ? `${t.notas} - ${clienteNome}` : t.notasDoDia}</Text>
               <Text style={S.modalSubtitle}>
                 {dataReferencia ? fmtData(dataReferencia) : ''} • {notasFiltradas.length} {t.notas.toLowerCase()}
@@ -897,7 +902,7 @@ const S = StyleSheet.create({
   inlineNovaBloqueadoTx: { fontSize: 13, fontWeight: '500', color: '#92400E' },
 
   // Meta row da nota (data + autor)
-  notaDataHora: { fontSize: 11, color: '#9CA3AF' },
+  notaDataHora: { fontSize: 11, color: '#9CA3AF', flexShrink: 1 },
   notaAutor: { fontSize: 11, color: '#6B7280', fontWeight: '500' },
 
   // Contexto da nota (data liquidação + parcela)

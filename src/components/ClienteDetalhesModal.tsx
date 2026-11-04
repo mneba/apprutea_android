@@ -2092,17 +2092,17 @@ const S = StyleSheet.create({
   // Empréstimo Card
   empCard: { backgroundColor: '#F9FAFB', borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#E5E7EB' },
   empHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  empHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  empHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
   empExpandBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 10, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#BFDBFE', backgroundColor: '#EFF6FF' },
   empExpandTx: { fontSize: 13, fontWeight: '600', color: '#2563EB' },
-  empValor: { fontSize: 16, fontWeight: '700', color: '#1F2937' },
+  empValor: { fontSize: 16, fontWeight: '700', color: '#1F2937', flexShrink: 1 },
   empVencBadge: { backgroundColor: '#FEE2E2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
   empVencText: { fontSize: 10, fontWeight: '600', color: '#DC2626' },
   empStatusBadge: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10 },
   empStatusText: { fontSize: 10, fontWeight: '700' },
 
   empInfoRow: { flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 4 },
-  empInfoItem: { fontSize: 11, color: '#6B7280' },
+  empInfoItem: { fontSize: 11, color: '#6B7280', flexShrink: 1 },
   empInfoDot: { fontSize: 11, color: '#D1D5DB' },
 
   empBarBg: { height: 4, backgroundColor: '#E5E7EB', borderRadius: 2, marginTop: 8, overflow: 'hidden' },
@@ -2118,7 +2118,7 @@ const S = StyleSheet.create({
   empFreqLabel: { fontSize: 12, color: '#6B7280' },
   empFreqValue: { fontSize: 12, fontWeight: '600', color: '#1F2937' },
   empProxRow: { flexDirection: 'row', marginTop: 4, gap: 4 },
-  empProxLabel: { fontSize: 12, color: '#6B7280' },
+  empProxLabel: { fontSize: 12, color: '#6B7280', flexShrink: 1 },
   empProxValue: { fontSize: 12, fontWeight: '600', color: '#F59E0B' },
 
   // Parcelas
@@ -2393,6 +2393,7 @@ const S = StyleSheet.create({
   trocaLinhaLabel: {
     fontSize: 12,
     color: '#6B7280',
+    flexShrink: 1,
   },
   trocaLinhaValor: {
     fontSize: 13,

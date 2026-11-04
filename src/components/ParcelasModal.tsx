@@ -1008,7 +1008,7 @@ const S = StyleSheet.create({
 
   // Banner crédito
   creditoBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#DBEAFE', padding: 12, marginHorizontal: 16, marginTop: 12, borderRadius: 10, borderWidth: 1, borderColor: '#93C5FD' },
-  creditoText: { fontSize: 13, fontWeight: '600', color: '#1D4ED8' },
+  creditoText: { fontSize: 13, fontWeight: '600', color: '#1D4ED8', flexShrink: 1 },
 
   // Hint
   hintBar: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#F9FAFB', borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
@@ -1029,7 +1029,7 @@ const S = StyleSheet.create({
   // Datas
   datesBlock: { marginTop: 4, gap: 2 },
   dateRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  dateText: { fontSize: 11, color: '#6B7280' },
+  dateText: { fontSize: 11, color: '#6B7280', flexShrink: 1 },
 
   // Badges atraso/pontualidade
   badgeAtraso: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEE2E2', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#FECACA', marginLeft: 4 },
@@ -1050,7 +1050,7 @@ const S = StyleSheet.create({
   // Breakdown dinheiro/crédito
   breakdownRow: { flexDirection: 'row', alignItems: 'center', marginTop: 1 },
   breakdownText: { fontSize: 11, color: '#6B7280' },
-  breakdownTextCredito: { fontSize: 11, color: '#2563EB', fontWeight: '500' },
+  breakdownTextCredito: { fontSize: 11, color: '#2563EB', fontWeight: '500', flexShrink: 1 },
 
   // Botões
   mParcelaBtns: { marginLeft: 8, justifyContent: 'center', gap: 6 },

@@ -334,7 +334,7 @@ function ClienteCardTodos({
           {ENCERRADO.has(emp.status) ? (
             // Empréstimo encerrado (quitado, renegociado ou cancelado) — resumo
             <>
-              <View>
+              <View style={S.pColEsq}>
                 <View style={S.pLblR}>
                   {(() => {
                     const b = desfechoBadge(emp.status, lang);
@@ -367,7 +367,7 @@ function ClienteCardTodos({
           ) : (
             // Empréstimo ativo/vencido — layout original
             <>
-              <View>
+              <View style={S.pColEsq}>
                 <View style={S.pLblR}>
                   <Text style={S.pLbl}>{t.parcela} {emp.numero_parcela_atual}/{emp.numero_parcelas}</Text>
                   <View style={S.fBdg}><Text style={S.fBdgT}>{FREQ[lang][emp.frequencia_pagamento] || emp.frequencia_pagamento}</Text></View>
@@ -694,7 +694,7 @@ const S = StyleSheet.create({
   bWarnNewI: { fontSize: 10, color: '#EF4444' },
   bWarnNewT: { fontSize: 10, fontWeight: '700', color: '#EF4444' },
   sub: { fontSize: 11, color: '#6B7280', marginTop: 2 },
-  pRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+  pRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', gap: 10, marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
   pLblR: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
   pLbl: { fontSize: 11, color: '#6B7280' },
   fBdg: { backgroundColor: '#EDE9FE', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 },
@@ -704,7 +704,13 @@ const S = StyleSheet.create({
   // nível do que a badge de frequência diz.
   diaSemLbl: { fontSize: 11, fontWeight: '700' as const, color: '#4338CA', marginTop: 2 },
   pValBig: { fontSize: 18, fontWeight: '800', color: '#1F2937', textAlign: 'right' },
-  sCol: { alignItems: 'flex-end' },
+  // As duas colunas de `pRow`. Mesmo conserto de ClienteCardLiquidacao:
+  // a esquerda CEDE largura (`flex: 1`), a direita do dinheiro pode
+  // ENCOLHER para "Saldo do emprestimo: $ 125.400,00" QUEBRAR em vez de
+  // ser cortada. Nenhuma tem largura fixa, de proposito: e isso que torna
+  // a linha imune a fonte grande do sistema e a tela estreita.
+  pColEsq: { flex: 1 },
+  sCol: { alignItems: 'flex-end', flexShrink: 1 },
   compEmp: { marginTop: 4, alignItems: 'flex-end', gap: 1 },
   compEmpLine: { fontSize: 11, color: '#6B7280' },
   compEmpStrong: { color: '#374151', fontWeight: '700' },
