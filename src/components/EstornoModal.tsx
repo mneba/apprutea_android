@@ -9,8 +9,9 @@ import {
   View,
 } from 'react-native';
 import { Language } from '../contexts/LiquidacaoContext';
+import { moeda } from '../utils/formato';
 
-const fmt = (v: number) => '$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (v: number) => moeda(v);
 
 interface ParcelaEstorno {
   parcela_id: string;

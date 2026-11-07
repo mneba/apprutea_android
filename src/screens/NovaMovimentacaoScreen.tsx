@@ -17,8 +17,10 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
-import { prepararImagem } from '../services/anexos';
+import { prepararImagem } from '../services/anexos';
+
 import { mensagemErro } from '../utils/mensagemErro';
+import { numeroBr } from '../utils/formato';
 
 // ============================================================
 // TIPOS
@@ -213,7 +215,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
     }
   };
 
-  // Entrada natural: digita 500 = R$ 500, digita 0.5 = R$ 0,50
+  // Entrada natural: digita 500 = $ 500, digita 0.5 = $ 0,50
   const handleValorChange = (text: string) => {
     setValor(text.replace(/[^\d.,]/g, '').replace(',', '.'));
   };
@@ -221,7 +223,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
   const valorNumerico = parseFloat((valor || '').replace(',', '.')) || 0;
 
   const formatarValor = (v: number) =>
-    v.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+    numeroBr(v);
 
   // -----------------------------------------------------------
   // FOTO
@@ -575,7 +577,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
           </View>
           <Text style={styles.sucessoTitle}>{t.registrada}</Text>
           <Text style={styles.sucessoSubtitle}>
-            {tipo === 'RECEBER' ? t.resumoEntrada : t.resumoSaida} de R$ {valorConfirmado}
+            {tipo === 'RECEBER' ? t.resumoEntrada : t.resumoSaida} de $ {valorConfirmado}
           </Text>
           {descConfirmada ? (
             <Text style={styles.sucessoDesc}>{descConfirmada}</Text>
@@ -801,7 +803,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
               <View style={styles.resumoDivider} />
               <View style={styles.resumoRow}>
                 <Text style={styles.resumoLabelBold}>{t.valor}</Text>
-                <Text style={styles.resumoValueBold}>R$ {formatarValor(valorNumerico)}</Text>
+                <Text style={styles.resumoValueBold}>$ {formatarValor(valorNumerico)}</Text>
               </View>
             </View>
           </View>

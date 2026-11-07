@@ -17,8 +17,10 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { supabase } from '../services/supabase';
+import { supabase } from '../services/supabase';
+
 import { mensagemErro } from '../utils/mensagemErro';
+import { numeroBr } from '../utils/formato';
 
 // ============================================================
 // TIPOS
@@ -376,11 +378,7 @@ export const SolicitacoesWidget: React.FC<Props> = ({ vendedorId, rotaId, lang =
     tipo === 'ABERTURA_RETROATIVA' || tipo === 'ABERTURA_DIAS_FALTANTES';
 
   const formatarValor = (valor: number) => {
-    return new Intl.NumberFormat(lang === 'es' ? 'es-CO' : 'pt-BR', {
-      style: 'currency',
-      currency: lang === 'es' ? 'COP' : 'BRL',
-      minimumFractionDigits: 2,
-    }).format(valor);
+    return '$ ' + numeroBr(valor);
   };
 
   // ============================================================

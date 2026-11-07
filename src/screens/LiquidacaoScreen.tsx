@@ -23,6 +23,7 @@ import { supabase } from '../services/supabase';
 import { buscarConflitos, ConflitoAbertura, diaCurto, encerrarConflitos } from '../services/solicitacoesAbertura';
 import { LiquidacaoDiaria } from '../types';
 import { mensagemErro } from '../utils/mensagemErro';
+import { moedaJunta, data as dataBr, dataExtenso, chaveData } from '../utils/formato';
 
 type Language = 'pt-BR' | 'es';
 
@@ -300,7 +301,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
 
   const setDataVisualizacao = useCallback((d: Date | null) => {
     setDataVisualizacaoLocal(d);
-    liqCtx.setDataVisualizacao(d ? d.toISOString().split('T')[0] : null);
+    liqCtx.setDataVisualizacao(d ? chaveData(d) : null);
   }, [liqCtx]);
 
   // Sincroniza a liquidação ABERTA no contexto quando a liquidação muda.
@@ -766,7 +767,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
     if (!vendedor) return;
     setLoadingVisualizacao(true);
     try {
-      const dataFiltro = data.toISOString().split('T')[0];
+      const dataFiltro = chaveData(data);
       const { data: clientesDia, error } = await supabase
         .from('vw_clientes_rota_dia')
         .select('*')
@@ -834,12 +835,12 @@ export default function LiquidacaoScreen({ navigation }: any) {
   // coisa so e nao podem ser separados por quebra de linha.
   const formatarMoeda = (valor: number | null) => {
     if (valor === null || valor === undefined) return '$\u00A00,00';
-    return `$\u00A0${(valor).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return moedaJunta(valor);
   };
 
   const formatarMoedaCompacta = (valor: number | null) => {
     if (valor === null || valor === undefined) return '$\u00A00';
-    return `$\u00A0${valor.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+    return moedaJunta(valor, 0);
   };
 
   // ⚠ NAO VOLTE A POR `adjustsFontSizeToFit` AQUI.
@@ -875,8 +876,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
         return `${dia}/${mes}/${ano}`;
       }
     }
-    const d = typeof data === 'string' ? new Date(data) : data;
-    return d.toLocaleDateString('pt-BR');
+    return dataBr(data);
   };
 
   // ATENCAO: o resumo do contexto e do dia que o CONTEXTO carregou, e esta
@@ -969,7 +969,15 @@ export default function LiquidacaoScreen({ navigation }: any) {
       if (resultado.requer_autorizacao) {
         console.log('Requer autorização, verificando se já existe solicitação de abertura pendente...');
         
-        const dataSolicitadaNova = dataLiquidacao || new Date().toISOString().split('T')[0];
+        // Só COMPARA e EXIBE, contra a solicitação pendente que a consulta
+        // abaixo acha — não grava. Quem grava manda NULL e deixa
+        // fn_criar_solicitacao_autorizacao decidir pelo fuso da EMPRESA.
+        //
+        // ⚠ Daí uma lacuna conhecida: `chaveData` usa o relógio do APARELHO.
+        // Se o fuso do celular diferir do da empresa, esta comparação pode
+        // discordar por um dia do que o banco gravou. Some quando a tela
+        // passar a pedir o dia operacional ao servidor.
+        const dataSolicitadaNova = dataLiquidacao || chaveData();
 
         // Verificar se já existe QUALQUER solicitação de ABERTURA pendente (retroativa ou dias faltantes)
         const { data: solicitacaoExistente, error: erroBusca } = await supabase
@@ -1064,7 +1072,17 @@ export default function LiquidacaoScreen({ navigation }: any) {
         ? 'ABERTURA_RETROATIVA' 
         : 'ABERTURA_DIAS_FALTANTES';
 
-      const dataSolicitada = validacaoInfo.dataSolicitada || new Date().toISOString().split('T')[0];
+      // Abertura RETROATIVA manda o dia escolhido; abertura de HOJE manda
+      // NULL de propósito, e quem decide é fn_criar_solicitacao_autorizacao
+      // com fn_data_hoje_rota — o fuso da EMPRESA.
+      //
+      // Aqui havia `|| chaveData()`, e antes dele `|| toISOString()`. Os dois
+      // leem o relógio do APARELHO: o segundo virava o dia às 21h (UTC−3) e
+      // foi o defeito que o Julio relatou em 04/11/2026; o primeiro acerta o
+      // dia local, mas o local do celular, que não é necessariamente o da
+      // rota. O dia operacional não sai do aparelho — ver "A liquidação é a
+      // régua do tempo" no CLAUDE.md.
+      const dataSolicitada = validacaoInfo.dataSolicitada;
 
       const { data, error } = await supabase.rpc('fn_criar_solicitacao_autorizacao', {
         p_vendedor_id: vendedor.id,
@@ -1303,10 +1321,11 @@ const confirmarConflitoAbertura = (
   }
 
   // ==================== RENDER CALENDÁRIO ====================
-  // Chave YYYY-MM-DD montada com os campos LOCAIS da Date. Nunca toISOString,
-  // que converte para UTC e desloca o dia em UTC-3.
-  const chaveDia = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  // A chave YYYY-MM-DD agora vem de `chaveData`, em utils/formato: os mesmos
+  // campos LOCAIS da Date, nunca toISOString. Estava definida só aqui, e era
+  // justamente o cálculo que faltava no caminho da solicitação de abertura —
+  // lá o fallback era `toISOString()`, e por isso a solicitação nascia com a
+  // data de amanhã depois das 19h na Colômbia.
 
   /**
    * O único alerta que importa: a solicitação de abertura MAIS RECENTE que
@@ -1339,7 +1358,7 @@ const confirmarConflitoAbertura = (
   /** Cor do pulso do dia, ou null. Pisca apenas o dia do alerta vigente. */
   const corPulso = (dia: DiaCalendario): string | null => {
     if (!dia.mesAtual || dia.liquidacao || !alertaSolic) return null;
-    if (chaveDia(dia.data) !== alertaSolic.data) return null;
+    if (chaveData(dia.data) !== alertaSolic.data) return null;
     if (alertaSolic.status === 'APROVADO') return '#10B981';   // verde: pode abrir
     if (alertaSolic.status === 'EXPIRADO') return '#EF4444';   // vermelho: caducou
     return '#F59E0B';                                          // âmbar: aguardando
@@ -1952,7 +1971,7 @@ const confirmarConflitoAbertura = (
                     {language === 'pt-BR' ? 'Visualização de Rota' : 'Visualización de Ruta'}
                   </Text>
                   <Text style={styles.cardVisualizacaoData}>
-                    {dataVisualizacao ? dataVisualizacao.toLocaleDateString(language === 'pt-BR' ? 'pt-BR' : 'es', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }) : ''}
+                    {dataVisualizacao ? dataExtenso(dataVisualizacao, language) : ''}
                   </Text>
                 </View>
               </View>

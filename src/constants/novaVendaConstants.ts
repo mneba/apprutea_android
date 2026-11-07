@@ -1,3 +1,4 @@
+import { numeroBr } from '../utils/formato';
 // ============================================================
 // TIPOS
 // ============================================================
@@ -156,7 +157,7 @@ export const formatarData = (dateStr: string): string => {
 
 /** Formata número para exibição monetária */
 export const fmt = (v: number): string =>
-  v.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+  numeroBr(v);
 
 // ============================================================
 // TRADUÇÕES

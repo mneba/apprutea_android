@@ -1,4 +1,5 @@
 import React from 'react';
+import { moeda } from '../utils/formato';
 import {
   Modal,
   StyleSheet,
@@ -31,7 +32,7 @@ interface ResumoPagamentoModalProps {
   };
 }
 
-const fmt = (v: number) => '$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (v: number) => moeda(v || 0);
 
 export default function ResumoPagamentoModal({
   visible,

@@ -47,6 +47,7 @@ import { DIAS_SEMANA_CURTO } from '../constants/novaVendaConstants';
 import { buscarDiasSemana, MapaDiasSemana } from '../services/diasSemanaEmprestimos';
 import { supabase } from '../services/supabase';
 import { mensagemErro } from '../utils/mensagemErro';
+import { moeda, data, diaMes, hora, numeroBr, chaveData } from '../utils/formato';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DRAWER_WIDTH = SCREEN_WIDTH * 0.75;
 
@@ -189,9 +190,9 @@ const textos = {
     semParcelaEmAberto: 'Sem parcela em aberto',
     semClientes: 'Nenhum cliente encontrado', carregando: 'Carregando clientes...',
     statusAtraso: 'Atraso', statusInativo: 'Inativo',
-    tipoFiltro: 'Tipo:...', statusFiltro: 'Status:...',
+    tipoFiltro: 'Tipo:...', statusFiltro: 'Situação na carteira:...',
     tipoTodos: 'Todos', tipoNovo: 'Novo', tipoRenovacao: 'Renovação', tipoRenegociacao: 'Renegociação',
-    stTodos: 'Todos', stAtivo: 'Ativo', stVencido: 'Vencido', stQuitado: 'Quitado', stRenegociado: 'Renegociado',
+    stTodos: 'Todos', stAberto: 'Em aberto', stAtraso: 'Em atraso', stQuitado: 'Quitado', stRenegociado: 'Já renegociou',
     pago: 'Pago:', original: 'Original:', credito: 'Crédito:',
     empAtivo: 'Empréstimo Ativo', empVencido: 'Empréstimo Vencido',
     empRenegociado: 'Renegociado', empQuitado: 'Quitado',
@@ -300,9 +301,9 @@ const textos = {
     semParcelaEmAberto: 'Sin cuota abierta',
     semClientes: 'Ningún cliente encontrado', carregando: 'Cargando clientes...',
     statusAtraso: 'Atraso', statusInativo: 'Inactivo',
-    tipoFiltro: 'Tipo:...', statusFiltro: 'Estado:...',
+    tipoFiltro: 'Tipo:...', statusFiltro: 'Situación en cartera:...',
     tipoTodos: 'Todos', tipoNovo: 'Nuevo', tipoRenovacao: 'Renovación', tipoRenegociacao: 'Renegociación',
-    stTodos: 'Todos', stAtivo: 'Activo', stVencido: 'Vencido', stQuitado: 'Liquidado', stRenegociado: 'Renegociado',
+    stTodos: 'Todos', stAberto: 'Abierto', stAtraso: 'En atraso', stQuitado: 'Liquidado', stRenegociado: 'Ya renegoció',
     pago: 'Pagado:', original: 'Original:', credito: 'Crédito:',
     empAtivo: 'Préstamo Activo', empVencido: 'Préstamo Vencido',
     empRenegociado: 'Renegociado', empQuitado: 'Liquidado',
@@ -388,7 +389,7 @@ const FREQ: Record<Language, Record<string, string>> = {
   'es': { DIARIO: 'Diario', SEMANAL: 'Semanal', QUINZENAL: 'Quincenal', MENSAL: 'Mensual', FLEXIVEL: 'Flexible' },
 };
 const getIni = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase() || '').join('');
-const fmt = (v: number) => '$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (v: number) => moeda(v);
 
 // ⭐ Normaliza texto para busca: remove acentos + lowercase
 const normalizarBusca = (texto: string): string =>
@@ -416,7 +417,7 @@ const fmtData = (d: string | null | undefined) => {
   // Se é timestamp, converte para data local
   const dt = new Date(d);
   if (isNaN(dt.getTime())) return '';
-  return dt.toLocaleDateString('pt-BR');
+  return data(dt);
 };
 const fmtTel = (t: string) => t.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
 // `corAtraso` e `borderOf` viviam aqui também, sem nenhuma chamada: quem pinta
@@ -2343,8 +2344,22 @@ export default function ClientesScreen({ navigation, route }: any) {
         const rPago = isPaga(r.parcela_id, r.status_dia, pagasSet);
         const existentePago = isPaga(existente.parcela_id, existente.status_dia, pagasSet);
         
-        // Substitui se a existente é paga e esta é pendente, ou se esta tem menor número de parcela e ambas são pendentes
-        if ((existentePago && !rPago) || (!existentePago && !rPago && r.numero_parcela < existente.numero_parcela)) {
+        // Substitui se a existente é paga e esta é pendente, ou se esta tem
+        // menor número de parcela e as duas estão no MESMO estado.
+        //
+        // ⚠ O caso "as duas PAGAS" faltava, e o efeito aparecia na aba Pagos:
+        // num empréstimo QUITADO nenhuma candidata é pendente, nenhuma regra
+        // disparava, e a parcela que representa o card acabava sendo a
+        // PRIMEIRA LINHA que a RPC devolveu — ou seja, a ordem do UNION ALL.
+        // Medido em 06/11/2026 no andrÉ vinicius da silva (rota 2.2 Pegassus,
+        // liquidação 30/10): dois empréstimos quitados no mesmo dia mostravam
+        // "Parcela 3/4" e "Parcela 1/4", sem critério nenhum.
+        //
+        // O cartão agora escreve "Quitado" em vez do número nesse caso, mas o
+        // desempate continua sendo necessário: a parcela escolhida também
+        // decide vencimento, saldo e a parcela que o botão Pagar mira.
+        if ((existentePago && !rPago)
+            || (existentePago === rPago && r.numero_parcela < existente.numero_parcela)) {
           Object.assign(existente, {
             parcela_id: r.parcela_id, numero_parcela: r.numero_parcela,
             valor_parcela: r.valor_parcela, valor_pago_parcela: r.valor_pago_parcela,
@@ -2848,15 +2863,43 @@ export default function ClientesScreen({ navigation, route }: any) {
         .map(c => ({ ...c, emprestimos: c.emprestimos.filter(e => (diasSemana[e.id] || []).includes(filtroDiaSemana as any)) }))
         .filter(c => c.emprestimos.length > 0);
     }
-    // Filtro por status do empréstimo
+    // Filtro por SITUAÇÃO DO CLIENTE NA CARTEIRA, derivada do status dos
+    // empréstimos.
+    //
+    // ⚠ `status` tem DOIS donos neste schema, e esta tela carrega os dois:
+    //   `emprestimos.status`  ATIVO | VENCIDO | QUITADO | RENEGOCIADO  ← aqui
+    //   `clientes.status`     ATIVO | INATIVO | SUSPENSO               ← o selo
+    //                         "suspenso" de ClienteCardTodos
+    //
+    // Até 05/11/2026 as opções eram o status do EMPRÉSTIMO, literal, numa aba
+    // que lista CLIENTES. "Ativo" errava nos dois sentidos, medido: escondia
+    // 313 clientes cujo empréstimo está VENCIDO — carteira em aberto, e
+    // justamente quem o vendedor mais precisa ver — e contava como "Ativo" 40
+    // clientes INATIVO ou SUSPENSO no cadastro. O Julio leu o rótulo e pediu
+    // a conferência da carteira contra a soma das abas; o rótulo é que estava
+    // errado.
+    //
+    // O braço QUITADO JÁ era de nível cliente desde sempre, com o comentário
+    // dizendo isso — uma opção traduzia empréstimo→cliente e três não, na
+    // mesma lista. Agora as três primeiras seguem a mesma régua.
+    //
+    // "Em atraso" é SUBCONJUNTO de "Em aberto", de propósito: é detalhamento,
+    // não partição. Era a objeção contra sobrepor duas opções, e ela cai
+    // quando a lista passa a ser de situação do cliente.
     if (filtroStatus !== 'todos') {
-      if (filtroStatus === 'QUITADO') {
-        // Cliente quitado = tem empréstimo QUITADO e NÃO tem nenhum ATIVO ou VENCIDO
-        r = r.filter(c =>
-          c.emprestimos.some(e => e.status === 'QUITADO') &&
-          !c.emprestimos.some(e => e.status === 'ATIVO' || e.status === 'VENCIDO')
-        );
+      const temAberto = (c: ClienteTodos) =>
+        c.emprestimos.some(e => e.status === 'ATIVO' || e.status === 'VENCIDO');
+      if (filtroStatus === 'ABERTO') {
+        r = r.filter(temAberto);
+      } else if (filtroStatus === 'ATRASO') {
+        r = r.filter(c => c.emprestimos.some(e => e.status === 'VENCIDO'));
+      } else if (filtroStatus === 'QUITADO') {
+        // Cliente quitado = tem empréstimo QUITADO e NÃO tem nenhum em aberto
+        r = r.filter(c => c.emprestimos.some(e => e.status === 'QUITADO') && !temAberto(c));
       } else {
+        // RENEGOCIADO é HISTÓRICO, não situação — daí o rótulo "Já renegociou"
+        // e a comparação literal. Dos 15 clientes que têm um, 9 seguem com
+        // empréstimo em aberto: espelhar o QUITADO aqui esconderia esses 9.
         r = r.filter(c => c.emprestimos.some(e => e.status === filtroStatus));
       }
     }
@@ -3264,13 +3307,34 @@ return (
                     const ms = new Date(p.data_pagamento).getTime();
                     if (!isNaN(ms) && ms < dtSrcMs) { dtSrcMs = ms; dtSrc = p.data_pagamento; }
                   });
+                  // ⚠ A DATA DO CABEÇALHO É A DA LIQUIDAÇÃO, NÃO O RELÓGIO.
+                  //
+                  // O `data_pagamento` que a RPC devolve é `MAX(pp.created_at)`
+                  // — o instante em que o lançamento foi REGISTRADO, não o dia
+                  // a que ele pertence. Numa liquidação retroativa os dois
+                  // divergem, e era o relógio que estava na tela: o cabeçalho
+                  // dizia "Pago: 04/11 · 18:09" numa lista que é inteira do dia
+                  // 30/10 (andrÉ vinicius, rota 2.2 Pegassus, medido em
+                  // 06/11/2026 — a liquidação ABERTA da rota é 30/10 e os
+                  // pagamentos têm `data_pagamento` 2026-10-30).
+                  // Ver "A liquidação é a régua do tempo" no CLAUDE.md.
+                  //
+                  // Os DOIS eixos ficam visíveis e nomeados, como já se faz em
+                  // `financeiro`: primeiro o dia operacional, e o instante do
+                  // lançamento só quando cai em outro dia — aí ele vem com a
+                  // palavra "lançado", para ninguém ler como data do pagamento.
                   const fmtDtPag = dtSrc ? (() => {
-                    if (dtSrc.includes('T') || dtSrc.includes('+') || dtSrc.length > 10) {
-                      const d = new Date(dtSrc);
-                      return `${d.toLocaleDateString(lang === 'es' ? 'es' : 'pt-BR', { day: '2-digit', month: '2-digit' })} · ${d.toLocaleTimeString(lang === 'es' ? 'es' : 'pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+                    const temHora = dtSrc.includes('T') || dtSrc.includes('+') || dtSrc.length > 10;
+                    const diaOperacional = dataLiq ? diaMes(dataLiq) : null;
+                    if (!temHora) {
+                      const [, m, day] = dtSrc.split('-');
+                      return diaOperacional || `${day}/${m}`;
                     }
-                    const [y, m, day] = dtSrc.split('-');
-                    return `${day}/${m}`;
+                    const d = new Date(dtSrc);
+                    if (!diaOperacional) return `${diaMes(d)} · ${hora(d)}`;
+                    return chaveData(d) === dataLiq
+                      ? `${diaOperacional} · ${hora(d)}`
+                      : `${diaOperacional} · ${lang === 'es' ? 'registrado' : 'lançado'} ${diaMes(d)} ${hora(d)}`;
                   })() : null;
                   return (
                     <View>
@@ -3702,7 +3766,7 @@ return (
             <View style={S.naoPagoBody}>
               <Text style={S.naoPagoCliente}>{naoPagoClienteInfo?.nome}</Text>
               <Text style={S.naoPagoParcela}>
-                {lang === 'es' ? 'Cuota' : 'Parcela'} {naoPagoParcelaInfo?.numero_parcela} — $ {naoPagoParcelaInfo?.valor_parcela?.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                {lang === 'es' ? 'Cuota' : 'Parcela'} {naoPagoParcelaInfo?.numero_parcela} — $ {numeroBr(naoPagoParcelaInfo?.valor_parcela)}
               </Text>
               
               <Text style={S.naoPagoLabel}>{lang === 'es' ? 'Observación (opcional):' : 'Observação (opcional):'}</Text>

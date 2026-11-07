@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { moeda } from '../utils/formato';
 import {
   Modal,
   ScrollView,
@@ -65,7 +66,7 @@ interface PagarMultiplasModalProps {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-const fmt = (v: number) => '$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (v: number) => moeda(v || 0);
 
 // Vencimento em dd/mm/aaaa. Datas puras YYYY-MM-DD são fatiadas na string (sem
 // new Date) para não escorregar um dia por fuso.

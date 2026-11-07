@@ -6,6 +6,7 @@ import {
     View,
 } from 'react-native';
 import { Language } from '../contexts/LiquidacaoContext';
+import { moeda, data } from '../utils/formato';
 
 // ─── Types (re-exportados para uso externo) ────────────────────────────────
 
@@ -37,7 +38,7 @@ const FREQ: Record<Language, Record<string, string>> = {
 };
 
 const getIni = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase() || '').join('');
-const fmt = (v: number) => '$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (v: number) => moeda(v);
 const fmtTel = (t: string) => t.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
 const fmtData = (d: string | null | undefined) => {
   if (!d) return '';
@@ -47,7 +48,7 @@ const fmtData = (d: string | null | undefined) => {
   }
   const dt = new Date(d);
   if (isNaN(dt.getTime())) return '';
-  return dt.toLocaleDateString('pt-BR');
+  return data(dt);
 };
 
 const corAtraso = (vencidas: number): string => {

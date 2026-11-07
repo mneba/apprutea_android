@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { moeda } from '../utils/formato';
 import {
   Modal,
   StyleSheet,
@@ -37,7 +38,7 @@ interface ValorLivreModalProps {
   };
 }
 
-const fmt = (v: number) => '$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (v: number) => moeda(v || 0);
 const parseValor = (s: string) => parseFloat((s || '0').replace(/\./g, '').replace(',', '.')) || 0;
 
 export default function ValorLivreModal({

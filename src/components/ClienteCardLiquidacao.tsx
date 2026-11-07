@@ -15,6 +15,7 @@ import Svg, { Path } from 'react-native-svg';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Language } from '../contexts/LiquidacaoContext';
 import { diasAtraso as calcAtraso, corAtraso, COR_EM_DIA, type ConfigCobranca } from '../utils/diasCobranca';
+import { moeda, data } from '../utils/formato';
 
 // ─── Types (re-exportados para uso externo) ────────────────────────────────
 
@@ -63,6 +64,26 @@ const DIA_SEMANA_ABREV: Record<Language, string[]> = {
  * Abreviado por necessidade: esta linha já divide espaço com a frequência e o
  * atraso, e dois dias escritos por extenso a estouram em tela estreita.
  */
+/**
+ * Empréstimo encerrado: não tem parcela a vencer nem atraso a contar.
+ *
+ * ⚠ Na aba Pagos a coluna da esquerda descrevia uma OBRIGAÇÃO FUTURA de um
+ * empréstimo que já tinha acabado: "Semanal · Qui · ok" e "Parcela 1/4" num
+ * empréstimo QUITADO com saldo 0,00. O "ok" é o cálculo de atraso rodando
+ * sobre um vencimento que ninguém vai cobrar, e o "1/4" é a parcela que
+ * representa a conta — que, estando todas pagas, era arbitrária (ver o
+ * desempate em `grouped` de ClientesScreen).
+ *
+ * Medido em 06/11/2026 no andrÉ vinicius da silva, rota 2.2 Pegassus,
+ * liquidação 30/10: dois empréstimos quitados no mesmo dia, um mostrando
+ * "Parcela 1/4" e o outro "Parcela 3/4", os dois com saldo 0,00.
+ *
+ * `status_emprestimo` já vem no payload de `fn_liquidacao_dia_completa` — o
+ * cartão tinha o dado e não o usava.
+ */
+const estaQuitado = (e: EmprestimoData) =>
+  String(e.status_emprestimo || '').toUpperCase() === 'QUITADO';
+
 const tipoComDia = (e: EmprestimoData, lang: Language) => {
   const base = FREQ[lang][e.frequencia_pagamento] || e.frequencia_pagamento;
   if (e.frequencia_pagamento !== 'SEMANAL') return base;
@@ -85,7 +106,7 @@ const MOSTRAR_BOTAO_PARCELAS = false;
 const MOSTRAR_LINK_DETALHES = false;
 
 const getIni = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase() || '').join('');
-const fmt = (v: number) => '$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (v: number) => moeda(v);
 const fmtTel = (t: string) => t.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
 const fmtData = (d: string | null | undefined) => {
   if (!d) return '';
@@ -95,7 +116,7 @@ const fmtData = (d: string | null | undefined) => {
   }
   const dt = new Date(d);
   if (isNaN(dt.getTime())) return '';
-  return dt.toLocaleDateString('pt-BR');
+  return data(dt);
 };
 
 const borderOf = (
@@ -392,17 +413,24 @@ function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
               const emDia = diasAtraso <= 0;
               const cor = corAtraso(diasAtraso, e.total_parcelas_vencidas || 0);
               const tipo = tipoComDia(e, lang);
+              const quit = estaQuitado(e);
               const txtDias = diasAtraso === 1
                 ? (lang === 'es' ? '1 día' : '1 dia')
                 : `${diasAtraso} ${lang === 'es' ? 'días' : 'dias'}`;
               return (
-                <Text style={[S.breadTipo, { color: cor }]} numberOfLines={1}>
-                  {tipo} · {emDia ? 'ok' : txtDias}
+                <Text style={[S.breadTipo, { color: quit ? '#059669' : cor }]} numberOfLines={1}>
+                  {tipo} · {quit
+                    ? (lang === 'es' ? 'liquidado' : 'quitado')
+                    : (emDia ? 'ok' : txtDias)}
                 </Text>
               );
             })()}
             <View style={S.pLblR}>
-              <Text style={S.pLbl}>{t.parcela} {e.numero_parcela}/{e.numero_parcelas}</Text>
+              <Text style={S.pLbl}>
+                {estaQuitado(e)
+                  ? (lang === 'es' ? 'Liquidado' : 'Quitado')
+                  : `${t.parcela} ${e.numero_parcela}/${e.numero_parcelas}`}
+              </Text>
             </View>
             {e.data_emprestimo ? <Text style={S.dataEmpLbl}>{lang === 'es' ? 'Préstamo:' : 'Empréstimo:'} {fmtData(e.data_emprestimo)}</Text> : null}
           </View>
@@ -655,10 +683,19 @@ function CardMultiplo({
                 {pago ? (lang === 'es' ? ' · pagada' : ' · paga') : ''}
               </Text>
             </View>
-            <Text style={[S.breadTipo, { color: corDias, marginTop: 5 }]} numberOfLines={1}>
-              {tipo} · {emDia ? 'ok' : txtDias}
+            <Text
+              style={[S.breadTipo, { color: estaQuitado(e) ? '#059669' : corDias, marginTop: 5 }]}
+              numberOfLines={1}
+            >
+              {tipo} · {estaQuitado(e)
+                ? (lang === 'es' ? 'liquidado' : 'quitado')
+                : (emDia ? 'ok' : txtDias)}
             </Text>
-            <Text style={S.pLbl}>{t.parcela} {e.numero_parcela}/{e.numero_parcelas}</Text>
+            <Text style={S.pLbl}>
+              {estaQuitado(e)
+                ? (lang === 'es' ? 'Liquidado' : 'Quitado')
+                : `${t.parcela} ${e.numero_parcela}/${e.numero_parcelas}`}
+            </Text>
           </View>
           <View style={S.sCol}>
             {pago && rp ? (

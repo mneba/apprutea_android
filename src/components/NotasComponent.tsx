@@ -14,6 +14,7 @@ import {
 import { supabase } from '../services/supabase';
 
 import { mensagemErro } from '../utils/mensagemErro';
+import { diaMes, hora, dataAno2, dataAno2Hora } from '../utils/formato';
 
 // ==================== TIPOS ====================
 export interface Nota {
@@ -111,14 +112,14 @@ const iconePrioridade: Record<string, string> = {
 const fmtData = (d: string) => {
   if (!d) return '';
   const dt = new Date(d.includes('T') ? d : d + 'T00:00:00');
-  return dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  return diaMes(dt);
 };
 
 const fmtHora = (d: string) => {
   if (!d) return '';
   const raw = d.includes('Z') || d.includes('+') ? d : d.replace(' ', 'T') + 'Z';
   const dt = new Date(raw);
-  return dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  return hora(dt);
 };
 
 const showAlert = (title: string, msg: string) => {
@@ -313,13 +314,13 @@ export function ModalNotasLista({
   // Formatar data/hora para exibição
   const fmtDataHora = (dt: string) => {
     const d = new Date(dt);
-    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    return dataAno2Hora(d);
   };
 
   // Formatar data curta (dd/mm/yy)
   const fmtDataCurta = (dt: string) => {
     const d = new Date(dt.includes('T') ? dt : dt + 'T00:00:00');
-    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+    return dataAno2(d);
   };
 
   // ⭐ NOVO: Verificar se pode editar nota (só se liquidação aberta e mesma liquidação)

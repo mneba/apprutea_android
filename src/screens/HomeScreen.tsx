@@ -16,8 +16,10 @@ import {
 import { ModalExtrato } from '../components/LiquidacaoDetalhes';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
-import { buscarConflitos, diaCurto, encerrarConflitos } from '../services/solicitacoesAbertura';
+import { buscarConflitos, diaCurto, encerrarConflitos } from '../services/solicitacoesAbertura';
+
 import { mensagemErro } from '../utils/mensagemErro';
+import { moeda, data } from '../utils/formato';
 
 // ==================== TIPOS ====================
 interface LiquidacaoDiaria {
@@ -354,7 +356,7 @@ export default function HomeScreen({ navigation }: any) {
 
   // ==================== FORMATADORES ====================
   const formatarMoeda = (v: number | null | undefined) => 
-    `$ ${(v ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    moeda(v ?? 0);
   
   const formatarData = (d: string | Date) => {
     if (!d) return '';
@@ -363,7 +365,7 @@ export default function HomeScreen({ navigation }: any) {
       const [ano, mes, dia] = d.substring(0, 10).split('-');
       return `${dia}/${mes}/${ano}`;
     }
-    return (typeof d === 'string' ? new Date(d) : d).toLocaleDateString('pt-BR');
+    return data(d);
   };
   
   // ⭐ Obtém a data da liquidação (prefere data_liquidacao, fallback para data_abertura)

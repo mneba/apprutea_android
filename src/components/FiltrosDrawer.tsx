@@ -83,8 +83,8 @@ interface FiltrosDrawerProps {
     tipoRenovacao: string;
     tipoRenegociacao: string;
     stTodos: string;
-    stAtivo: string;
-    stVencido: string;
+    stAberto: string;
+    stAtraso: string;
     stQuitado: string;
     stRenegociado: string;
     ocultarLiquidacao: string;
@@ -310,12 +310,19 @@ export default function FiltrosDrawer({
 
               <View style={S.drawerSection}>
                 <Text style={S.drawerSectionTitle}>
-                  <Ionicons name="flag-outline" size={16} color="#6B7280" /> {t.statusFiltro || 'Status'}
+                  <Ionicons name="flag-outline" size={16} color="#6B7280" /> {t.statusFiltro || 'Situação na carteira'}
                 </Text>
+                {/*
+                  SITUAÇÃO DO CLIENTE na carteira, não status do empréstimo —
+                  a régua vive em `todosFilt` de ClientesScreen, que explica
+                  por quê. O rótulo diz "na carteira" porque `status` tem dois
+                  donos e o selo "suspenso" do cartão usa o outro
+                  (`clientes.status`).
+                */}
                 {[
                   { k: 'todos', l: t.stTodos },
-                  { k: 'ATIVO', l: t.stAtivo },
-                  { k: 'VENCIDO', l: t.stVencido },
+                  { k: 'ABERTO', l: t.stAberto },
+                  { k: 'ATRASO', l: t.stAtraso },
                   { k: 'QUITADO', l: t.stQuitado },
                   { k: 'RENEGOCIADO', l: t.stRenegociado },
                 ].map(o => (

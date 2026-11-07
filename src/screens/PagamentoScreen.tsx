@@ -15,6 +15,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
 import { ClienteRotaDia } from '../types';
 import { mensagemErro } from '../utils/mensagemErro';
+import { numeroBr } from '../utils/formato';
 
 interface Props {
   route: {
@@ -40,7 +41,7 @@ export default function PagamentoScreen({ route, navigation }: Props) {
   const saldoParcela = cliente.saldo_parcela;
 
   const formatarMoeda = (v: number) => {
-    return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    return '$ ' + numeroBr(v);
   };
 
   const handlePagar = async () => {
@@ -140,7 +141,7 @@ export default function PagamentoScreen({ route, navigation }: Props) {
         <View style={styles.inputContainer}>
           <Text style={styles.inputLabel}>Valor a Pagar</Text>
           <View style={styles.inputWrapper}>
-            <Text style={styles.inputPrefix}>R$</Text>
+            <Text style={styles.inputPrefix}>$</Text>
             <TextInput
               style={styles.input}
               value={valor}

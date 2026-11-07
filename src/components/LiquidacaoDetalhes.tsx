@@ -27,6 +27,7 @@ import {
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
 import { mensagemErro } from '../utils/mensagemErro';
+import { moeda, data, dataHora, hora } from '../utils/formato';
 
 const { width, height } = Dimensions.get('window');
 
@@ -34,7 +35,7 @@ const { width, height } = Dimensions.get('window');
 // HELPERS
 // =====================================================
 const fmt = (v: number | null | undefined) =>
-  '$ ' + (v ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  moeda(v ?? 0);
 
 /**
  * Um lançamento pode ter até 5 comprovantes (`comprovantes_urls`), mas os
@@ -49,7 +50,7 @@ const comprovantesDe = (registro: any): string[] => {
 const fmtData = (d: string | null) => {
   if (!d) return '-';
   const dt = new Date(d);
-  return dt.toLocaleDateString('pt-BR');
+  return data(dt);
 };
 
 /** `DD/MM/AAAA HH:MM` de um timestamp do banco.
@@ -63,7 +64,7 @@ const fmtDataHora = (d: string | null) => {
   const utcStr = d.endsWith('Z') || d.includes('+') ? d : d + 'Z';
   const dt = new Date(utcStr);
   if (isNaN(dt.getTime())) return '';
-  return `${dt.toLocaleDateString('pt-BR')} ${dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+  return dataHora(dt);
 };
 
 const fmtHora = (d: string | null) => {
@@ -71,7 +72,7 @@ const fmtHora = (d: string | null) => {
   // Supabase retorna timestamps sem 'Z' mas são UTC — adicionar Z para forçar interpretação correta
   const utcStr = d.endsWith('Z') || d.includes('+') ? d : d + 'Z';
   const dt = new Date(utcStr);
-  return dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  return hora(dt);
 };
 
 // =====================================================
@@ -585,8 +586,8 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const diferencaNaoExplicada = caixaFinal - somaDasLinhas;
   const temDiferenca = Math.abs(diferencaNaoExplicada) > 0.01;
 
-  const dataHoje = new Date().toLocaleDateString('pt-BR');
-  const horaAgora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const dataHoje = data(new Date());
+  const horaAgora = hora(new Date());
 
   const DIV = '- - - - - - - - - - - -';
   const DDIV = '= = = = = = = = = = = =';
@@ -738,7 +739,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
     const clienteNome = emp.cliente?.nome || '—';
     const clienteCodigo = emp.cliente?.codigo_cliente || '';
     const primeiroPgto = emp.data_primeiro_vencimento
-      ? new Date(emp.data_primeiro_vencimento + 'T00:00:00').toLocaleDateString(lang === 'es' ? 'es-CO' : 'pt-BR')
+      ? data(emp.data_primeiro_vencimento)
       : '—';
     const isRenovacao = emp.tipo_emprestimo === 'RENOVACAO';
     const isAdicional = emp.tipo_emprestimo === 'ADICIONAL';
@@ -764,7 +765,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   ${renegociacoesDia.map((emp, idx) => {
     const clienteNome = emp.cliente?.nome || '—';
     const primeiroPgto = emp.data_primeiro_vencimento
-      ? new Date(emp.data_primeiro_vencimento + 'T00:00:00').toLocaleDateString(lang === 'es' ? 'es-CO' : 'pt-BR')
+      ? data(emp.data_primeiro_vencimento)
       : '—';
     return `<div class="mov">
       <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${clienteNome}</span><span class="mov-val" style="color:#F59E0B">${fmt(parseFloat(emp.valor_principal))}</span></div>
@@ -970,7 +971,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                   const clienteNome = (emp.cliente as any)?.nome || '—';
                   const clienteCodigo = (emp.cliente as any)?.codigo_cliente || '';
                   const primeiroPgto = emp.data_primeiro_vencimento
-                    ? new Date(emp.data_primeiro_vencimento + 'T00:00:00').toLocaleDateString(lang === 'es' ? 'es-CO' : 'pt-BR')
+                    ? data(emp.data_primeiro_vencimento)
                     : '—';
                   // ⭐ Identificar tipo: NOVO, RENOVACAO, ADICIONAL
                   const isRenovacao = emp.tipo_emprestimo === 'RENOVACAO';
@@ -1024,7 +1025,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                 {renegociacoesDia.map((emp, idx) => {
                   const clienteNome = (emp.cliente as any)?.nome || '—';
                   const primeiroPgto = emp.data_primeiro_vencimento
-                    ? new Date(emp.data_primeiro_vencimento + 'T00:00:00').toLocaleDateString(lang === 'es' ? 'es-CO' : 'pt-BR')
+                    ? data(emp.data_primeiro_vencimento)
                     : '—';
                   return (
                     <View key={emp.id}>
@@ -2044,7 +2045,7 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
     if (tipo === 'VENDAS') {
       const clienteNome = item.cliente?.nome || '—';
       const primeiroPgto = item.data_primeiro_vencimento
-        ? new Date(item.data_primeiro_vencimento + 'T00:00:00').toLocaleDateString(lang === 'es' ? 'es-CO' : 'pt-BR')
+        ? data(item.data_primeiro_vencimento)
         : '—';
       
       // ⭐ NOVO: regras de cancelamento de venda

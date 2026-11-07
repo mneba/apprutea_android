@@ -37,6 +37,7 @@ import Carregando from '../components/Carregando';
 import { useAuth } from '../contexts/AuthContext';
 import { buscarFicha, EventoFicha, Ficha } from '../services/fichaEmprestimo';
 import { mensagemErro } from '../utils/mensagemErro';
+import { moeda, hora } from '../utils/formato';
 
 type Lang = 'pt-BR' | 'es';
 
@@ -182,7 +183,7 @@ const Linha = ({ rot, val, cor, forte, derivada }: {
 );
 
 const fmt = (v: number | null | undefined) =>
-  '$ ' + Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  moeda(Number(v || 0));
 
 /** `YYYY-MM-DD` ou timestamp → `DD/MM/AA`. */
 const fmtData = (d?: string | null) => {
@@ -198,7 +199,7 @@ const fmtHora = (ts?: string | null) => {
   if (!ts || String(ts).length <= 10) return '';
   const d = new Date(String(ts).replace(' ', 'T'));
   if (isNaN(d.getTime())) return '';
-  return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  return hora(d);
 };
 
 const CORES: Record<string, string> = {

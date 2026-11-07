@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { moeda, data } from '../utils/formato';
 import {
   ActivityIndicator,
   Modal,
@@ -44,7 +45,7 @@ export interface EmprestimoInfo {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-const fmt = (v: number) => '$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (v: number) => moeda(v);
 
 const fmtData = (d: string | null | undefined) => {
   if (!d) return '';
@@ -54,7 +55,7 @@ const fmtData = (d: string | null | undefined) => {
   }
   const dt = new Date(d);
   if (isNaN(dt.getTime())) return '';
-  return dt.toLocaleDateString('pt-BR');
+  return data(dt);
 };
 
 const parseValor = (s: string) => parseFloat((s || '0').replace(/\./g, '').replace(',', '.')) || 0;

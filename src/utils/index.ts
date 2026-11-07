@@ -1,28 +1,28 @@
 /**
  * Funções utilitárias do app Bella Kids
  */
+import { numeroBr, data as dataBr, dataHora } from './formato';
 
 /**
- * Formata valor para moeda brasileira
+ * Formata valor em dinheiro.
+ *
+ * ⚠ O simbolo e SEMPRE `$`, com 2 casas. O sistema opera na America
+ * Latina e a tela NAO sabe em que pais esta -- a empresa e que carrega o
+ * fuso e a moeda, e nao ha campo de moeda no schema (ver "Ja existem
+ * DUAS moedas na base" no prompt do modulo de licencas). Entao `R$` aqui
+ * era simplesmente errado, e cortar os centavos por supor peso
+ * colombiano seria o mesmo erro pelo outro lado: decisao do Mauricio em
+ * 04/11/2026, "como nao sabemos a localizacao devemos manter casas
+ * decimais".
  */
 export function formatarMoeda(valor: number | null | undefined): string {
-  if (valor === null || valor === undefined) return 'R$ 0,00';
-  return valor.toLocaleString('pt-BR', { 
-    style: 'currency', 
-    currency: 'BRL' 
-  });
+  if (valor === null || valor === undefined) return '$ 0,00';
+  return '$ ' + numeroBr(valor);
 }
 
-/**
- * Formata valor para moeda colombiana
- */
+/** @deprecated Mesma coisa que `formatarMoeda`. Use aquela. */
 export function formatarMoedaCOP(valor: number | null | undefined): string {
-  if (valor === null || valor === undefined) return '$ 0';
-  return valor.toLocaleString('es-CO', { 
-    style: 'currency', 
-    currency: 'COP',
-    minimumFractionDigits: 0,
-  });
+  return formatarMoeda(valor);
 }
 
 /**
@@ -30,8 +30,7 @@ export function formatarMoedaCOP(valor: number | null | undefined): string {
  */
 export function formatarData(data: string | Date | null): string {
   if (!data) return '-';
-  const d = new Date(data);
-  return d.toLocaleDateString('pt-BR');
+  return dataBr(data);
 }
 
 /**
@@ -40,7 +39,7 @@ export function formatarData(data: string | Date | null): string {
 export function formatarDataHora(data: string | Date | null): string {
   if (!data) return '-';
   const d = new Date(data);
-  return d.toLocaleString('pt-BR');
+  return dataHora(d);
 }
 
 /**

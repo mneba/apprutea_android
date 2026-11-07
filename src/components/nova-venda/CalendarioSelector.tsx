@@ -6,6 +6,7 @@ import {
   View,
 } from 'react-native';
 import { DIAS_SEMANA_CURTO, MESES_NOME, type Lang } from '../../constants/novaVendaConstants';
+import { data } from '../../utils/formato';
 
 // ============================================================
 // COMPONENTE CALENDÁRIO
@@ -204,7 +205,7 @@ export default function CalendarioSelector({
             }}
             activeOpacity={0.7}
           >
-            <Text style={styles.hojeBtnText}>📅 {lang === 'es' ? 'Hoy' : 'Hoje'} ({hoje.toLocaleDateString(lang === 'es' ? 'es-CO' : 'pt-BR')})</Text>
+            <Text style={styles.hojeBtnText}>📅 {lang === 'es' ? 'Hoy' : 'Hoje'} ({data(hoje)})</Text>
           </TouchableOpacity>
         );
       })()}

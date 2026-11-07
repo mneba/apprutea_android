@@ -22,6 +22,7 @@ import AnexosLista from './AnexosLista';
 import { useAuth } from '../contexts/AuthContext';
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { diasAtraso as calcAtraso, diasCobrancaEntre, type ConfigCobranca } from '../utils/diasCobranca';
+import { dataAno2, dataAno2Hora } from '../utils/formato';
 
 // ==================== TIPOS ====================
 interface ClienteInfo {
@@ -130,7 +131,7 @@ const fmt = (v: number) => {
 const fmtData = (d: string | null) => {
   if (!d) return '—';
   const dt = new Date(d.includes('T') ? d : d + 'T00:00:00');
-  return dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  return dataAno2(dt);
 };
 
 const getIni = (nome: string) => {
@@ -1282,7 +1283,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                       const s = ts.replace(' ', 'T').replace(/\+00(:00)?$/, 'Z');
                       const dt = new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z');
                       if (isNaN(dt.getTime())) return '—';
-                      return dt.toLocaleString(lang === 'es' ? 'es-CO' : 'pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+                      return dataAno2Hora(dt);
                     } catch { return '—'; }
                   };
 

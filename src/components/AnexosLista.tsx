@@ -14,8 +14,10 @@ import {
 } from 'react-native';
 import * as anexosSvc from '../services/anexos';
 import { Anexo } from '../services/anexos';
-import ConfirmModal from './ConfirmModal';
+import ConfirmModal from './ConfirmModal';
+
 import { mensagemErro } from '../utils/mensagemErro';
+import { dataAno2, hora } from '../utils/formato';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Lista de anexos (evidências) de um cliente ou de um pagamento.
@@ -91,7 +93,7 @@ const fmtQuando = (iso: string, lang: Lang) => {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '';
   const loc = lang === 'es' ? 'es' : 'pt-BR';
-  return `${d.toLocaleDateString(loc, { day: '2-digit', month: '2-digit', year: '2-digit' })} · ${d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' })}`;
+  return `${dataAno2(d)} · ${hora(d)}`;
 };
 
 export default function AnexosLista({

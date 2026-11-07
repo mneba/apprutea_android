@@ -13,6 +13,7 @@ import {
 import Svg, { Path } from 'react-native-svg';
 import { Language } from '../contexts/LiquidacaoContext';
 import { diasAtraso as calcAtraso, corAtraso, COR_EM_DIA, type ConfigCobranca } from '../utils/diasCobranca';
+import { moeda, data } from '../utils/formato';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -124,7 +125,7 @@ const origemLabel = (tipo: string | undefined, lang: Language): string | null =>
   (tipo && ORIGEM[lang][tipo]) || null;
 
 const getIni = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase() || '').join('');
-const fmt = (v: number) => '$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (v: number) => moeda(v);
 const fmtTel = (t: string) => t.replace(/(\d{2})(\d{5})(\d{4})/, '($1) $2-$3');
 const fmtData = (d: string | null | undefined) => {
   if (!d) return '';
@@ -134,7 +135,7 @@ const fmtData = (d: string | null | undefined) => {
   }
   const dt = new Date(d);
   if (isNaN(dt.getTime())) return '';
-  return dt.toLocaleDateString('pt-BR');
+  return data(dt);
 };
 
 // A escala de atraso vivia copiada aqui. Era a terceira cópia da mesma regra, e

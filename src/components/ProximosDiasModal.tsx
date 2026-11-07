@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { supabase } from '../services/supabase';
 import CalendarioSelector from './nova-venda/CalendarioSelector';
+import { numeroBr } from '../utils/formato';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -44,7 +45,7 @@ interface Props {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-const fmt = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (v: number) => numeroBr(v);
 
 const fmtData = (d: string, lang: string) => {
   const [y, m, day] = d.split('-');

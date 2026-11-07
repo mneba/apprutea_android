@@ -45,6 +45,7 @@ import {
   type DadosRecibo,
 } from '../services/recibo';
 import { mensagemErro } from '../utils/mensagemErro';
+import { moeda } from '../utils/formato';
 
 type Idioma = 'pt-BR' | 'es';
 
@@ -84,7 +85,7 @@ const textos = {
 } as const;
 
 const fmt = (v: number) =>
-  '$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  moeda(v || 0);
 
 const fmtData = (d: string | null | undefined) => {
   if (!d) return '—';

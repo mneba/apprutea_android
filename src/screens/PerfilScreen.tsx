@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
+import { data as dataBr } from '../utils/formato';
 
 type Language = 'pt-BR' | 'es';
 
@@ -137,11 +138,7 @@ export default function PerfilScreen({ navigation }: any) {
     if (!data) return t.semInfo;
     try {
       const d = new Date(data);
-      return d.toLocaleDateString(language === 'pt-BR' ? 'pt-BR' : 'es', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      });
+      return dataBr(d);
     } catch {
       return data;
     }

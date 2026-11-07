@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { styles } from '../../styles/novaVendaStyles';
 import { fmt, type Textos } from '../../constants/novaVendaConstants';
+import { data } from '../../utils/formato';
 
 interface Props {
   visible: boolean;
@@ -78,7 +79,7 @@ export default function ModalResultado({ visible, resultado, t, onClose }: Props
                   <View key={p.numero} style={styles.parcelaRow}>
                     <Text style={[styles.parcelaText, { width: 30 }]}>{p.numero}</Text>
                     <Text style={[styles.parcelaText, { flex: 1 }]}>
-                      {new Date(p.vencimento + 'T00:00:00').toLocaleDateString('pt-BR')}
+                      {data(p.vencimento)}
                     </Text>
                     <Text style={[styles.parcelaText, { width: 100, textAlign: 'right' }]}>
                       $ {fmt(p.valor)}

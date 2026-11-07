@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import { moeda, data } from '../utils/formato';
 import {
   ActivityIndicator,
   Modal,
@@ -79,7 +80,7 @@ interface MenuPagamentoProps {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-const fmt = (v: number) => '$ ' + (v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (v: number) => moeda(v || 0);
 const parseValor = (s: string) => parseFloat((s || '0').replace(/\./g, '').replace(',', '.')) || 0;
 
 const fmtData = (d: string | null | undefined) => {
@@ -90,7 +91,7 @@ const fmtData = (d: string | null | undefined) => {
   }
   const dt = new Date(d);
   if (isNaN(dt.getTime())) return '';
-  return dt.toLocaleDateString('pt-BR');
+  return data(dt);
 };
 
 // ─── Componente ─────────────────────────────────────────────────────────────
@@ -267,7 +268,7 @@ export default function MenuPagamento({
                       </View>
                       <Text style={[S.opcaoLbl, opcao === 'saldo' && S.opcaoLblSel]}>{t.pagarSaldo || 'Pagar saldo'}</Text>
                     </View>
-                    <View style={{ alignItems: 'flex-end' }}>
+                    <View style={S.opcaoDir}>
                       <Text style={S.opcaoVal}>{fmt(valorSaldo)}</Text>
                       {creditoSaldo > 0 && (
                         <Text style={S.opcaoComp}>
@@ -297,7 +298,7 @@ export default function MenuPagamento({
                     </View>
                     <Text style={[S.opcaoLbl, opcao === 'cheia' && S.opcaoLblSel]}>{t.pagar1Cheia || 'Pagar 1 parcela cheia'}</Text>
                   </View>
-                  <View style={{ alignItems: 'flex-end' }}>
+                  <View style={S.opcaoDir}>
                     <Text style={S.opcaoVal}>{fmt(creditoCheio > 0 ? valorCheio : valorCheioLimitado)}</Text>
                     {creditoCheio > 0 && (
                       <Text style={S.opcaoComp}>
@@ -452,21 +453,25 @@ const S = StyleSheet.create({
   opcaoSel: { borderWidth: 2, borderColor: '#6366F1', backgroundColor: '#F5F3FF', shadowColor: '#6366F1', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
   opcaoQuitar: { borderColor: '#FCA5A5', backgroundColor: '#FEF2F2' },
   opcaoQuitarSel: { borderWidth: 2, borderColor: '#DC2626', backgroundColor: '#FEF2F2', shadowColor: '#DC2626', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
-  opcaoHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  opcaoEsq: { flexDirection: 'row', alignItems: 'center', gap: 11 },
-  iconeBox: { width: 34, height: 34, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  // A linha CEDE largura: a esquerda (icone + rotulo) cresce e encolhe, e a
+  // direita encolhe antes de estourar. Sem isso a largura vira a SOMA dos
+  // conteudos e o Android corta o que passa da borda, em silencio.
+  opcaoHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
+  opcaoEsq: { flexDirection: 'row', alignItems: 'center', gap: 11, flex: 1, minWidth: 0 },
+  opcaoDir: { alignItems: 'flex-end', flexShrink: 1 },
+  iconeBox: { width: 34, height: 34, borderRadius: 10, justifyContent: 'center', alignItems: 'center', flexShrink: 0 },
   radio: { width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: '#9CA3AF' },
   radioOn: { borderWidth: 5, borderColor: '#6366F1' },
-  opcaoLbl: { fontSize: 14, color: '#1F2937' },
+  opcaoLbl: { fontSize: 14, color: '#1F2937', flexShrink: 1 },
   opcaoLblSel: { fontWeight: '700' },
   opcaoVal: { fontSize: 17, fontWeight: '700', color: '#1F2937' },
-  opcaoComp: { fontSize: 11, color: '#4F46E5', fontWeight: '600', marginTop: 2 },
+  opcaoComp: { fontSize: 11, color: '#4F46E5', fontWeight: '600', marginTop: 2, textAlign: 'right' },
   opcaoHint: { fontSize: 12, color: '#9CA3AF' },
   opcaoCred: { fontSize: 14, fontWeight: '700', color: '#4F46E5' },
   resumoTx: { fontSize: 13, color: '#6B7280', marginBottom: 8 },
-  resumoLinha: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
+  resumoLinha: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3, gap: 10 },
   resumoLbl: { fontSize: 13, color: '#6B7280', flexShrink: 1 },
-  resumoVal: { fontSize: 13, fontWeight: '600', color: '#1F2937' },
+  resumoVal: { fontSize: 13, fontWeight: '600', color: '#1F2937', flexShrink: 1, textAlign: 'right' },
   btnConfirmar: { backgroundColor: '#10B981', borderRadius: 10, padding: 12, alignItems: 'center', marginTop: 11, shadowColor: '#10B981', shadowOpacity: 0.3, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
   btnConfirmarTx: { fontSize: 14, fontWeight: '700', color: '#fff' },
   btnOcupado: { opacity: 0.75 },
@@ -481,7 +486,7 @@ const S = StyleSheet.create({
   erro: { fontSize: 12, color: '#DC2626', marginTop: 6 },
   divider: { height: 1, backgroundColor: '#E5E7EB', marginVertical: 10 },
   outras: {},
-  outraBtn: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 4, borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB' },
-  outraTx: { fontSize: 14, color: '#1F2937' },
+  outraBtn: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 4, borderBottomWidth: 0.5, borderBottomColor: '#E5E7EB', gap: 10 },
+  outraTx: { fontSize: 14, color: '#1F2937', flexShrink: 1 },
   outraCred: { fontSize: 14, fontWeight: '600', color: '#4F46E5' },
 });

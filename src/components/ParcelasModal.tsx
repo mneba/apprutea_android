@@ -12,6 +12,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { diasCobrancaEntre } from '../utils/diasCobranca';
 import AnexosLista from './AnexosLista';
+import { moeda, data, dataAno2Hora } from '../utils/formato';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -62,7 +63,7 @@ interface ClienteModalInfo {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 const fmt = (v: number) =>
-  '$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  moeda(v);
 
 const fmtData = (d: string | null | undefined) => {
   if (!d) return '';
@@ -72,7 +73,7 @@ const fmtData = (d: string | null | undefined) => {
   }
   const dt = new Date(d);
   if (isNaN(dt.getTime())) return '';
-  return dt.toLocaleDateString('pt-BR');
+  return data(dt);
 };
 
 const fmtTs = (ts: string) => {
@@ -80,10 +81,7 @@ const fmtTs = (ts: string) => {
     const s = ts.replace(' ', 'T').replace(/\+00(:00)?$/, 'Z');
     const dt = new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z');
     if (isNaN(dt.getTime())) return '—';
-    return dt.toLocaleString('pt-BR', {
-      day: '2-digit', month: '2-digit', year: '2-digit',
-      hour: '2-digit', minute: '2-digit',
-    });
+    return dataAno2Hora(dt);
   } catch {
     return '—';
   }
