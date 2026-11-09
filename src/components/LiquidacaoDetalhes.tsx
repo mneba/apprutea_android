@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -28,6 +28,7 @@ import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
 import { mensagemErro } from '../utils/mensagemErro';
 import { moeda, data, dataHora, hora } from '../utils/formato';
+import { normalizarBusca } from '../utils';
 
 const { width, height } = Dimensions.get('window');
 
@@ -360,6 +361,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         .select(`
           id, numero_parcela, valor_pago_total, valor_pago_atual, valor_parcela, valor_credito_gerado, valor_credito_usado,
           forma_pagamento, created_at, cliente_id, parcela_id, emprestimo_id,
+          operacao_id, tipo_operacao,
           clientes!pagamentos_parcelas_cliente_id_fkey(nome, consecutivo)
         `)
         .eq('liquidacao_id', liquidacaoId)
@@ -371,7 +373,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         // Fallback: busca sem join se foreign key falhar
         const { data: pagsSem, error: errSem } = await supabase
           .from('pagamentos_parcelas')
-          .select('id, numero_parcela, valor_pago_total, valor_pago_atual, valor_parcela, valor_credito_gerado, valor_credito_usado, forma_pagamento, created_at, cliente_id')
+          .select('id, numero_parcela, valor_pago_total, valor_pago_atual, valor_parcela, valor_credito_gerado, valor_credito_usado, forma_pagamento, created_at, cliente_id, operacao_id, tipo_operacao')
           .eq('liquidacao_id', liquidacaoId)
           .eq('estornado', false)
           .order('created_at', { ascending: true });
@@ -522,6 +524,108 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
     }
     return '';
   };
+
+  /**
+   * O EXTRATO LISTA RECEBIMENTOS, NÃO PARCELAS.
+   *
+   * `pagamentos_parcelas` tem uma linha por PARCELA. Uma quitação de 5
+   * parcelas de 61,33 virava cinco linhas de 61,33 — e nenhuma delas é um
+   * valor que passou pela mão do vendedor. O que passou foi UM dinheiro de
+   * 306,65.
+   *
+   * Relatado pelo Julio em 07/11/2026: o extrato é o papel que se confere
+   * contra caixa e banco, e ali o valor da operação não existia em lugar
+   * nenhum.
+   *
+   * `operacao_id` é o ato do vendedor — 1 para 1 com o lançamento em
+   * `financeiro` —, preenchido em 100% dos pagamentos desde 2024.
+   *
+   * MEDIDO em 07/11/2026, sobre as 18.591 operações com liquidação:
+   *   · 1.237 cobrem mais de uma parcela, e geram 7.530 linhas;
+   *   · a 5.1 Sebastian em 17/10 mostrava 135 linhas para 48 recebimentos;
+   *   · uma operação NUNCA atravessa cliente, empréstimo nem liquidação —
+   *     ZERO exceções em 19.849. É isto que torna o agrupamento seguro.
+   *
+   * ⚠ O TOTAL NÃO MUDA. O dinheiro se distribui por linha, então a soma do
+   * grupo é a soma das linhas que ele substitui, e `totalCobrancas` continua
+   * saindo de `pagamentosDinheiro`. É mudança de apresentação: o extrato
+   * fecha no mesmo número de antes.
+   *
+   * ⚠ E O DIA COMUM NÃO MUDA DE APARÊNCIA: 17.354 das 18.591 operações têm
+   * uma parcela só e seguem renderizadas exatamente como hoje.
+   */
+  const recebimentos = (() => {
+    const porOp = new Map<string, any[]>();
+    for (const p of pagamentosDinheiro) {
+      // Sem `operacao_id` a linha vira o seu próprio recebimento: é o
+      // comportamento de antes, e nada desaparece da tela.
+      const k = (p as any).operacao_id || p.id;
+      const arr = porOp.get(k);
+      if (arr) arr.push(p); else porOp.set(k, [p]);
+    }
+    // A ordem é a de `pagamentosDinheiro`, que já vem por `created_at`: o
+    // Map preserva a ordem de inserção.
+    return [...porOp.entries()].map(([key, linhas]) => {
+      const dinheiro = linhas.reduce((s: number, p: any) => s
+        + parseFloat(p.valor_pago_atual || p.valor_pago_total || 0)
+        - parseFloat(p.valor_credito_usado || 0), 0);
+
+      // ⚠ CRÉDITO SEGUE DETALHADO, a pedido do Julio — e é também o único
+      // caso em que a soma seria ambígua: 378 operações têm duas formas de
+      // pagamento, e são exatamente a mistura dinheiro + crédito.
+      //
+      // A pergunta é feita pelo GRUPO *e* pelo empréstimo no dia. Pelo grupo
+      // não basta: as linhas de forma CREDITO estão fora de
+      // `pagamentosDinheiro` (e com razão — não são caixa), então um grupo
+      // pode parecer limpo e ainda assim ter crédito aplicado nele, que é a
+      // nota que `fraseCredito` acrescenta à última linha visível do
+      // empréstimo. Colapsar esse grupo engoliria a nota.
+      const doDia = creditoDoDiaPorEmprestimo.get(linhas[0].emprestimo_id)
+        || { consumido: 0, oculto: 0, parcelas: 0 };
+      const temCredito = doDia.consumido > 0 || doDia.oculto > 0
+        || linhas.some((p: any) => parseFloat(p.valor_credito_gerado || 0) > 0);
+
+      return {
+        key,
+        linhas,
+        dinheiro,
+        nomeCliente: (linhas[0].clientes as any)?.nome || (linhas[0].cliente as any)?.nome
+          || `${lang === 'es' ? 'Cuota' : 'Parcela'} ${linhas[0].numero_parcela}`,
+        parcelas: linhas.map((p: any) => Number(p.numero_parcela || 0)).sort((a: number, b: number) => a - b),
+        quitacao: linhas.some((p: any) => p.tipo_operacao === 'QUITACAO'),
+        // Uma parcela só já É um recebimento: nada a agrupar, e a linha de
+        // hoje diz mais (mostra o valor da parcela).
+        detalhar: temCredito || linhas.length === 1,
+      };
+    });
+  })();
+
+  /**
+   * A lista que a tela percorre, numerada de 1 a N.
+   *
+   * Grupo colapsado entra como UM item; grupo detalhado entra como as suas
+   * linhas, cada uma renderizada byte a byte como antes. Assim o caso com
+   * crédito não muda nada, que é o que o Julio pediu.
+   */
+  type ItemCobranca = { grupo?: typeof recebimentos[number]; p?: any; rec: typeof recebimentos[number] };
+  const itensCobranca: ItemCobranca[] = recebimentos.flatMap((rec): ItemCobranca[] =>
+    rec.detalhar
+      ? rec.linhas.map((p: any) => ({ p, rec }))
+      : [{ grupo: rec, rec }],
+  );
+
+  /** "5 parcelas (11 a 15)" — ou os números soltos, quando não são seguidos. */
+  const fraseParcelas = (nums: number[]) => {
+    const un = lang === 'es'
+      ? (nums.length === 1 ? 'cuota' : 'cuotas')
+      : (nums.length === 1 ? 'parcela' : 'parcelas');
+    const seguidos = nums.every((n, i) => i === 0 || n === nums[i - 1] + 1);
+    const quais = seguidos && nums.length > 1
+      ? `${nums[0]} a ${nums[nums.length - 1]}`
+      : nums.join(', ');
+    return `${nums.length} ${un} (${quais})`;
+  };
+
   const totalPagamentos = pagamentosDinheiro.reduce((s, p) => {
     // valor_pago_atual = dinheiro + crédito usado neste pagamento
     // valor_pago_total = valor aplicado na parcela (pode ser diferente se gerou excedente)
@@ -666,20 +770,36 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   <hr class="sep2">
   ` : ''}
 
-  <div class="secao">${t.detalheEntradas} (${pagamentosDinheiro.length + entradasOutras.length})</div>
+  <div class="secao">${t.detalheEntradas} (${recebimentos.length + entradasOutras.length})</div>
   <hr class="sep">
   ${pagamentosDinheiro.length === 0 && entradasOutras.length === 0 ? `<div class="c cinza">${t.nenhumaEntrada}</div>` : `
     ${pagamentosDinheiro.length > 0 ? `
-      <div class="c cinza" style="font-size:10px">── ${t.cobrancasParcelas} (${pagamentosDinheiro.length}) ──</div>
-      ${pagamentosDinheiro.map((p, idx) => {
-        const nomeCliente = (p.clientes as any)?.nome || (p.cliente as any)?.nome || `Parcela ${p.numero_parcela}`;
+      <div class="c cinza" style="font-size:10px">── ${t.cobrancasParcelas} (${recebimentos.length}) ──</div>
+      ${itensCobranca.map((item, idx) => {
+        const rec = item.rec;
+        const num = String(idx + 1).padStart(2, '0');
+
+        // Recebimento que cobriu várias parcelas: o valor da OPERAÇÃO em
+        // cima. A tela e o papel têm de contar a mesma história — se só um
+        // dos dois agrupasse, o vendedor passaria a conferir dois extratos
+        // diferentes do mesmo dia.
+        if (item.grupo) {
+          const base = rec.linhas[0];
+          return `<div class="mov">
+          <div class="mov-row"><span class="mov-idx">${num}</span><span class="mov-cat">${rec.nomeCliente}</span><span class="mov-val" style="color:${rec.quitacao ? '#7C3AED' : '#059669'}">+${fmt(rec.dinheiro)}</span></div>
+          <div class="mov-sub" style="color:#6B7280">${fraseParcelas(rec.parcelas)}${rec.quitacao ? ` · ${lang === 'es' ? 'liquidación' : 'quitação'}` : ''}</div>
+          <div class="mov-meta"><span>${fmtHora(base.created_at)}</span>${base.forma_pagamento ? `<span>${base.forma_pagamento}</span>` : ''}</div>
+        </div>`;
+        }
+
+        const p = item.p;
         // ⭐ Mostrar o valor que entrou no caixa (dinheiro), não o valor_pago_total
         const valorPagoAtual = parseFloat(p.valor_pago_atual || p.valor_pago_total || 0);
         const creditoUsado = parseFloat(p.valor_credito_usado || 0);
         const dinheiroRecebido = valorPagoAtual - creditoUsado;
         const liqH = creditoLiquido(p);
         return `<div class="mov">
-          <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${nomeCliente}</span><span class="mov-val verde">+${fmt(dinheiroRecebido)}</span></div>
+          <div class="mov-row"><span class="mov-idx">${num}</span><span class="mov-cat">${rec.nomeCliente}</span><span class="mov-val verde">+${fmt(dinheiroRecebido)}</span></div>
           <div class="mov-sub" style="color:#6B7280">${lang === 'es' ? 'Cuota' : 'Parcela'} ${p.numero_parcela}: ${fmt(parseFloat(p.valor_parcela || 0))}${creditoUsado > 0 ? ` · ${fmt(creditoUsado)} ${lang === 'es' ? 'con crédito' : 'com crédito'}` : ''}${fraseCredito(liqH)}${liqH.excedente > 0 ? ` · ${lang === 'es' ? 'Crédito generado' : 'Crédito gerado'}: ${fmt(liqH.excedente)}` : ''}</div>
           <div class="mov-meta"><span>${fmtHora(p.created_at)}</span>${p.forma_pagamento ? `<span>${p.forma_pagamento}</span>` : ''}</div>
         </div>`;
@@ -1085,7 +1205,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
             ) : (
               <>
                 {/* ═══ DETALHES ENTRADAS ═══ */}
-                <Text style={[cupom.centro, { marginTop: 14 }]}>{t.detalheEntradas} ({pagamentosDinheiro.length + entradasOutras.length})</Text>
+                <Text style={[cupom.centro, { marginTop: 14 }]}>{t.detalheEntradas} ({recebimentos.length + entradasOutras.length})</Text>
                 <Text style={cupom.div1}>{DIV}</Text>
 
                 {pagamentosDinheiro.length === 0 && entradasOutras.length === 0 ? (
@@ -1095,26 +1215,59 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                     {/* ── COBRANÇAS DE PARCELAS — usa pagamentos_parcelas diretamente ── */}
                     {pagamentosDinheiro.length > 0 && (
                       <>
-                        <Text style={[cupom.centro, { fontSize: 10, marginTop: 6, color: '#6B7280' }]}>── {t.cobrancasParcelas} ({pagamentosDinheiro.length}) ──</Text>
-                        {pagamentosDinheiro.map((p, idx) => {
-                          const nomeCliente = (p.clientes as any)?.nome || (p.cliente as any)?.nome || `Parcela ${p.numero_parcela}`;
-                          // ⭐ Mostrar o valor que entrou no caixa (dinheiro), não o valor_pago_total
+                        {/* A contagem é de RECEBIMENTOS — atos do vendedor —, não de parcelas. */}
+                        <Text style={[cupom.centro, { fontSize: 10, marginTop: 6, color: '#6B7280' }]}>── {t.cobrancasParcelas} ({recebimentos.length}) ──</Text>
+                        {itensCobranca.map((item, idx) => {
+                          const rec = item.rec;
+                          const base = item.grupo ? rec.linhas[0] : item.p;
+                          const emprestimoId = (base as any).emprestimo_id;
+                          const abrirFicha = () => {
+                            onClose();
+                            setTimeout(() => nav.navigate('FichaEmprestimo', { emprestimoId }), 250);
+                          };
+                          const divisor = idx < itensCobranca.length - 1
+                            ? <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>
+                            : null;
+
+                          // ── UM RECEBIMENTO QUE COBRIU VÁRIAS PARCELAS ──
+                          // O valor da OPERAÇÃO em cima, a quantidade de
+                          // parcelas embaixo. É o pedido do Julio em 07/11/2026.
+                          if (item.grupo) {
+                            return (
+                              <TouchableOpacity key={rec.key} disabled={!emprestimoId} onPress={abrirFicha}>
+                                <View style={cupom.itemRow}>
+                                  <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
+                                  <Text style={cupom.itemCat} numberOfLines={1}>{rec.nomeCliente}</Text>
+                                  {/* Quitação tem cor própria: é ela que explica o salto do valor. */}
+                                  <Text style={[cupom.itemVal, { color: rec.quitacao ? '#7C3AED' : '#059669' }]}>+{fmt(rec.dinheiro)}</Text>
+                                </View>
+                                <Text style={[cupom.itemSub, { color: '#6B7280', fontSize: 9 }]}>
+                                  {'   '}
+                                  {fraseParcelas(rec.parcelas)}
+                                  {rec.quitacao && ` · ${lang === 'es' ? 'liquidación' : 'quitação'}`}
+                                </Text>
+                                <View style={cupom.itemMeta}>
+                                  <Text style={cupom.itemHora}>   {fmtHora(base.created_at)}</Text>
+                                  {base.forma_pagamento && <Text style={cupom.itemHora}>{base.forma_pagamento}</Text>}
+                                </View>
+                                {divisor}
+                              </TouchableOpacity>
+                            );
+                          }
+
+                          // ── LINHA POR PARCELA, como sempre foi ──
+                          // Recebimento de uma parcela só, ou operação com
+                          // crédito, onde o detalhe é o que vale.
+                          const p = item.p;
                           const valorPagoAtual = parseFloat(p.valor_pago_atual || p.valor_pago_total || 0);
                           const creditoUsado = parseFloat(p.valor_credito_usado || 0);
                           const dinheiroRecebido = valorPagoAtual - creditoUsado;
                           const liq = creditoLiquido(p);
                           return (
-                            <TouchableOpacity
-                              key={p.id}
-                              disabled={!(p as any).emprestimo_id}
-                              onPress={() => {
-                                onClose();
-                                setTimeout(() => nav.navigate('FichaEmprestimo', { emprestimoId: (p as any).emprestimo_id }), 250);
-                              }}
-                            >
+                            <TouchableOpacity key={p.id} disabled={!emprestimoId} onPress={abrirFicha}>
                               <View style={cupom.itemRow}>
                                 <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
-                                <Text style={cupom.itemCat} numberOfLines={1}>{nomeCliente}</Text>
+                                <Text style={cupom.itemCat} numberOfLines={1}>{rec.nomeCliente}</Text>
                                 <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(dinheiroRecebido)}</Text>
                               </View>
                               <Text style={[cupom.itemSub, { color: '#6B7280', fontSize: 9 }]}>
@@ -1128,7 +1281,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                                 <Text style={cupom.itemHora}>   {fmtHora(p.created_at)}</Text>
                                 {p.forma_pagamento && <Text style={cupom.itemHora}>{p.forma_pagamento}</Text>}
                               </View>
-                              {idx < pagamentosDinheiro.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
+                              {divisor}
                             </TouchableOpacity>
                           );
                         })}
@@ -1329,6 +1482,28 @@ export function ModalResetCliente({ visible, onClose, onResetSuccess, liquidacao
   const [clientes, setClientes] = useState<{ id: string; nome: string; qtd_transacoes: number }[]>([]);
   const [loading, setLoading] = useState(false);
   const [resetando, setResetando] = useState<string | null>(null);
+  const [busca, setBusca] = useState('');
+
+  // BUSCA POR NOME. Pedido do Julio em 06/11/2026: em rota com muitos clientes
+  // ele percorria a lista inteira para achar quem resetar.
+  //
+  // Aparece SEMPRE, e nao a partir de um tamanho: medido em 08/11/2026 sobre
+  // as 1.133 liquidacoes com transacao, a lista tem mediana de 15 clientes,
+  // p90 de 40 e maximo de 344 -- e 758 delas (67%) passam de 8. Esconder a
+  // lupa nos casos pequenos seria uma regra a mais para explicar, num modal
+  // que o usuario abre para corrigir dinheiro.
+  //
+  // `normalizarBusca` vem de utils: a mesma que a lista de clientes usa, para
+  // "nubia" achar "núbia" nas duas.
+  const filtrados = useMemo(() => {
+    const b = normalizarBusca(busca);
+    if (!b) return clientes;
+    return clientes.filter(c => normalizarBusca(c.nome).includes(b));
+  }, [clientes, busca]);
+
+  // A busca nao sobrevive ao fechar: o modal fica montado e, reaberto noutro
+  // dia, mostraria a lista filtrada pelo nome digitado na vez anterior.
+  useEffect(() => { if (!visible) setBusca(''); }, [visible]);
 
   useEffect(() => {
     if (visible && liquidacaoId) carregarClientes();
@@ -1452,6 +1627,30 @@ export function ModalResetCliente({ visible, onClose, onResetSuccess, liquidacao
           </Text>
         </View>
 
+        {/* Busca */}
+        {!loading && clientes.length > 0 && (
+          <View style={resetStyles.buscaBox}>
+            {/* Ionicons e nao emoji: emoji depende da fonte do aparelho, que e
+                a mesma familia de problema do ICU em 04/11. */}
+            <Ionicons name="search-outline" size={16} color="#9CA3AF" />
+            <TextInput
+              style={resetStyles.buscaInput}
+              value={busca}
+              onChangeText={setBusca}
+              placeholder={lang === 'es' ? 'Buscar cliente por nombre...' : 'Buscar cliente pelo nome...'}
+              placeholderTextColor="#9CA3AF"
+              autoCorrect={false}
+              autoCapitalize="none"
+              returnKeyType="search"
+            />
+            {!!busca && (
+              <TouchableOpacity onPress={() => setBusca('')} hitSlop={10} style={resetStyles.buscaLimpar}>
+                <Ionicons name="close" size={13} color="#4B5563" />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
         {/* Lista */}
         {loading ? (
           <ActivityIndicator size="large" color="#DC2626" style={{ marginTop: 40 }} />
@@ -1461,9 +1660,24 @@ export function ModalResetCliente({ visible, onClose, onResetSuccess, liquidacao
               {lang === 'es' ? 'Ningún cliente con transacciones' : 'Nenhum cliente com transações'}
             </Text>
           </View>
+        ) : filtrados.length === 0 ? (
+          /* Vazio da BUSCA, nao vazio da liquidacao: dizer "nenhum cliente com
+             transacoes" aqui faria o usuario achar que o dia esta limpo. */
+          <View style={resetStyles.empty}>
+            <Text style={resetStyles.emptyTxt}>
+              {lang === 'es'
+                ? `Ningún cliente con "${busca}"`
+                : `Nenhum cliente com "${busca}"`}
+            </Text>
+            <TouchableOpacity onPress={() => setBusca('')} style={resetStyles.limparBtn}>
+              <Text style={resetStyles.limparBtnTxt}>
+                {lang === 'es' ? 'Limpiar búsqueda' : 'Limpar busca'}
+              </Text>
+            </TouchableOpacity>
+          </View>
         ) : (
           <FlatList
-            data={clientes}
+            data={filtrados}
             keyExtractor={item => item.id}
             contentContainerStyle={{ padding: 16 }}
             renderItem={({ item }) => (
@@ -1498,8 +1712,20 @@ const resetStyles = StyleSheet.create({
   closeTxt: { color: '#fff', fontSize: 14, fontWeight: '700' },
   aviso: { backgroundColor: '#FEF2F2', borderLeftWidth: 4, borderLeftColor: '#DC2626', margin: 16, padding: 12, borderRadius: 8 },
   avisoTxt: { fontSize: 13, color: '#7F1D1D', lineHeight: 18 },
-  empty: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  emptyTxt: { fontSize: 14, color: '#9CA3AF' },
+  // `flexShrink: 1` no input: numa linha `row` o filho nasce rigido no React
+  // Native, e o placeholder longo empurrava o X para fora da tela.
+  buscaBox: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    marginHorizontal: 16, marginBottom: 4, paddingHorizontal: 12,
+    backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 10,
+  },
+  buscaInput: { flex: 1, flexShrink: 1, minWidth: 0, paddingVertical: 10, fontSize: 14, color: '#1F2937' },
+  buscaLimpar: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#E5E7EB', justifyContent: 'center', alignItems: 'center' },
+  limparBtn: { marginTop: 12, paddingVertical: 8, paddingHorizontal: 16, backgroundColor: '#F3F4F6', borderRadius: 8 },
+  limparBtnTxt: { fontSize: 13, color: '#374151', fontWeight: '600' },
+
+  empty: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 },
+  emptyTxt: { fontSize: 14, color: '#9CA3AF', textAlign: 'center' },
   clienteRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F9FAFB', borderRadius: 10, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#E5E7EB' },
   clienteInfo: { flex: 1 },
   clienteNome: { fontSize: 15, fontWeight: '600', color: '#1F2937' },

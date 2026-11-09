@@ -31,6 +31,14 @@ interface MenuPagamentoProps {
   totalParcelas: number;
   saldoEmprestimo: number;
   creditoDisponivel: number;
+  /**
+   * A conta da quitação lida das PARCELAS, nos termos de
+   * `fn_quitar_emprestimo`. Quando vem, a folha mostra o bruto de verdade e o
+   * botão confirma o valor exato que a função exige. `null` enquanto carrega:
+   * aí a folha deriva `saldo + crédito`, que erra por centavos em 24 dos
+   * 2.603 empréstimos quitáveis da base.
+   */
+  quitacao?: { bruto: number; credito: number; dinheiro: number } | null;
   /** Pagamentos parciais desta parcela (data/liquidação/valor). */
   pagamentosParciais?: { valor: number; dataLiq: string | null }[];
   // Ações
@@ -71,6 +79,12 @@ interface MenuPagamentoProps {
     quantoPagar?: string;
     valorAcimaMax?: string;
     registrando?: string;
+    // A decomposicao da quitacao. As MESMAS tres palavras que a tela de
+    // confirmacao usa -- antes estavam escritas a mao nos dois lugares, e
+    // divergir ali e dizer ao cobrador duas coisas sobre o mesmo dinheiro.
+    parcelasAbertoLbl?: string;
+    creditoClienteLbl?: string;
+    aReceberLbl?: string;
     emprestimoLbl?: string;
     jaPagoLbl?: string;
     estePagamento?: string;
@@ -106,6 +120,7 @@ export default function MenuPagamento({
   totalParcelas,
   saldoEmprestimo,
   creditoDisponivel,
+  quitacao = null,
   pagamentosParciais,
   onPagarValor,
   onUsarCredito,
@@ -158,6 +173,16 @@ export default function MenuPagamento({
   // confirmar vira espera no proprio botao, e a folha so fecha quando o
   // pagamento gravou.
   // ─────────────────────────────────────────────────────────────────────
+
+  // AS TRÊS GRANDEZAS DA QUITAÇÃO, num lugar só.
+  //
+  // Com `quitacao` elas vêm das parcelas, iguais às da função. Sem ela, a
+  // derivação antiga: `saldoEmprestimo` é `emprestimos.valor_saldo`, JÁ
+  // líquido de crédito, então o bruto é `líquido + crédito` e o dinheiro é o
+  // próprio líquido.
+  const qBruto = quitacao ? quitacao.bruto : saldoEmprestimo + creditoDisponivel;
+  const qCredito = quitacao ? quitacao.credito : creditoDisponivel;
+  const qDinheiro = quitacao ? quitacao.dinheiro : saldoEmprestimo;
 
   const cenario = (valorEspecie: number, valorCredito: number = 0) => {
     if (!(valorTotalEmprestimo > 0)) return null;
@@ -402,21 +427,54 @@ export default function MenuPagamento({
                     </View>
                     <Text style={[S.opcaoLbl, { color: '#991B1B' }, opcao === 'quitar' && { fontWeight: '700' }]}>{t.quitarEmprestimo || 'Quitar empréstimo'}</Text>
                   </View>
-                  <Text style={[S.opcaoVal, { color: '#991B1B' }]}>{fmt(saldoEmprestimo)}</Text>
+                  <Text style={[S.opcaoVal, { color: '#991B1B' }]}>{fmt(qDinheiro)}</Text>
                 </TouchableOpacity>
                 {opcao === 'quitar' && (
                   <View style={{ marginTop: 10 }}>
-                    <View style={S.resumoLinha}>
-                      <Text style={S.resumoLbl}>{t.saldoTotalLbl || 'Saldo do empréstimo'}</Text>
-                      <Text style={S.resumoVal}>{fmt(saldoEmprestimo)}</Text>
-                    </View>
-                    {creditoDisponivel > 0 && (
+                    {/* ⚠ `saldoEmprestimo` JA E LIQUIDO de credito
+                        (`emprestimos.valor_saldo`, descontado pelo gatilho), e
+                        por isso e exatamente o dinheiro que
+                        `fn_quitar_emprestimo` exige.
+
+                        Antes isto mostrava duas linhas soltas:
+                            Saldo do emprestimo   265,00   <- ja liquido
+                            Credito disponivel     23,00   <- sem sinal
+                        e quem le subtrai de novo. Era literalmente o
+                        "garanta que o credito seja descontado apenas uma vez"
+                        do Julio em 24/10/2026 -- nao na conta, na LEITURA. A
+                        tela de confirmacao seguinte ja mostrava a conta certa,
+                        mas quem decide clicar le esta.
+
+                        Agora a conta aparece inteira e fecha de cima para
+                        baixo. O bruto sai de `liquido + credito` porque o
+                        payload do dia nao traz a soma das parcelas: 98,2% do
+                        credito da base esta numa parcela paga em dia anterior,
+                        fora da consulta. Quando o credito passa da divida o
+                        liquido vira 0 e esta soma erra -- mas ai a funcao
+                        recusa a quitacao, dizendo para resolver a sobra. */}
+                    {qCredito > 0 ? (
+                      <>
+                        <View style={S.resumoLinha}>
+                          <Text style={S.resumoLbl}>{t.parcelasAbertoLbl || 'Parcelas em aberto'}</Text>
+                          <Text style={S.resumoVal}>{fmt(qBruto)}</Text>
+                        </View>
+                        <View style={S.resumoLinha}>
+                          <Text style={[S.resumoLbl, { color: '#4F46E5' }]}>{t.creditoClienteLbl || 'Crédito do cliente'}</Text>
+                          <Text style={[S.resumoVal, { color: '#4F46E5' }]}>− {fmt(Math.min(qCredito, qBruto))}</Text>
+                        </View>
+                        <View style={S.divider} />
+                        <View style={S.resumoLinha}>
+                          <Text style={S.novoLbl}>{t.aReceberLbl || 'A receber em dinheiro'}</Text>
+                          <Text style={S.novoVal}>{fmt(qDinheiro)}</Text>
+                        </View>
+                      </>
+                    ) : (
                       <View style={S.resumoLinha}>
-                        <Text style={[S.resumoLbl, { color: '#4F46E5' }]}>{t.creditoLbl || 'Crédito disponível'}</Text>
-                        <Text style={[S.resumoVal, { color: '#4F46E5' }]}>{fmt(creditoDisponivel)}</Text>
+                        <Text style={S.resumoLbl}>{t.saldoTotalLbl || 'Saldo do empréstimo'}</Text>
+                        <Text style={S.resumoVal}>{fmt(qDinheiro)}</Text>
                       </View>
                     )}
-                    {botao(`${t.confirmar || 'Confirmar'} ${fmt(saldoEmprestimo)}`, onQuitarEmprestimo, true)}
+                    {botao(`${t.confirmar || 'Confirmar'} ${fmt(qDinheiro)}`, onQuitarEmprestimo, true)}
                   </View>
                 )}
               </View>

@@ -86,6 +86,9 @@ const TX = {
     saldoCurto: 'Saldo',
     pc1: 'parcela',
     pcN: 'parcelas',
+    pcDe: 'de',
+    pcAb1: 'parcela em aberto',
+    pcAbN: 'parcelas em aberto',
     semEventos: 'Nenhuma movimentação registrada',
     comprovantes: 'Comprovantes',
     documentos: 'Documentos do cliente',
@@ -137,6 +140,9 @@ const TX = {
     saldoCurto: 'Saldo',
     pc1: 'cuota',
     pcN: 'cuotas',
+    pcDe: 'de',
+    pcAb1: 'cuota pendiente',
+    pcAbN: 'cuotas pendientes',
     semEventos: 'Ninguna movimentación registrada',
     comprovantes: 'Comprobantes',
     documentos: 'Documentos del cliente',
@@ -168,9 +174,13 @@ const Linha = ({ rot, val, cor, forte, derivada }: {
       {derivada && (
         <Ionicons name="return-down-forward-outline" size={13} color="rgba(255,255,255,0.45)" />
       )}
+      {/* SEM `numberOfLines`: o rotulo cresceu com a contagem de parcelas
+          ("Saldo (19 parcelas em aberto)") e, cortado, viraria
+          "...em abert...". Com `flexShrink: 1` e sem teto de linhas, o pior
+          caso e o cartao ficar mais ALTO — nunca texto cortado, em qualquer
+          fonte do sistema e qualquer tela. E a regra do Mauricio de 03/11. */}
       <Text
         style={[S.linhaRot, forte && S.linhaRotForte, derivada && S.linhaRotDeriv]}
-        numberOfLines={1}
       >{rot}</Text>
     </View>
     <Text style={[
@@ -267,11 +277,22 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
   const creditoEmp = Number(ficha?.totais?.credito_disponivel || 0);
   const valorParcelaEmp = Number(ficha?.emprestimo?.valor_parcela || 0);
 
-  // SALDO é o que o cliente ainda tem de TRAZER, e por isso desconta o
-  // crédito: esse dinheiro ele já entregou e pode usá-lo a qualquer momento
-  // para pagar uma parcela. `saldo_atual` é a dívida contábil das parcelas,
-  // que não enxerga crédito ainda não aplicado — e é maior exatamente por ele.
-  const saldoFaltaEmp = Math.max(saldoEmp - creditoEmp, 0);
+  // SALDO é o que o cliente ainda tem de TRAZER, e `saldo_atual` JÁ É isso:
+  // `emprestimos.valor_saldo` vem LÍQUIDO DE CRÉDITO, porque o gatilho
+  // `atualizar_saldo_emprestimo` faz `GREATEST(0, Σ parcelas abertas − crédito)`.
+  //
+  // ⚠ Esta linha subtraía o crédito DE NOVO, e era desconto duplo. Na Camila
+  // Rafaela (relato do Julio, 06/11/2026): parcelas abertas 170, crédito 135,
+  // `valor_saldo` 35 — e a tela mostrava `max(35 − 135, 0)` = 0,00 EM VERDE,
+  // com uma parcela de 200 em aberto. Medido na base: 389 empréstimos em
+  // aberto têm crédito e em 23 o saldo aparecia zerado, em 15 rotas.
+  //
+  // O mesmo erro já tinha sido consertado DENTRO do banco, em
+  // `fn_quitar_emprestimo` ("a versão anterior subtraía o crédito de novo,
+  // então quitava cobrando a menos"), e o aviso está no CLAUDE.md desde
+  // 06/10/2026. Os 35 aqui são o MESMO número que aquela função cobra em
+  // dinheiro: 170 das parcelas menos os 135 de crédito que ela consome.
+  const saldoFaltaEmp = Math.max(saldoEmp, 0);
 
   // PAGO é tudo o que o cliente entregou, crédito incluído: quem paga 150 numa
   // parcela de 100 pagou 150. O CRÉDITO não é uma parcela irmã desta — é um
@@ -282,7 +303,9 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
   // também quando o crédito vem de outro empréstimo da cadeia — nesse caso ele
   // já entrou no abatimento, e somá-lo contaria o mesmo dinheiro duas vezes.
   //
-  // A cadeia fecha por construção: Juros − Pago = Saldo.
+  // A cadeia fecha por construção: Juros − Pago = Saldo. Na Camila,
+  // 4.800 − 35 = 4.765, que é o dinheiro que ela entregou de verdade — e não
+  // os 4.800 das 24 parcelas inteiras, que foi o relato do Julio.
   const pagoEmp = Math.max(totalEmp - saldoFaltaEmp, 0);
 
   const taxaEmp = ficha?.emprestimo?.taxa_juros;
@@ -292,15 +315,38 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
     ? '—'
     : Number(taxaEmp).toFixed(2).replace(/\.?0+$/, '').replace('.', ',') + '%';
 
-  // "Pago (1,5 parcelas)". O número sai do dinheiro dividido pelo valor da
-  // parcela e pode ser quebrado — pagamento parcial é a regra, não a exceção.
-  // Sem valor de parcela o rótulo fica sozinho, em vez de exibir uma divisão
-  // por zero.
-  const rotComParcelas = (rot: string, valor: number) => {
-    if (!valorParcelaEmp) return rot;
-    const n = Math.round((valor / valorParcelaEmp) * 10) / 10;
-    const txt = Number.isInteger(n) ? String(n) : n.toFixed(1).replace('.', ',');
-    return `${rot} (${txt} ${n === 1 ? t.pc1 : t.pcN})`;
+  // PARCELA SE CONTA EM PARCELA, NÃO EM DINHEIRO.
+  //
+  // ⚠ Isto saía de `dinheiro ÷ valor_parcela`, e era a outra metade do relato
+  // do Julio: a Camila aparecia com "Pago (24 parcelas)" e, na lista logo
+  // abaixo, uma parcela em aberto. 4.800 / 200 = 24 — o resumo contradizia a
+  // lista na mesma tela, e nenhuma das duas estava contando parcelas.
+  //
+  // Quem conta é o banco, em `totais`. Conferido antes de confiar:
+  // `status = 'PAGO'` ⟺ `valor_saldo = 0` em 32.099 de 32.099 parcelas, zero
+  // divergências nas duas direções — ao contrário de PENDENTE × VENCIDO, que
+  // o gatilho grava contra CURRENT_DATE e por isso mente (ver CLAUDE.md).
+  //
+  // O denominador é `parcelas_total` dos totais, não `numero_parcelas`: as 58
+  // parcelas CANCELADO da base não são devidas nem pagas, e ficam fora das
+  // duas contagens — somá-las ao total deixaria "23 de 24" com uma a mais.
+  const parcelasPagas = Number(ficha?.totais?.parcelas_pagas || 0);
+  const parcelasAbertas = Number(ficha?.totais?.parcelas_abertas || 0);
+  const parcelasTotal = Number(ficha?.totais?.parcelas_total || 0);
+
+  /** "Pago (23 de 24 parcelas)" — e sem o "de 24" quando não falta nenhuma. */
+  const rotPagas = (rot: string) => {
+    if (!parcelasTotal) return rot;
+    const un = parcelasPagas === 1 ? t.pc1 : t.pcN;
+    return parcelasAbertas === 0
+      ? `${rot} (${parcelasPagas} ${un})`
+      : `${rot} (${parcelasPagas} ${t.pcDe} ${parcelasTotal} ${t.pcN})`;
+  };
+
+  /** "Saldo (1 parcela em aberto)" — e só "Saldo" quando não há nenhuma. */
+  const rotAbertas = (rot: string) => {
+    if (!parcelasAbertas) return rot;
+    return `${rot} (${parcelasAbertas} ${parcelasAbertas === 1 ? t.pcAb1 : t.pcAbN})`;
   };
 
   const rotuloEvento = (ev: EventoFicha) => ({
@@ -351,7 +397,7 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
             activeOpacity={0.85}
           >
             <Text style={S.linhaRotForte} numberOfLines={1}>
-              {rotComParcelas(t.saldoCurto, saldoFaltaEmp)}
+              {rotAbertas(t.saldoCurto)}
             </Text>
             <View style={S.minDir}>
               <Text style={[S.linhaVal, S.linhaValForte, { color: saldoFaltaEmp > 0 ? '#FCD34D' : '#6EE7B7' }]}>
@@ -391,7 +437,7 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
 
             <View style={S.resumoDiv} />
 
-            <Linha rot={rotComParcelas(t.pago, pagoEmp)} val={fmt(pagoEmp)} />
+            <Linha rot={rotPagas(t.pago)} val={fmt(pagoEmp)} />
             <Linha
               rot={t.creditoCurto}
               val={fmt(creditoEmp)}
@@ -404,7 +450,7 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
             {/* Âmbar quando ainda deve, verde quando zerou: no fundo escuro o
                 vermelho some, e o que importa é a distinção. */}
             <Linha
-              rot={rotComParcelas(t.saldoCurto, saldoFaltaEmp)}
+              rot={rotAbertas(t.saldoCurto)}
               val={fmt(saldoFaltaEmp)}
               cor={saldoFaltaEmp > 0 ? '#FCD34D' : '#6EE7B7'}
               forte

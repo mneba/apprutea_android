@@ -10,6 +10,15 @@ export interface ClienteRotaDia {
   foto_url: string | null;
   latitude: number | null; longitude: number | null;
   emprestimo_id: string; saldo_emprestimo: number; valor_principal: number; valor_total?: number;
+  /**
+   * Crédito do cliente ainda nao aplicado (Σ `saldo_excedente` das parcelas).
+   *
+   * ⚠ NAO subtraia de `saldo_emprestimo`: aquele campo e
+   * `emprestimos.valor_saldo` e JA vem liquido dele. Este existe para ser
+   * MOSTRADO ao lado, que foi o pedido original desta pendencia -- "essa
+   * informacao nao aparece na tela principal do cobrador".
+   */
+  credito_disponivel?: number;
   numero_parcelas: number; status_emprestimo: string; rota_id: string;
   frequencia_pagamento: string; parcela_id: string; numero_parcela: number;
   valor_parcela: number; valor_pago_parcela: number; saldo_parcela: number;
@@ -136,6 +145,44 @@ export async function getClientesDia(
   const rows = (data || []) as any[];
 
   // ═══════════════════════════════════════════════════════════════════════
+  // CREDITO DISPONIVEL — a segunda viagem, e ela e deliberada
+  // ═══════════════════════════════════════════════════════════════════════
+  //
+  // Esta funcao e a "uma onda" do app, e acrescentar consulta aqui contraria
+  // isso. Vai mesmo assim, por tres razoes medidas em 08/11/2026:
+  //
+  // 1. O DADO NAO ESTA NO PAYLOAD E NAO E DERIVAVEL. A RPC devolve
+  //    `valor_credito_gerado/usado` por parcela, somados sobre PAGAMENTOS, mas
+  //    nao `saldo_excedente`, que e o credito parado. Das 682 parcelas que
+  //    carregam credito (389 emprestimos em aberto), TODAS estao `PAGO` e 670
+  //    (98,2%) foram pagas em dia ANTERIOR -- fora dos dois bracos do UNION.
+  // 2. CUSTA 1,1 ms na maior rota da base (352 clientes, 348 contas):
+  //    `Index Only Scan` em `idx_parcelas_saldo_excedente`, 784 buffers, todos
+  //    em cache. A propria RPC custa 11 a 152 ms com cache quente.
+  // 3. A ALTERNATIVA ERA PIOR: acrescentar coluna ao `RETURNS TABLE` da funcao
+  //    mais chamada do sistema exige `DROP` e refazer os grants.
+  //
+  // E a aba "Todos" ja faz exatamente esta consulta -- aqui e o mesmo
+  // mecanismo, nao um segundo.
+  const creditoMap = new Map<string, number>();
+  const empIdsCred = [...new Set(rows.map(r => r.emprestimo_id).filter(Boolean))];
+  if (empIdsCred.length > 0) {
+    const { data: cred, error: errCred } = await supabase
+      .from('emprestimo_parcelas')
+      .select('emprestimo_id, saldo_excedente')
+      .in('emprestimo_id', empIdsCred)
+      .gt('saldo_excedente', 0);
+    // Falha aqui NAO derruba o dia: o credito e informacao a mais na tela, e
+    // o saldo que o cobrador le ja esta correto sem ele.
+    if (errCred) console.warn('⚠️ credito disponivel nao carregado:', errCred.message);
+    (cred || []).forEach((p: any) => {
+      if (!p.emprestimo_id) return;
+      creditoMap.set(p.emprestimo_id,
+        (creditoMap.get(p.emprestimo_id) || 0) + Number(p.saldo_excedente || 0));
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   // MONTAGEM 100% LOCAL (medido em ~0,1ms com N pequeno)
   // ═══════════════════════════════════════════════════════════════════════
   const raw: ClienteRotaDia[] = [];
@@ -164,6 +211,7 @@ export async function getClientesDia(
       longitude: r.longitude,
       emprestimo_id: r.emprestimo_id,
       saldo_emprestimo: r.saldo_emprestimo,
+      credito_disponivel: creditoMap.get(r.emprestimo_id) || 0,
       valor_principal: r.valor_principal,
       valor_total: r.valor_total ?? null,
       numero_parcelas: r.numero_parcelas,

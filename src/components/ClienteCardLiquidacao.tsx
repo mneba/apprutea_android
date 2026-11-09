@@ -21,6 +21,8 @@ import { moeda, data } from '../utils/formato';
 
 export interface EmprestimoData {
   emprestimo_id: string; saldo_emprestimo: number; valor_principal: number;
+  /** Credito ainda nao aplicado. ⚠ `saldo_emprestimo` JA esta liquido dele. */
+  credito_disponivel?: number;
   valor_total?: number;
   numero_parcelas: number; status_emprestimo: string; frequencia_pagamento: string;
   /**
@@ -200,6 +202,7 @@ interface ClienteCardLiquidacaoProps {
   t: {
     parcela: string;
     saldoEmprestimo: string;
+    creditoDisponivel?: string;
     pagar: string;
     parcialmentePaga?: string;
     deLbl?: string;
@@ -466,6 +469,17 @@ function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
               <Text style={S.pValBig}>{fmt(valorAPagar)}</Text>
             )}
             <Text style={S.sLbl}>{t.saldoEmprestimo} {fmt(e.saldo_emprestimo)}</Text>
+            {/* O CREDITO, na tela onde o cobrador trabalha. Era o pedido
+                original desta pendencia: "essa informacao nao aparece na tela
+                principal do cobrador".
+                ⚠ O saldo acima JA esta liquido deste valor -- a linha existe
+                para o cobrador poder DIZER ao cliente que ele tem credito, nao
+                para ser subtraida de novo. */}
+            {(e.credito_disponivel || 0) > 0 && (
+              <Text style={S.cLbl}>
+                {t.creditoDisponivel || 'Crédito disponível:'} {fmt(e.credito_disponivel || 0)}
+              </Text>
+            )}
             {/* ⭐ Composição do empréstimo: emprestado + juros + total.
                 Antes só o total era exibido; agora o usuário vê quanto foi
                 de fato emprestado sem calcular. Juros = total − principal. */}
@@ -716,6 +730,17 @@ function CardMultiplo({
               <Text style={S.pValBig}>{fmt(valorAPagar)}</Text>
             )}
             <Text style={S.sLbl}>{t.saldoEmprestimo} {fmt(e.saldo_emprestimo)}</Text>
+            {/* O CREDITO, na tela onde o cobrador trabalha. Era o pedido
+                original desta pendencia: "essa informacao nao aparece na tela
+                principal do cobrador".
+                ⚠ O saldo acima JA esta liquido deste valor -- a linha existe
+                para o cobrador poder DIZER ao cliente que ele tem credito, nao
+                para ser subtraida de novo. */}
+            {(e.credito_disponivel || 0) > 0 && (
+              <Text style={S.cLbl}>
+                {t.creditoDisponivel || 'Crédito disponível:'} {fmt(e.credito_disponivel || 0)}
+              </Text>
+            )}
           </View>
         </View>
 
@@ -985,6 +1010,7 @@ const S = StyleSheet.create({
   pColEsq: { flex: 1 },
   sCol: { alignItems: 'flex-end', flexShrink: 1 },
   sLbl: { fontSize: 11, color: '#6B7280', marginBottom: 2 },
+  cLbl: { fontSize: 11, color: '#4F46E5', fontWeight: '600', marginBottom: 2 },
   exp: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#F3F4F6' },
   expActRow: { flexDirection: 'row', gap: 8, marginBottom: 6, alignItems: 'center' },
   faixaParcial: { backgroundColor: '#FEF3C7', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginBottom: 8 },

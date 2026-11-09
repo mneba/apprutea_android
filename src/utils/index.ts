@@ -115,6 +115,17 @@ export function limparTelefone(telefone: string | null): string {
 /**
  * Trunca texto com ellipsis
  */
+/**
+ * Normaliza texto para BUSCA: sem acento, minusculo, sem espaco nas pontas.
+ *
+ * Vive aqui porque duas telas buscam cliente pelo nome — a lista de clientes
+ * e o "Resetar cliente" do extrato — e busca que ignora acento num lugar e
+ * nao no outro e o formato de erro que este projeto ja pagou varias vezes.
+ * Quem digita "nubia" tem de achar "núbia" nos dois.
+ */
+export const normalizarBusca = (texto: string): string =>
+  (texto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
 export function truncarTexto(texto: string, tamanho: number): string {
   if (texto.length <= tamanho) return texto;
   return texto.slice(0, tamanho - 3) + '...';

@@ -14,7 +14,7 @@ import {
 import { supabase } from '../services/supabase';
 
 import { mensagemErro } from '../utils/mensagemErro';
-import { diaMes, hora, dataAno2, dataAno2Hora } from '../utils/formato';
+import { diaMes, hora, dataAno2, dataAno2Hora, chaveData } from '../utils/formato';
 
 // ==================== TIPOS ====================
 export interface Nota {
@@ -288,7 +288,12 @@ export function ModalNotasLista({
         p_parcela_id: parcelaAutoId,
         p_nota: novoTexto.trim(),
         p_prioridade: 'NORMAL',
-        p_data_referencia: dataReferencia || new Date().toISOString().split('T')[0],
+        // ⚠ A reserva era `new Date().toISOString().split('T')[0]`, o dia em
+        // UTC: das 21h à meia-noite em São Paulo ela gravava AMANHÃ.
+        // `chaveData` lê os campos LOCAIS da `Date` (utils/formato.ts).
+        // Continua sendo relógio, e por isso é só reserva: quem manda é
+        // `dataReferencia`, que vem da liquidação.
+        p_data_referencia: dataReferencia || chaveData(new Date()),
         p_latitude: coords?.lat || null,
         p_longitude: coords?.lng || null,
       });
@@ -724,7 +729,12 @@ export function ModalCriarNota({
         p_parcela_id: parcelaAutoId || null,
         p_nota: notaTexto.trim(),
         p_prioridade: 'NORMAL',
-        p_data_referencia: dataReferencia || new Date().toISOString().split('T')[0],
+        // ⚠ A reserva era `new Date().toISOString().split('T')[0]`, o dia em
+        // UTC: das 21h à meia-noite em São Paulo ela gravava AMANHÃ.
+        // `chaveData` lê os campos LOCAIS da `Date` (utils/formato.ts).
+        // Continua sendo relógio, e por isso é só reserva: quem manda é
+        // `dataReferencia`, que vem da liquidação.
+        p_data_referencia: dataReferencia || chaveData(new Date()),
         p_latitude: coords?.lat || null,
         p_longitude: coords?.lng || null,
       });

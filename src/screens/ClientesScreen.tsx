@@ -48,6 +48,7 @@ import { buscarDiasSemana, MapaDiasSemana } from '../services/diasSemanaEmpresti
 import { supabase } from '../services/supabase';
 import { mensagemErro } from '../utils/mensagemErro';
 import { moeda, data, diaMes, hora, numeroBr, chaveData } from '../utils/formato';
+import { normalizarBusca } from '../utils';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DRAWER_WIDTH = SCREEN_WIDTH * 0.75;
 
@@ -224,6 +225,11 @@ const textos = {
     confirmarEstorno: 'CONFIRMAR ESTORNO', cancelar: 'Cancelar',
     estornoSucesso: 'Estorno realizado!', estornoErro: 'Erro ao estornar',
     liquidacaoNecessaria: 'É necessário ter uma liquidação aberta para esta operação.',
+    // As tres palavras da decomposicao da quitacao. Usadas pelo menu de
+    // pagamento E pela tela de confirmacao -- uma fonte so.
+    parcelasAbertoLbl: 'Parcelas em aberto',
+    creditoClienteLbl: 'Crédito do cliente',
+    aReceberLbl: 'A receber em dinheiro',
     usar: 'Usar',
     saldoAnterior: 'Saldo anterior de',
     valorPendente: 'Valor pendente:',
@@ -263,7 +269,19 @@ const textos = {
     dinheiro: 'Dinheiro',
     creditoUsado: 'Crédito usado',
     toqueDetalhes: 'Toque para ver detalhes',
-    legendaTitulo: 'Significado das Cores',
+    // O modal do "?" passou a explicar a TELA, nao so as cores: o relato do
+    // Julio em 26/10 e 03/11/2026 foi somar os tres botoes e nao fechar. Os
+    // numeros estavam certos; faltava dizer o que cada um conta.
+    legendaTitulo: 'Como ler esta tela',
+    secBotoes: 'Os três botões',
+    secCores: 'Cores da borda do card',
+    botLiqLabel: 'Liquidação',
+    botLiqDesc: 'Clientes do dia que ainda não pagaram.',
+    botPagosLabel: 'Pagos',
+    botPagosDesc: 'Quem já pagou neste dia. Cliente com duas contas aparece uma vez por conta paga.',
+    botTodosLabel: 'Todos',
+    botTodosDesc: 'A carteira inteira da rota.',
+    botSoma: 'Liquidação + Pagos = os clientes do dia. Quem está em dia não entra em nenhum dos dois: a parcela dele vence depois do dia da liquidação, e ele aparece só em Todos.',
     // "tempo sem pagar" era FALSO, e o campo pegou: a conta mede o atraso da
     // parcela em aberto mais ANTIGA, nao o tempo desde o ultimo pagamento.
     // Medido em 27/10/2026: 13 clientes passam de 15 dias por essa conta
@@ -335,6 +353,9 @@ const textos = {
     confirmarEstorno: 'CONFIRMAR REVERSIÓN', cancelar: 'Cancelar',
     estornoSucesso: '¡Reversión realizada!', estornoErro: 'Error al reversar',
     liquidacaoNecessaria: 'Es necesario tener una liquidación abierta para esta operación.',
+    parcelasAbertoLbl: 'Cuotas en abierto',
+    creditoClienteLbl: 'Crédito del cliente',
+    aReceberLbl: 'A recibir en efectivo',
     usar: 'Usar',
     saldoAnterior: 'Saldo anterior de',
     valorPendente: 'Valor pendiente:',
@@ -372,7 +393,16 @@ const textos = {
     pagoNoDia: 'A tiempo',
     pagoAdiantado: 'Adelantado',
     toqueDetalhes: 'Toque para ver detalles',
-    legendaTitulo: 'Significado de los Colores',
+    legendaTitulo: 'Cómo leer esta pantalla',
+    secBotoes: 'Los tres botones',
+    secCores: 'Colores del borde de la tarjeta',
+    botLiqLabel: 'Liquidación',
+    botLiqDesc: 'Clientes del día que aún no han pagado.',
+    botPagosLabel: 'Pagados',
+    botPagosDesc: 'Quien ya pagó en este día. El cliente con dos cuentas aparece una vez por cuenta pagada.',
+    botTodosLabel: 'Todos',
+    botTodosDesc: 'La cartera completa de la ruta.',
+    botSoma: 'Liquidación + Pagados = los clientes del día. Quien está al día no entra en ninguno de los dos: su cuota vence después del día de la liquidación, y aparece solo en Todos.',
     legendaSubtitulo: 'Borde izquierdo de cada tarjeta. El color toma lo peor entre cobros perdidos y días de atraso de la cuota más antigua abierta.',
     legendaEntendido: 'Entendido',
     legendaDataRef: 'Contado hasta el día de la liquidación abierta ({data}), no hasta hoy.',
@@ -391,9 +421,9 @@ const FREQ: Record<Language, Record<string, string>> = {
 const getIni = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase() || '').join('');
 const fmt = (v: number) => moeda(v);
 
-// ⭐ Normaliza texto para busca: remove acentos + lowercase
-const normalizarBusca = (texto: string): string =>
-  texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+// `normalizarBusca` saiu daqui para `utils/index.ts` em 08/11/2026, quando o
+// "Resetar cliente" do extrato ganhou busca: duas buscas de nome de cliente,
+// uma regua so.
 
 // AQUI VIVIA `buscarCreditoMap`, SEM NENHUMA CHAMADA, sob o comentário
 // "Saldo real = valor_saldo - credito_acumulado".
@@ -618,13 +648,32 @@ export default function ClientesScreen({ navigation, route }: any) {
   // payload da liquidação. Ver services/diasSemanaEmprestimos.ts.
   const [diasSemana, setDiasSemana] = useState<MapaDiasSemana>({});
   const [filtroDiaSemana, setFiltroDiaSemana] = useState<number | null>(null);
+
+  // ⚠ Sair de SEMANAL desmarca o dia. Os chips S-T-Q-Q-S-S-D so sao
+  // DESENHADOS quando a frequencia e SEMANAL (`breadcrumbDias`), mas o filtro
+  // seguia sendo APLICADO depois — e com efeito devastador: `diasSemana` so e
+  // preenchido para emprestimo SEMANAL, entao um emprestimo DIARIO tem lista
+  // vazia, `.includes()` da falso e a lista fica VAZIA, sem nada na tela
+  // explicando por que.
+  //
+  // Desenhar e aplicar tinham de ser a mesma condicao. Esta e a forma geral do
+  // que o Julio relatou em 07/11/2026 — "sem manter filtros ocultos ativos".
+  useEffect(() => {
+    if (filtroFrequencia !== 'SEMANAL' && filtroDiaSemana != null) {
+      setFiltroDiaSemana(null);
+    }
+  }, [filtroFrequencia, filtroDiaSemana]);
+
   const [showProximosDias, setShowProximosDias] = useState(false);
   const [showFiltroTipo, setShowFiltroTipo] = useState(false);
   const [showFiltroStatus, setShowFiltroStatus] = useState(false);
   const [ocultarLiquidacao, setOcultarLiquidacao] = useState(false);
 
   // Sinaliza se há algum filtro do drawer ativo (bolinha vermelha no ícone)
-  const temFiltroAtivo = filtro !== 'todos' || filtroTipo !== 'todos' || filtroStatus !== 'todos' || filtroFrequencia !== 'todos' || ocultarLiquidacao;
+  // ⚠ `filtroDiaSemana` entra aqui, e faltava. Sem ele, um dia da semana
+  // marcado nao acendia a bolinha do botao de filtros: o filtro estava ativo e
+  // nada na tela dizia isso. Relato do Julio em 07/11/2026.
+  const temFiltroAtivo = filtro !== 'todos' || filtroTipo !== 'todos' || filtroStatus !== 'todos' || filtroFrequencia !== 'todos' || filtroDiaSemana != null || ocultarLiquidacao;
 
   // Reordenação de clientes
   const [modoReordenar, setModoReordenar] = useState(false);
@@ -673,6 +722,24 @@ export default function ClientesScreen({ navigation, route }: any) {
   
   const [parcelaPagamento, setParcelaPagamento] = useState<ParcelaModal | null>(null);
   const [dadosPagamento, setDadosPagamento] = useState<any>(null);
+
+  /**
+   * A conta da QUITAÇÃO, nos mesmos termos de `fn_quitar_emprestimo`.
+   *
+   * Ela exige `p_valor_pagamento` igual a `Σ parcelas abertas − LEAST(crédito,
+   * Σ abertas)`, com tolerância de 1 centavo nas duas direções, e recusa fora
+   * disso. Enquanto a tela mandava `emprestimos.valor_saldo`, a quitação
+   * FALHAVA nos 24 empréstimos em que aquela coluna difere da soma das
+   * parcelas por centavos (máximo 0,39 — medido em 08/11/2026, todos com
+   * crédito zero, pior caso `denise peluquería` na 7.1 BendCredit). É o mesmo
+   * defeito que o web tinha, consertado lá no mesmo dia.
+   *
+   * `null` enquanto carrega ou quando a consulta falha; nesse caso as telas
+   * caem na derivação antiga, que acerta em 2.579 dos 2.603 quitáveis.
+   */
+  const [quitacaoInfo, setQuitacaoInfo] = useState<
+    { bruto: number; credito: number; dinheiro: number } | null
+  >(null);
   const [loadingDadosPagamento, setLoadingDadosPagamento] = useState(false);
   // ⭐ Dados extras para o fluxo de 2 passos do PagamentoModal (cenário + faixa de parcial)
   const [emprestimoInfoPag, setEmprestimoInfoPag] = useState<{ valor_total: number; total_pago: number } | null>(null);
@@ -983,6 +1050,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       setFiltroTipo('todos');
       setFiltroStatus('todos');
       setFiltroFrequencia('todos');
+      setFiltroDiaSemana(null); // faltava: sobrevivia a virada do dia
       dataOperacionalRef.current = dataLiq;
     }
   }, [dataLiq]);
@@ -1323,6 +1391,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     
     setParcelaPagamento(parcela);
     setDadosPagamento(null);
+    setQuitacaoInfo(null);
     setLoadingDadosPagamento(true);
     setUsarCredito(false);
     setFormaPagamento('DINHEIRO');
@@ -1348,7 +1417,10 @@ export default function ClientesScreen({ navigation, route }: any) {
 
       // ⭐ Dados extras (cenário do passo 2 + faixa de "parcialmente paga")
       const empId = clienteInfo?.emprestimo_id || (dados && dados.emprestimo_id);
-      const [empRes, pagsRes] = await Promise.all([
+      // A terceira consulta entra no Promise.all QUE JA EXISTE: em paralelo,
+      // nao custa espera nenhuma. E e um empréstimo só — no máximo 34 parcelas
+      // na base inteira.
+      const [empRes, pagsRes, parcRes] = await Promise.all([
         empId
           ? supabase.from('emprestimos').select('valor_total, total_pago').eq('id', empId).single()
           : Promise.resolve({ data: null } as any),
@@ -1357,7 +1429,28 @@ export default function ClientesScreen({ navigation, route }: any) {
           .eq('parcela_id', parcela.parcela_id)
           .eq('estornado', false)
           .order('created_at', { ascending: true }),
+        empId
+          ? supabase.from('emprestimo_parcelas')
+              .select('status, valor_saldo, saldo_excedente')
+              .eq('emprestimo_id', empId)
+          : Promise.resolve({ data: null } as any),
       ]);
+
+      // A conta da quitação, repetindo `fn_quitar_emprestimo` ao pé da letra:
+      // bruto das parcelas ABERTAS, crédito só onde `saldo_excedente > 0`,
+      // e o dinheiro é a diferença com `LEAST`.
+      if (parcRes?.data) {
+        const ABERTAS = ['PENDENTE', 'PARCIAL', 'VENCIDO'];
+        const linhas = parcRes.data as any[];
+        const bruto = linhas
+          .filter(p => ABERTAS.includes(p.status))
+          .reduce((acc, p) => acc + Number(p.valor_saldo || 0), 0);
+        const credito = linhas
+          .filter(p => Number(p.saldo_excedente || 0) > 0)
+          .reduce((acc, p) => acc + Number(p.saldo_excedente || 0), 0);
+        const aUsar = Math.min(credito, bruto);
+        setQuitacaoInfo({ bruto, credito, dinheiro: bruto - aUsar });
+      }
       if (empRes?.data) {
         setEmprestimoInfoPag({
           valor_total: Number(empRes.data.valor_total || 0),
@@ -1726,10 +1819,16 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   const acaoQuitarEmprestimo = useCallback(() => {
     if (!parcelaPagamento || !clienteModal) return;
-    // saldo_emprestimo já vem líquido de crédito (a trigger desconta), então
-    // é exatamente o dinheiro que fn_quitar_emprestimo espera receber.
-    const dinheiro = Number(clienteModal.saldo_emprestimo || 0);
-    const credito = Number(dadosPagamento?.credito_disponivel || 0);
+    // `quitacaoInfo` é a conta da própria função, lida das parcelas. Sem ela
+    // (consulta falhou), cai na derivação antiga: `valor_saldo` já vem líquido
+    // de crédito, e acerta em 2.579 dos 2.603 quitáveis — erra por centavos
+    // nos 24 em que a coluna diverge da soma das parcelas.
+    const dinheiro = quitacaoInfo
+      ? quitacaoInfo.dinheiro
+      : Number(clienteModal.saldo_emprestimo || 0);
+    const credito = quitacaoInfo
+      ? quitacaoInfo.credito
+      : Number(dadosPagamento?.credito_disponivel || 0);
     if (dinheiro <= 0 && credito <= 0) { Alert.alert(t.atencao, t.semSaldoQuitar || 'Empréstimo já está quitado'); return; }
     setMenuPagamentoVisible(false);
 
@@ -1742,20 +1841,23 @@ export default function ClientesScreen({ navigation, route }: any) {
     //
     // `saldo_emprestimo` já vem LÍQUIDO de crédito (ver nota em
     // quitarEmprestimoRpc), então o bruto é dinheiro + crédito.
-    const bruto = dinheiro + credito;
+    // Com `quitacaoInfo` o bruto é a SOMA DAS PARCELAS, de verdade. Sem ela,
+    // `dinheiro + credito` — que erra quando o crédito passa da dívida, caso
+    // em que a função recusa de qualquer forma.
+    const bruto = quitacaoInfo ? quitacaoInfo.bruto : dinheiro + credito;
     const es = lang === 'es';
     const detalhes: LinhaConfirm[] = [
-      { rotulo: es ? 'Cuotas en abierto' : 'Parcelas em aberto', valor: fmt(bruto) },
+      { rotulo: t.parcelasAbertoLbl, valor: fmt(bruto) },
     ];
     if (credito > 0) {
       detalhes.push({
-        rotulo: es ? 'Crédito del cliente' : 'Crédito do cliente',
+        rotulo: t.creditoClienteLbl,
         valor: `− ${fmt(credito)}`,
         abate: true,
       });
     }
     detalhes.push({
-      rotulo: es ? 'A recibir en efectivo' : 'A receber em dinheiro',
+      rotulo: t.aReceberLbl,
       valor: fmt(dinheiro),
       total: true,
     });
@@ -1763,6 +1865,14 @@ export default function ClientesScreen({ navigation, route }: any) {
     // Crédito maior que a dívida: fn_quitar_emprestimo recusa, porque quitar
     // aqui destruiria a diferença. Avisa antes em vez de deixar o vendedor
     // bater no erro depois de confirmar.
+    //
+    // ⚠ ATÉ 08/11/2026 ESTE AVISO NUNCA DISPARAVA: `bruto` vinha de
+    // `dinheiro + credito`, então `credito − bruto = −dinheiro`, que nunca
+    // passa de 0,01. Agora que o bruto é a soma real das parcelas, a condição
+    // é a mesma que a função usa e o aviso funciona.
+    //
+    // Sem `quitacaoInfo` ele volta a ser inerte — e aí quem recusa é a função,
+    // depois do clique, que é o comportamento antigo e não uma regressão.
     const sobra = credito - bruto;
     const aviso = sobra > 0.01
       ? (es
@@ -1782,7 +1892,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         quitarEmprestimoRpc(dinheiro);
       },
     });
-  }, [parcelaPagamento, clienteModal, dadosPagamento, t, lang, quitarEmprestimoRpc]);
+  }, [parcelaPagamento, clienteModal, dadosPagamento, quitacaoInfo, t, lang, quitarEmprestimoRpc]);
 
   // Chama a RPC de crédito em cascata
   // Função para ir para próxima parcela pendente
@@ -3209,6 +3319,16 @@ return (
           setFiltroTipo('todos');
           setFiltroStatus('todos');
           setFiltroFrequencia('todos');
+          // ⚠ O dia da semana faltava aqui, e era o relato do Julio em
+          // 07/11/2026: "ao clicar em Limpar, o dia continua marcado e a lista
+          // permanece mostrando apenas clientes semanais".
+          //
+          // Ele mora numa TRILHA SEPARADA do drawer — os chips S-T-Q-Q-S-S-D
+          // aparecem na tela, nao dentro dos filtros —, e por isso escapou de
+          // uma lista que, de resto, esta completa. Botao de limpar tem de
+          // zerar TODO estado que filtra, nao so o que esta desenhado ao lado
+          // dele.
+          setFiltroDiaSemana(null);
           setOcultarLiquidacao(false);
         }}
         filtroVencimento={filtroVencimento}
@@ -3499,6 +3619,7 @@ return (
         totalParcelas={dadosPagamento?.total_parcelas || parcelasModal.length || 0}
         saldoEmprestimo={Number(clienteModal?.saldo_emprestimo || 0)}
         creditoDisponivel={Number(dadosPagamento?.credito_disponivel || 0)}
+        quitacao={quitacaoInfo}
         pagamentosParciais={pagamentosParciaisPag}
         onPagarValor={acaoPagarValor}
         onUsarCredito={acaoUsarCredito}
@@ -3622,7 +3743,14 @@ return (
         clienteId={notaClienteId}
         clienteNome={notaClienteNome}
         emprestimoId={notaEmprestimoId}
-        dataReferencia={new Date().toISOString().split('T')[0]}
+        /* ⚠ Aqui estava `new Date().toISOString().split('T')[0]`, que é o
+           dia em UTC do aparelho: depois das 21h em São Paulo a nota nascia
+           com a data de AMANHÃ. Medido em 08/11/2026 nas 121 notas da base:
+           31 têm `data_referencia` POSTERIOR ao dia da liquidação, ZERO
+           anterior, e ZERO posterior ao dia em UTC — a mesma identidade que
+           entregou o bug da autorização de abertura em 04/11.
+           `dataLiq` é o dia operacional, que é a régua do sistema. */
+        dataReferencia={dataLiq}
         obsLocal="Cliente"
         lang={lang}
         coords={coords}
