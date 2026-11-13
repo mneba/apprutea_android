@@ -3865,17 +3865,24 @@ return (
           setTimeout(() => setModalDetalhesVisible(true), 100);
         }}
         onRenegociar={(cli, emp) => {
-          // Mesmo fluxo do onRenegociar do ClienteCardTodos
+          // Mesmo fluxo do onRenegociar do ClienteCardTodos.
+          //
+          // ⚠ Uma via só. A via que CANCELAVA o empréstimo atual existiu por
+          //    algumas horas em 12/11/2026 e saiu do app: ela servia para
+          //    consertar empréstimo lançado errado, e conserto é operação de
+          //    ADMIN. O vendedor não alcança um empréstimo de dias atrás, por
+          //    causa da regra de dias retroativos — ele opera a liquidação
+          //    que pode abrir, não o calendário.
           const nav = navigation.getParent() || navigation;
-          nav.navigate('NovoCliente', { dataLiq, 
-            renegociacao: { 
-              emprestimo_id: emp.id, 
-              cliente_id: cli.id, 
-              cliente_nome: cli.nome, 
+          nav.navigate('NovoCliente', { dataLiq,
+            renegociacao: {
+              emprestimo_id: emp.id,
+              cliente_id: cli.id,
+              cliente_nome: cli.nome,
               saldo_devedor: (emp as any).valor_saldo || 0,
-              telefone_celular: (cli as any).telefone_celular || '', 
-              codigo_cliente: (cli as any).codigo_cliente 
-            } 
+              telefone_celular: (cli as any).telefone_celular || '',
+              codigo_cliente: (cli as any).codigo_cliente,
+            }
           });
         }}
       />

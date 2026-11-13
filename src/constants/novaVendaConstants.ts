@@ -167,6 +167,9 @@ export const textos = {
   'pt-BR': {
     // Header
     tituloRenegociacao: 'RENEGOCIAÇÃO', tituloRenovacao: 'RENOVAÇÃO', tituloNovaVenda: 'NOVA VENDA', tituloAdicional: 'EMPRÉSTIMO ADICIONAL',
+    // Os rotulos do botao de confirmar. Estavam escritos a mao no JSX, em
+    // portugues, inclusive para quem usa o app em espanhol.
+    confirmarVenda: 'CONFIRMAR VENDA', confirmarRenegociacao: 'CONFIRMAR RENEGOCIAÇÃO',
     // Seções
     secCliente: 'CLIENTE', secEmprestimo: 'EMPRÉSTIMO', secMicroseguro: 'MICROSEGURO',
     secCalculo: 'CÁLCULO AUTOMÁTICO', secResumo: 'RESUMO DA VENDA',
@@ -234,6 +237,7 @@ export const textos = {
   },
   'es': {
     tituloRenegociacao: 'RENEGOCIACIÓN', tituloRenovacao: 'RENOVACIÓN', tituloNovaVenda: 'NUEVA VENTA', tituloAdicional: 'PRÉSTAMO ADICIONAL',
+    confirmarVenda: 'CONFIRMAR VENTA', confirmarRenegociacao: 'CONFIRMAR RENEGOCIACIÓN',
     secCliente: 'CLIENTE', secEmprestimo: 'PRÉSTAMO', secMicroseguro: 'MICROSEGURO',
     secCalculo: 'CÁLCULO AUTOMÁTICO', secResumo: 'RESUMEN DE VENTA',
     documento: 'Documento', telefoneFixo: 'Teléfono fijo', email: 'Email',

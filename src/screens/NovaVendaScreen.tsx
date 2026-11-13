@@ -196,6 +196,11 @@ export default function NovaVendaScreen({ navigation, route }: any) {
   const isClienteReadOnly = !!(clienteExistente?.id || buscaDoc.clienteEncontradoId);
   const isDisabled = isRenegociacao || buscaDoc.isVendaAprovadaTravada || form.isRenovacaoTravada || !!(buscaDoc.solicitacaoRenovacaoDetectada);
 
+  // ⚠ A via que CANCELAVA o emprestimo atual SAIU do app em 12/11/2026, no
+  //    mesmo dia em que entrou: ela servia para consertar emprestimo lancado
+  //    errado, e conserto e operacao de ADMIN, no web. O vendedor nao alcanca
+  //    um emprestimo de dias atras -- a liquidacao e a regua do tempo.
+  //    `t.tituloSubstituicao` e `t.confirmarSubstituicao` sairam junto.
   const titulo = isRenegociacao
     ? t.tituloRenegociacao
     : buscaDoc.tipoEmprestimoDetectado === 'RENOVACAO'
@@ -495,7 +500,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
             </View>
           ) : (
             <Text style={[styles.confirmButtonText, !isFormValido && styles.confirmButtonTextDisabled]}>
-              ✓ {isRenegociacao ? 'CONFIRMAR RENEGOCIAÇÃO' : 'CONFIRMAR VENDA'}
+              ✓ {isRenegociacao ? t.confirmarRenegociacao : t.confirmarVenda}
             </Text>
           )}
         </TouchableOpacity>

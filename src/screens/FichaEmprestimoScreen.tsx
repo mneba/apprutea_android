@@ -19,7 +19,7 @@
 // conferência prontos. Esta tela renderiza.
 
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   LayoutAnimation,
   Modal,
@@ -265,6 +265,23 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
 
   useEffect(() => { carregar(); }, [carregar]);
 
+  // ⭐ Recarregar ao ganhar foco.
+  //
+  // Nasceu para o "+", que saiu em 12/11/2026, e FICA: esta tela é empilhada
+  // sobre as abas e sobre o ParcelasModal, então o dinheiro pode ter mudado
+  // enquanto ela estava atrás. Ficha de dinheiro mostrando estado velho é o
+  // formato de erro que este projeto já pagou.
+  //
+  // A primeira vez é pulada porque o efeito acima já carregou.
+  const primeiroFoco = useRef(true);
+  useEffect(() => {
+    const off = navigation.addListener('focus', () => {
+      if (primeiroFoco.current) { primeiroFoco.current = false; return; }
+      carregar();
+    });
+    return off;
+  }, [navigation, carregar]);
+
   const nomeCliente = ficha?.cliente?.nome || '';
   const conf = ficha?.conferencia;
   const tudoConfere = !!conf && conf.caixa_confere && conf.credito_confere;
@@ -334,6 +351,21 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
   const parcelasAbertas = Number(ficha?.totais?.parcelas_abertas || 0);
   const parcelasTotal = Number(ficha?.totais?.parcelas_total || 0);
 
+  // ⚠ O "+" DO CABEÇALHO SAIU em 12/11/2026, no mesmo dia em que entrou.
+  //
+  // A porta das operações — renegociar, empréstimo novo, adicional — é a
+  // aba Empréstimos do `ClienteDetalhesModal`. Esta tela é de UM
+  // empréstimo, e as três são decisões do CLIENTE: o adicional depende da
+  // carteira inteira, não desta conta. Decisão do Mauricio: "não faz
+  // sentido" aqui.
+  //
+  // Com isso, as quatro chaves que `fn_ficha_emprestimo` passou a devolver
+  // em sql/2026-11-12_ficha_dia_operacional.sql — `dia_operacional`,
+  // `liquidacao_aberta_id`, `tem_atraso`, `cliente_tem_atraso` — ficam SEM
+  // USO. Continuam na função e na interface; o modal deriva as suas
+  // sozinho, porque está DENTRO do `LiquidacaoProvider` e conhece a data
+  // operacional, que é exatamente o que esta tela não tem.
+
   /** "Pago (23 de 24 parcelas)" — e sem o "de 24" quando não falta nenhuma. */
   const rotPagas = (rot: string) => {
     if (!parcelasTotal) return rot;
@@ -367,6 +399,8 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
           <Text style={S.headerTitulo}>{t.titulo}</Text>
           {!!nomeCliente && <Text style={S.headerSub} numberOfLines={1}>{nomeCliente}</Text>}
         </View>
+        {/* Espaçador que equilibra o botão de voltar, para o título ficar
+            centrado. Já era isto antes do "+" e voltou a ser. */}
         <View style={S.btVoltar} />
       </View>
 
@@ -914,6 +948,12 @@ const S = StyleSheet.create({
     backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#F3F4F6',
   },
   selLinhaAtual: { backgroundColor: '#EEF2FF', borderColor: '#C7D2FE' },
+
+  // Opções do "+". `flexShrink: 1` no texto, que é quem CEDE largura: no RN o
+  // filho de linha nasce com `flexShrink: 0` — o inverso da web —, e o que
+  // excede a borda o Android corta em silêncio. Aqui são rótulos traduzidos,
+  // então o pior caso é uma palavra cortada; mesmo assim a linha cede, porque
+  // fonte do sistema em 1,3x estoura qualquer um deles.
 
   eloPonto: { width: 8, height: 8, borderRadius: 4 },
   eloTx: { fontSize: 13, fontWeight: '700', color: '#111827' },

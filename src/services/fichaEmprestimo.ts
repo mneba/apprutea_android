@@ -113,6 +113,27 @@ export interface Ficha {
   parcelas: any[];
   cadeia: EloCadeia[];
   conferencia: ConferenciaFicha;
+
+  // ⭐ A régua do tempo, vinda do BANCO (sql/2026-11-12_ficha_dia_operacional.sql).
+  //
+  // A tela NÃO recalcula isto. `FichaEmprestimoScreen` está fora do
+  // `LiquidacaoProvider` — ele envolve só `MainTabs`, e a Ficha é irmã dela no
+  // Stack —, então não conhece a data operacional. E
+  // `emprestimo_parcelas.status` não serve: o gatilho o grava contra
+  // `CURRENT_DATE`, que é UTC, e é UM valor só para o vendedor que opera 25/08
+  // e para o admin que olha hoje.
+  //
+  // `dia_operacional` é a liquidação ABERTA da rota; sem dia aberto, a data do
+  // servidor no fuso da empresa (`fn_data_hoje_rota`).
+  dia_operacional: string;
+  // Nulo quando não há dia aberto. É o que permite a tela não oferecer
+  // operação que o `useNovaVendaSubmit` recusaria no fim do formulário.
+  liquidacao_aberta_id: string | null;
+  // Deste empréstimo.
+  tem_atraso: boolean;
+  // De qualquer empréstimo ATIVO/VENCIDO do cliente. É esta — e não a de
+  // cima — a régua do empréstimo ADICIONAL, que é operação do CLIENTE.
+  cliente_tem_atraso: boolean;
 }
 
 export async function buscarFicha(emprestimoId: string): Promise<Ficha> {

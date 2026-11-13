@@ -190,6 +190,13 @@ export function useNovaVendaSubmit(ctx: SubmitContext) {
           p_iniciar_proximo_mes: freqParams.iniciar_proximo_mes,
           p_latitude: latitude, p_longitude: longitude,
           p_microseguro_valor: fv.microValor > 0 ? fv.microValor : null,
+          // ⚠ SEMPRE false no app. A via que CANCELA o emprestimo atual saiu
+          //    daqui em 12/11/2026: ela servia para consertar emprestimo
+          //    lancado errado, e conserto e operacao de ADMIN, no web -- o
+          //    vendedor nao alcanca um emprestimo de dias atras por causa da
+          //    regra de dias retroativos. O parametro continua na funcao,
+          //    esperando o processo de recriacao do web.
+          p_substituir: false,
         }));
       } else if (ctx.clienteExistente?.id || ctx.clienteEncontradoId) {
         const clienteId = ctx.clienteExistente?.id || ctx.clienteEncontradoId;
@@ -227,6 +234,11 @@ export function useNovaVendaSubmit(ctx: SubmitContext) {
             p_dia_mes_cobranca: freqParams.dia_mes,
             p_dias_mes_cobranca: freqParams.dias_mes,
             p_iniciar_proximo_mes: freqParams.iniciar_proximo_mes,
+            // ⚠ SEMPRE false aqui, de proposito: este caminho e a
+            //    renegociacao detectada pelo DOCUMENTO, onde ninguem
+            //    perguntou nada ao vendedor. A via NOVA exige escolha
+            //    explicita, e a escolha vive no ClienteDetalhesModal.
+            p_substituir: false,
           }));
         } else if (isAdicional) {
           console.log('➕ Novo empréstimo adicional - fn_nova_venda_adicional para:', fv.nome);

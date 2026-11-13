@@ -70,20 +70,27 @@ interface Parcela {
   estornos?: { valor: number; data: string; motivo: string | null; por: string | null }[];
 }
 
-type Aba = 'pessoais' | 'emprestimo' | 'historico' | 'documentos';
+type Aba = 'pessoais' | 'emprestimo' | 'documentos';
 
-// Empréstimo e Histórico saem daqui (setembro/2026): a Ficha do Empréstimo
-// mostra a mesma coisa e mais — ordena por tempo, agrupa por operação e
-// confere as contas. Este modal volta a ser o que o nome diz: o cadastro do
-// cliente. Em avaliação com o Julio; por isso a lista é constante e o
-// renderEmprestimo/renderHistorico continuam no arquivo.
-const ABAS_VISIVEIS: Aba[] = ['pessoais', 'documentos'];
+// ⭐ A aba Empréstimos VOLTOU em 12/11/2026, e é a porta das operações.
+//
+// Ela saiu em setembro/2026 porque a Ficha do Empréstimo mostrava o mesmo e
+// mais. O efeito colateral só apareceu agora: com ela fora, o único caminho
+// vivo para renegociar era a busca por documento, que EXIGE atraso — então
+// cliente em dia autorizado não tinha por onde. A Ficha é por EMPRÉSTIMO; a
+// renegociação e o empréstimo adicional são decisões do CLIENTE, e é aqui que
+// o cliente inteiro está à vista.
+//
+// A aba `historico` DEIXOU DE EXISTIR: os encerrados foram para o fim desta
+// mesma aba (decisão do Mauricio, 12/11/2026 — "todos, atuais e antigos"), em
+// lugar de uma quarta aba. `renderHistorico` foi apagado, não desligado.
+const ABAS_VISIVEIS: Aba[] = ['pessoais', 'emprestimo', 'documentos'];
 type Language = 'pt-BR' | 'es';
 
 // ==================== TEXTOS ====================
 const T = {
   'pt-BR': {
-    pessoais: 'Pessoais', emprestimo: 'Empréstimo', historico: 'Histórico', documentos: 'Docs',
+    pessoais: 'Pessoais', emprestimo: 'Empréstimos', historico: 'Histórico', documentos: 'Docs',
     nome: 'Nome', telefone: 'Telefone', documento: 'Documento', endereco: 'Endereço',
     codigo: 'Código', status: 'Status',
     valorPrincipal: 'Principal', valorTotal: 'Total', valorPago: 'Pago', saldo: 'Saldo',
@@ -97,9 +104,25 @@ const T = {
     restantes: 'restantes',
     novoEmprestimo: 'Novo empréstimo',
     renegociar: 'Renegociar',
+    encerrados: 'Encerrados',
+    naoPago: 'Não pago',
+    qualEmp: 'Qual empréstimo?',
+    qualEmpCorpo: 'O cliente tem mais de um empréstimo ativo. Escolha qual.',
+    operacoes: 'Operações',
+    opTitulo: 'O que fazer com este cliente',
+    opReneg: 'Renegociar',
+    opRenegSub: 'O atual fica renegociado',
+    opNovo: 'Empréstimo novo',
+    opNovoSub: 'Cancela o atual e cria outro, de valor livre',
+    opAdicional: 'Empréstimo adicional',
+    opAdicionalSub: 'Paralelo — não cancela o atual',
+    opRenovar: 'Novo empréstimo',
+    opRenovarSub: 'O cliente não tem conta em aberto',
+    opSolicitar: 'Solicitar autorização',
+    opSolicitarSub: 'Para um empréstimo adicional',
   },
   'es': {
-    pessoais: 'Personales', emprestimo: 'Préstamo', historico: 'Historial', documentos: 'Docs',
+    pessoais: 'Personales', emprestimo: 'Préstamos', historico: 'Historial', documentos: 'Docs',
     nome: 'Nombre', telefone: 'Teléfono', documento: 'Documento', endereco: 'Dirección',
     codigo: 'Código', status: 'Estado',
     valorPrincipal: 'Principal', valorTotal: 'Total', valorPago: 'Pagado', saldo: 'Saldo',
@@ -113,6 +136,22 @@ const T = {
     restantes: 'restantes',
     novoEmprestimo: 'Nuevo préstamo',
     renegociar: 'Renegociar',
+    encerrados: 'Cerrados',
+    naoPago: 'No pagado',
+    qualEmp: '¿Cuál préstamo?',
+    qualEmpCorpo: 'El cliente tiene más de un préstamo activo. Elija cuál.',
+    operacoes: 'Operaciones',
+    opTitulo: 'Qué hacer con este cliente',
+    opReneg: 'Renegociar',
+    opRenegSub: 'El actual queda renegociado',
+    opNovo: 'Préstamo nuevo',
+    opNovoSub: 'Cancela el actual y crea otro, de valor libre',
+    opAdicional: 'Préstamo adicional',
+    opAdicionalSub: 'Paralelo — no cancela el actual',
+    opRenovar: 'Nuevo préstamo',
+    opRenovarSub: 'El cliente no tiene cuenta abierta',
+    opSolicitar: 'Solicitar autorización',
+    opSolicitarSub: 'Para un préstamo adicional',
   },
 };
 
@@ -184,6 +223,10 @@ interface Props {
   /** `statusSolic` decide se o formulário abre travado: APROVADO trava no valor liberado, PENDENTE deixa editar. Este modal passa os dois desde 27/10/2026 — antes mandava `'PENDENTE'` fixo. */
   onAlterarSolicitacaoRenovacao?: (cliente: ClienteInfo, solicitacaoId: string, emprestimoQuitadoId: string, valorSolicitado: number, statusSolic: string) => void;
   onCancelarSolicitacaoRenovacao?: (solicitacaoId: string) => void;
+  /** Renegociacao, uma via so: o atual fica RENEGOCIADO. A via que CANCELAVA
+   *  o atual saiu do app em 12/11/2026 -- conserto de emprestimo e operacao de
+   *  ADMIN, no web, porque o vendedor nao alcanca um emprestimo de dias atras
+   *  (a liquidacao e a regua do tempo). */
   onRenegociar?: (cliente: ClienteInfo, emprestimo: Emprestimo) => void;
 }
 
@@ -197,6 +240,8 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
   const [empAtivos, setEmpAtivos] = useState<Emprestimo[]>([]);
   const [empHistorico, setEmpHistorico] = useState<Emprestimo[]>([]);
   const [expandedEmp, setExpandedEmp] = useState<string | null>(null);
+  /** O popup das operações da aba Empréstimos. */
+  const [opsAberto, setOpsAberto] = useState(false);
   const [parcelas, setParcelas] = useState<Map<string, Parcela[]>>(new Map());
   const [loadingParcelas, setLoadingParcelas] = useState<string | null>(null);
   const [clienteCompleto, setClienteCompleto] = useState<any>(null);
@@ -955,6 +1000,143 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       </ScrollView>
     );
   };
+  // ==========================================================================
+  // A PORTA DAS OPERAÇÕES — UM gatilho, UM popup
+  // ==========================================================================
+  //
+  // ⚠ Esta porta mudou de lugar TRÊS vezes em 12/11/2026, e o formato foi a
+  // última correção: *"na renovação, da forma como foi apresentada, não ficou
+  // bom — deve ser popup com as opções simplesmente"* (Mauricio). Antes eram
+  // botões empilhados no topo da aba, cada um com a sua cor e o seu tamanho:
+  // o vendedor tinha de ler a tela inteira para saber o que podia fazer.
+  //
+  // Agora é um gatilho só. **Não devolva botão de operação para o corpo da
+  // aba, nem replique estas opções em outra tela** — a Ficha do Empréstimo
+  // teve um "+" com elas por algumas horas e ele saiu: a Ficha é de UM
+  // empréstimo, e o adicional é decisão do CLIENTE.
+  //
+  // ⚠ `dispararRenegociacao` FOI APAGADO, e com ele a pergunta entre as duas
+  // vias: a via que CANCELA o atual saiu do app no mesmo dia (ver o comentário
+  // de `opcoesOps`). Aqui a renegociação é uma só.
+  //
+  // A régua de atraso é `_temAtraso` do próprio empréstimo, que
+  // `carregarDados` calcula contra a DATA OPERACIONAL. Não `status ===
+  // 'VENCIDO'` nem `parcelas_vencidas` da view: os dois derivam do
+  // CURRENT_DATE do gatilho e, numa liquidação retroativa, põem o empréstimo
+  // em atraso sem nenhuma parcela vencida no dia que se opera.
+  //
+  // ⚠ "Empréstimo adicional" é PARALELO (`fn_nova_venda_adicional`): não
+  // cancela nem substitui nada. O rótulo diz isso porque o menu tem duas
+  // operações que criam empréstimo para o mesmo cliente.
+  const temAlgumAtraso = empAtivos.some(e => (e as any)._temAtraso === true);
+  const clienteEmDia = !temAlgumAtraso;
+  const temEmprestimoAtivo = empAtivos.length > 0;
+
+  // Os `permite_*` são boolean na coluna, mas o jsonb já entregou string em
+  // outros caminhos deste app — por isso as duas formas.
+  const permiteAdicional = clienteCompleto?.permite_emprestimo_adicional === true
+    || clienteCompleto?.permite_emprestimo_adicional === 'true';
+  const permiteReneg = clienteCompleto?.permite_renegociacao === true
+    || clienteCompleto?.permite_renegociacao === 'true';
+
+  // Novo empréstimo: sem conta em aberto é renovação livre; com conta em
+  // aberto exige estar em dia E autorização de adicional.
+  const podeMostrarNovoEmprestimo = clienteEmDia && (!temEmprestimoAtivo || permiteAdicional);
+  const temPendenteRenovacao = !!(solicitacoesPendentes.renovacao_excede
+    && solicitacoesPendentes.renovacao_solic_id);
+
+  // ⭐ QUAL empréstimo a operação mira.
+  //
+  // O menu é do CLIENTE e a renegociação é de UM empréstimo, então o alvo é
+  // escolhido, nunca o primeiro da lista:
+  //
+  //  1. o empréstimo que o admin AUTORIZOU (`aprovacao_emprestimo_id`), se
+  //     estiver entre os candidatos. É o mais específico que existe.
+  //  2. o único candidato. Medido em 12/11/2026: 2.801 dos 2.811 clientes com
+  //     empréstimo ativo têm exatamente um, então este é o caso real.
+  //  3. nenhum dos dois → PERGUNTA. São 10 clientes na base (9 com dois
+  //     ativos, 1 com três ou mais).
+  //
+  // ⚠ Os candidatos são os ativos COM ATRASO, não todos: a função recusa
+  // empréstimo em dia. Com dois ativos, o vendedor poderia escolher justamente
+  // o que está em dia e ouvir a recusa só no fim do formulário.
+  const comEmprestimo = (cb: (e: Emprestimo) => void) => {
+    const cands = empAtivos.filter(e => (e as any)._temAtraso === true);
+    if (cands.length === 0) return;
+    const aprovado = solicitacoesPendentes.aprovacao_emprestimo_id
+      ? cands.find(e => e.id === solicitacoesPendentes.aprovacao_emprestimo_id) || null
+      : null;
+    const alvo = aprovado || (cands.length === 1 ? cands[0] : null);
+    if (alvo) { cb(alvo); return; }
+
+    const escolhas = cands.map(e => ({
+      text: `${fmt(e.valor_total)} · ${fmtData(e.data_emprestimo)}`,
+      onPress: () => cb(e),
+    }));
+    if (Platform.OS === 'web') {
+      // `window.confirm` só tem duas saídas; com 2 candidatos resolve e com 3+
+      // pergunta em cadeia. Cancelar em todas = não fazer nada.
+      for (const e of escolhas) {
+        if (window.confirm(`${t.qualEmpCorpo}\n\n${e.text}?`)) { e.onPress(); return; }
+      }
+      return;
+    }
+    Alert.alert(t.qualEmp, t.qualEmpCorpo, [
+      ...escolhas,
+      { text: lang === 'es' ? 'Cerrar' : 'Fechar', style: 'cancel' as const },
+    ]);
+  };
+
+  type OpcaoOps = {
+    chave: string; icone: any; cor: string;
+    titulo: string; sub: string; onPress: () => void;
+  };
+
+  const opcoesOps: OpcaoOps[] = [];
+  // ⚠ RENEGOCIAÇÃO EXIGE ATRASO, e a exigência voltou em 12/11/2026.
+  //
+  // Ela tinha caído naquele mesmo dia para servir de conserto de empréstimo
+  // lançado errado. O Mauricio desfez quando viu a consequência: **o conserto
+  // não cabe no app**. Se o empréstimo é de três dias atrás, o vendedor não o
+  // alcança — a liquidação é a régua do tempo, e ele só opera os dias que pode
+  // abrir. Conserto é operação de ADMIN, e o lugar dela é o web.
+  //
+  // Então aqui ficou só a renegociação de verdade: parâmetro do admin MAIS
+  // empréstimo em atraso, que é o que `fn_renegociar_emprestimo` exige no
+  // passo 5. Oferecer sem atraso faria o vendedor preencher o formulário
+  // inteiro para ouvir "Nenhuma parcela estava vencida em…" no fim.
+  const ativosComAtraso = empAtivos.filter(e => (e as any)._temAtraso === true);
+  if (cliente && onRenegociar && permiteReneg && ativosComAtraso.length > 0) {
+    opcoesOps.push({
+      chave: 'reneg', icone: 'refresh-outline', cor: '#C2410C',
+      titulo: t.opReneg, sub: t.opRenegSub,
+      onPress: () => comEmprestimo(e => {
+        setOpsAberto(false);
+        onClose();
+        onRenegociar(cliente, e);
+      }),
+    });
+  }
+  if (cliente && onNovoEmprestimo && podeMostrarNovoEmprestimo && !temPendenteRenovacao) {
+    opcoesOps.push({
+      chave: 'novo', icone: 'layers-outline', cor: '#2563EB',
+      titulo: temEmprestimoAtivo ? t.opAdicional : t.opRenovar,
+      sub: temEmprestimoAtivo ? t.opAdicionalSub : t.opRenovarSub,
+      onPress: () => { setOpsAberto(false); onClose(); onNovoEmprestimo(cliente); },
+    });
+  }
+  if (clienteEmDia && temEmprestimoAtivo && !permiteAdicional && !solicitacoesPendentes.adicional) {
+    opcoesOps.push({
+      chave: 'solicitar', icone: 'lock-closed-outline', cor: '#6B7280',
+      titulo: t.opSolicitar, sub: t.opSolicitarSub,
+      onPress: () => {
+        setOpsAberto(false);
+        setSolicitando({ tipo: 'EMPRESTIMO_ADICIONAL' });
+        setMotivoSolicitacao('');
+      },
+    });
+  }
+
   const renderEmprestimoCard = (emp: Emprestimo, somenteLeitura: boolean) => {
     const isExp = expandedEmp === emp.id;
     const cor = corStatus[emp.status] || corStatus.PENDENTE;
@@ -1063,22 +1245,17 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
             && !ehEmpAprovado;
           
           // Cliente autorizado E este é o empréstimo da autorização → renegociar
-          if (permiteReneg && ehEmpAprovado) {
-            return (
-              <TouchableOpacity 
-                style={S.btnRenegociar} 
-                onPress={() => {
-                  onClose();
-                  onRenegociar(cliente, emp);
-                }}
-                activeOpacity={0.7}
-              >
-                <Text style={S.btnRenegociarIcon}>↻</Text>
-                <Text style={S.btnRenegociarText}>{t.renegociar}</Text>
-              </TouchableOpacity>
-            );
-          }
-          
+          // ⭐ AUTORIZADO não desenha botão AQUI desde 12/11/2026 — a ação
+          // subiu para a barra do topo da aba, que é a única porta. Duas
+          // portas para a mesma operação é o formato de erro que este projeto
+          // já pagou várias vezes; e a renegociação é decisão do CLIENTE, não
+          // de um card no meio de uma lista.
+          //
+          // O que SOBRA aqui é a SOLICITAÇÃO de autorização, que continua
+          // sendo por empréstimo porque o admin aprova um empréstimo
+          // específico (`aprovacao_emprestimo_id`).
+          if (permiteReneg && ehEmpAprovado) return null;
+
           // Cliente autorizado mas para OUTRO empréstimo → este precisa solicitar
           // (o admin liberou um específico, este não é o liberado)
           if (permiteReneg && temAprovadoOutroEmp) {
@@ -1101,24 +1278,10 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
             );
           }
           
-          // Cliente autorizado proativamente (sem solicitação prévia) → todos cards podem renegociar
-          // Caso raro: admin aprovou sem solicitação, então não há aprovacao_emprestimo_id
-          if (permiteReneg && !solicitacoesPendentes.aprovacao_emprestimo_id) {
-            return (
-              <TouchableOpacity 
-                style={S.btnRenegociar} 
-                onPress={() => {
-                  onClose();
-                  onRenegociar(cliente, emp);
-                }}
-                activeOpacity={0.7}
-              >
-                <Text style={S.btnRenegociarIcon}>↻</Text>
-                <Text style={S.btnRenegociarText}>{t.renegociar}</Text>
-              </TouchableOpacity>
-            );
-          }
-          
+          // Autorizado em aberto (o admin liberou o cliente sem solicitação
+          // prévia): também sem botão aqui — barra do topo.
+          if (permiteReneg && !solicitacoesPendentes.aprovacao_emprestimo_id) return null;
+
           // Este é o empréstimo da solicitação pendente
           if (ehEmpDaSolicitacao) {
             return (
@@ -1212,255 +1375,45 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
             ) : parcs.length > 0 ? (
               <View style={S.parcelasBox}>
                 <Text style={S.parcelasTitle}>{t.parcelas} ({parcs.length})</Text>
+                {/* ⭐ LINHA SIMPLES, de propósito (Mauricio, 12/11/2026):
+                    número, vencimento, valor e UM estado — pago ou não pago.
+
+                    A versão anterior tinha badge de pontualidade, forma de
+                    pagamento, crédito gerado, crédito usado, estornos e dias
+                    de atraso: ~180 linhas por parcela. Tudo isso continua na
+                    FICHA do empréstimo, que é a tela de conferir dinheiro.
+                    Aqui a pergunta é outra — "o que este cliente tem?" — e o
+                    detalhe atrapalhava a leitura de cima para baixo.
+
+                    O valor é o DA PARCELA, sempre. Mostrar o valor pago na
+                    linha paga fazia a coluna misturar duas grandezas, e a
+                    soma visual deixava de fechar com o total do empréstimo. */}
                 {parcs.map(p => {
                   const isPago = p.status === 'PAGO';
                   const isParcial = p.status === 'PARCIAL';
-                  // ⭐ VENCIDA é derivado da DATA OPERACIONAL, não do status.
-                  //
-                  // `emprestimo_parcelas.status` é gravado pelo trigger
-                  // atualizar_saldo_parcela comparando com CURRENT_DATE — o
-                  // relógio real. Quem opera uma liquidação retroativa via
-                  // parcelas marcadas VENCIDO que, naquele dia, nem tinham
-                  // vencido ainda: cliente cadastrada em 22/08 com parcelas de
-                  // 24 a 29/08 aparecia com "5 vencidas" na liquidação de 25/08.
-                  //
-                  // O status persistido não pode servir aos dois — o vendedor
-                  // operando 25/08 e o admin olhando hoje precisam de respostas
-                  // diferentes sobre a mesma linha. Quem diferencia é a tela.
-                  //
-                  // `<` e não `<=`: parcela que vence no próprio dia operacional
-                  // ainda está no prazo.
-                  const isVencida = !isPago && !isParcial && !!p.data_vencimento
+                  // ⚠ VENCIDA sai da DATA OPERACIONAL, nunca do status: o
+                  // gatilho grava `emprestimo_parcelas.status` contra
+                  // CURRENT_DATE, que é UTC, e é UM valor só para o vendedor
+                  // que opera 25/08 e para quem olha hoje. `<` e não `<=`:
+                  // parcela que vence no próprio dia operacional está no prazo.
+                  const isVencida = !isPago && !!p.data_vencimento
                     && p.data_vencimento.substring(0, 10) < dataRefAtraso;
-                  const isPendente = !isPago && !isVencida && !isParcial;
-                  const corP = corStatus[isPago ? 'PAGO' : isVencida ? 'VENCIDO' : isParcial ? 'PARCIAL' : 'PENDENTE'];
-                  // ⭐ Dinheiro real recebido = valor_pago da parcela MENOS o
-                  // crédito usado. Assim, somar os "Pago" das parcelas bate com
-                  // o dinheiro que o vendedor efetivamente recebeu (mesma regra
-                  // do ParcelasModal). O crédito é mostrado à parte, não somado.
-                  const creditoUsadoP = (p as any).valor_credito_usado_total ?? 0;
-                  const valorPagoReal = (p.valor_pago ?? 0) - creditoUsadoP;
-                  const temCredito = (p.valor_credito_gerado ?? 0) > 0;
-
-                  // ⭐ Pontualidade do pagamento (PAGO ou PARCIAL)
-                  //
-                  // NÃO usar p.dias_atraso do banco aqui: essa coluna é
-                  // persistida como (hoje − vencimento) e NÃO reflete a data
-                  // real do pagamento. Numa parcela PAGA ela devolve lixo —
-                  // marcava "18 dias de atraso" para quem pagou ADIANTADO,
-                  // porque só media a distância entre hoje e o vencimento.
-                  //
-                  // Para parcela paga/parcial, a pontualidade correta compara a
-                  // DATA DA LIQUIDAÇÃO (data de negócio onde foi paga) com o
-                  // vencimento — NÃO a data_pagamento (quando o registro foi
-                  // criado). Ex.: liquidação 04/08, venc 04/08, registro 05/08
-                  // → EM DIA. Fallback para data_pagamento se não houver data
-                  // de liquidação.
-                  //   diasDiferenca > 0  → pagou com atraso
-                  //   diasDiferenca = 0  → pagou no dia
-                  //   diasDiferenca < 0  → pagou adiantado (quitouAntecipado)
-                  let diasDiferenca: number | null = null;
-                  let quitouAntecipado = false;
-                  const refPontualidade = (p as any).liquidacao_data || p.data_pagamento;
-                  if ((isPago || isParcial) && refPontualidade && p.data_vencimento) {
-                    diasDiferenca = diasCobrancaEntre(p.data_vencimento, refPontualidade, configCobranca);
-                    if (diasDiferenca < 0) quitouAntecipado = true;
-                  }
-                  
-                  // ⭐ Atraso corrente de parcela não paga, em dias de cobrança.
-                  // Serve às duas exibições: o aviso "ao vivo" da PENDENTE
-                  // vencida e o atraso da VENCIDA — que antes lia a coluna
-                  // `dias_atraso` do banco, persistida como (hoje − vencimento)
-                  // sem descontar domingo nem feriado.
-                  const atrasoHoje = (!isPago && !isParcial && p.data_vencimento)
-                    ? calcAtraso(p.data_vencimento, dataRefAtraso, configCobranca)
-                    : 0;
-                  const atrasoAoVivo: number | null =
-                    isPendente && atrasoHoje > 0 ? atrasoHoje : null;
-
-                  const fmtTs = (ts: string) => {
-                    try {
-                      const s = ts.replace(' ', 'T').replace(/\+00(:00)?$/, 'Z');
-                      const dt = new Date(s.endsWith('Z') || s.includes('+') ? s : s + 'Z');
-                      if (isNaN(dt.getTime())) return '—';
-                      return dataAno2Hora(dt);
-                    } catch { return '—'; }
-                  };
-
+                  // São DUAS palavras só — "Pago" e "Não pago" —, e a cor
+                  // carrega o resto: vermelho para vencida, âmbar para parcial,
+                  // cinza para quem ainda está no prazo. O cobrador não perde o
+                  // sinal de atraso e não precisa ler nada a mais.
+                  const estiloEstado = isPago ? S.pEstadoPago
+                    : isVencida ? S.pEstadoVencido
+                    : isParcial ? S.pEstadoParcial
+                    : S.pEstadoAberto;
                   return (
-                    <View key={p.id} style={{
-                      paddingVertical: 10,
-                      paddingHorizontal: 12,
-                      marginBottom: 6,
-                      backgroundColor: isPago ? '#F0FDF4' : isVencida ? '#FEF2F2' : (atrasoAoVivo ? '#FEF2F2' : '#FAFAFA'),
-                      borderRadius: 8,
-                      borderLeftWidth: 4,
-                      borderLeftColor: isPago && diasDiferenca !== null && diasDiferenca === 0 ? '#10B981'
-                        : isPago && diasDiferenca !== null && diasDiferenca > 0 ? '#F59E0B'
-                        : isPago && quitouAntecipado ? '#10B981'
-                        : isVencida || atrasoAoVivo ? '#EF4444'
-                        : isParcial ? '#F59E0B'
-                        : '#E5E7EB',
-                      borderTopWidth: 1,
-                      borderRightWidth: 1,
-                      borderBottomWidth: 1,
-                      borderTopColor: isPago ? '#BBF7D0' : isVencida || atrasoAoVivo ? '#FECACA' : '#E5E7EB',
-                      borderRightColor: isPago ? '#BBF7D0' : isVencida || atrasoAoVivo ? '#FECACA' : '#E5E7EB',
-                      borderBottomColor: isPago ? '#BBF7D0' : isVencida || atrasoAoVivo ? '#FECACA' : '#E5E7EB',
-                    }}>
-                      {/* Linha 1: número + vencimento + valor + status */}
-                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#374151', minWidth: 24 }}>#{p.numero_parcela}</Text>
-                          <Text style={{ fontSize: 11, color: '#9CA3AF' }}>{fmtData(p.data_vencimento)}</Text>
-                        </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          <Text style={{
-                            fontSize: 15, fontWeight: '700',
-                            color: isPago ? '#10B981' : isVencida ? '#EF4444' : '#374151'
-                          }}>
-                            {(isPago || isParcial || (isVencida && valorPagoReal > 0)) ? fmt(valorPagoReal) : fmt(p.valor_parcela)}
-                          </Text>
-                          <View style={{ backgroundColor: corP.bg, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                            <Text style={{ fontSize: 10, fontWeight: '600', color: corP.text }}>
-                              {isPago ? t.pago : isVencida ? t.vencido : isParcial ? t.parcial : t.pendente}
-                            </Text>
-                          </View>
-                        </View>
-                      </View>
-                      
-                      {/* ⭐ Badge de pontualidade (parcela PAGA, PARCIAL ou VENCIDA com pagamento) */}
-                      {(isPago || isParcial || (isVencida && valorPagoReal > 0)) && diasDiferenca !== null && (
-                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
-                          {diasDiferenca === 0 ? (
-                            <View style={{ backgroundColor: '#D1FAE5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                              <Ionicons name="checkmark-circle" size={10} color="#065F46" /><Text style={{ fontSize: 10, fontWeight: '600', color: '#065F46' }}>
-                                {lang === 'es' ? 'En el día' : 'No dia'}
-                              </Text>
-                            </View>
-                          ) : diasDiferenca > 0 ? (
-                            // Atraso REAL: pagou depois do vencimento
-                            <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                              <Ionicons name="alert-circle" size={10} color="#991B1B" /><Text style={{ fontSize: 10, fontWeight: '600', color: '#991B1B' }}>
-                                {diasDiferenca} {lang === 'es' ? (diasDiferenca === 1 ? 'día de atraso' : 'días de atraso') : (diasDiferenca === 1 ? 'dia de atraso' : 'dias de atraso')}
-                              </Text>
-                            </View>
-                          ) : (
-                            // diasDiferenca < 0 → pagou adiantado. Badge VERDE,
-                            // nunca vermelho. Antes esta parcela exibia
-                            // "N dias de atraso" indevidamente.
-                            <View style={{ backgroundColor: '#D1FAE5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                              <Ionicons name="flash" size={10} color="#065F46" /><Text style={{ fontSize: 10, fontWeight: '600', color: '#065F46' }}>
-                                {Math.abs(diasDiferenca)} {lang === 'es'
-                                  ? (Math.abs(diasDiferenca) === 1 ? 'día antes' : 'días antes')
-                                  : (Math.abs(diasDiferenca) === 1 ? 'dia antes' : 'dias antes')}
-                              </Text>
-                            </View>
-                          )}
-                        </View>
-                      )}
-                      
-                      {/* ⭐ Badge de atraso ao vivo (parcela PENDENTE com data passada) */}
-                      {atrasoAoVivo !== null && (
-                        <View style={{ marginTop: 6 }}>
-                          <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, alignSelf: 'flex-start' }}>
-                              <Ionicons name="alert-circle" size={10} color="#991B1B" /><Text style={{ fontSize: 10, fontWeight: '600', color: '#991B1B' }}>
-                              {atrasoAoVivo} {lang === 'es' ? (atrasoAoVivo === 1 ? 'día atrasada' : 'días atrasada') : (atrasoAoVivo === 1 ? 'dia atrasada' : 'dias atrasada')}
-                            </Text>
-                          </View>
-                        </View>
-                      )}
-
-                      {/* Linha 2 (pago/parcial/vencida com pagamento): detalhes do pagamento */}
-                      {(isPago || isParcial || (isVencida && valorPagoReal > 0)) && (
-                        <View style={{ marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: isPago ? '#D1FAE5' : '#FED7AA', flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                          {parseFloat(String(valorPagoReal)) !== p.valor_parcela && (
-                            <Text style={{ fontSize: 11, color: '#6B7280' }}>
-                              {lang === 'es' ? 'Cuota:' : 'Parcela:'} {fmt(p.valor_parcela)}
-                            </Text>
-                          )}
-                          {/* Saldo restante — PARCIAL ou VENCIDA com pagamento parcial */}
-                          {(isParcial || (isVencida && valorPagoReal > 0 && valorPagoReal < p.valor_parcela)) && (
-                            <Text style={{ fontSize: 11, color: '#D97706', fontWeight: '600' }}>
-                              {lang === 'es' ? 'Pendiente:' : 'Pendente:'} {fmt(p.valor_saldo ?? (p.valor_parcela - valorPagoReal))}
-                            </Text>
-                          )}
-                          {p.data_pagamento && (
-                            <Text style={{ fontSize: 11, color: '#6B7280' }}>
-                              {lang === 'es' ? 'Pago en:' : 'Pago em:'} {fmtTs(p.data_pagamento)}
-                            </Text>
-                          )}
-                          {p.forma_pagamento && (
-                            <Text style={{ fontSize: 11, color: '#6B7280' }}>
-                              {/* Mapeamento explícito das formas reais. Antes era
-                                  um ternário binário (DINHEIRO senão "Transferência"),
-                                  que rotulava pagamento por CREDITO como
-                                  "Transferência" — foi o caso da parcela paga por
-                                  auto-quitação com crédito. */}
-                              {p.forma_pagamento === 'DINHEIRO'
-                                ? (lang === 'es' ? 'Efectivo' : 'Dinheiro')
-                                : p.forma_pagamento === 'CREDITO'
-                                ? (lang === 'es' ? 'Pagado con crédito' : 'Pago com crédito')
-                                : (lang === 'es' ? 'Transferencia' : 'Transferência')}
-                            </Text>
-                          )}
-                          {temCredito && (
-                            <Text style={{ fontSize: 11, color: '#2563EB', fontWeight: '600' }}>
-                              +{fmt(p.valor_credito_gerado!)} {lang === 'es' ? 'crédito generado' : 'crédito gerado'}
-                            </Text>
-                          )}
-                          {((p as any).valor_credito_usado_total ?? 0) > 0 && (
-                            <Text style={{ fontSize: 11, color: '#2563EB', fontWeight: '600' }}>
-                              {lang === 'es' ? 'Crédito usado:' : 'Crédito usado:'} {fmt((p as any).valor_credito_usado_total)}
-                            </Text>
-                          )}
-                          {p.liquidacao_data && (
-                            <Text style={{ fontSize: 11, color: '#9CA3AF' }}>
-                              {lang === 'es' ? 'Liq.' : 'Liq.'} {fmtData(p.liquidacao_data)}
-                            </Text>
-                          )}
-                        </View>
-                      )}
-
-                      {/* Atraso da parcela VENCIDA, em dias de cobrança.
-                          NÃO usar p.dias_atraso: o banco persiste essa coluna
-                          como (hoje − vencimento), contando domingo e feriado. */}
-                      {isVencida && atrasoHoje > 0 && (
-                        <Text style={{ fontSize: 11, color: '#EF4444', marginTop: 4, fontWeight: '600' }}>
-                          ⚠ {atrasoHoje} {lang === 'es' ? (atrasoHoje === 1 ? 'día de atraso' : 'días de atraso') : (atrasoHoje === 1 ? 'dia de atraso' : 'dias de atraso')}
-                        </Text>
-                      )}
-
-                      {/* ⭐ Estornos desta parcela — inline, sempre visível.
-                          Mostra a história: pagou → estornou → (repagou).
-                          Motivo e responsável para o operador entender. */}
-                      {Array.isArray(p.estornos) && p.estornos.length > 0 && (
-                        <View style={{ marginTop: 6, gap: 4 }}>
-                          {p.estornos.map((est, ei) => (
-                            <View key={ei} style={{ backgroundColor: '#FEF2F2', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 5 }}>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                <Ionicons name="arrow-undo-outline" size={11} color="#B91C1C" />
-                                <Text style={{ fontSize: 11, fontWeight: '600', color: '#B91C1C' }}>
-                                  {lang === 'es' ? 'Estornado' : 'Estornado'} {fmt(est.valor)}
-                                </Text>
-                                <Text style={{ fontSize: 10, color: '#9CA3AF' }}>
-                                  {fmtTs(est.data)}
-                                </Text>
-                              </View>
-                              {est.motivo ? (
-                                <Text style={{ fontSize: 10, color: '#6B7280', fontStyle: 'italic', marginTop: 1 }}>
-                                  "{est.motivo}"
-                                </Text>
-                              ) : null}
-                              {est.por ? (
-                                <Text style={{ fontSize: 10, color: '#9CA3AF', marginTop: 1 }}>
-                                  {lang === 'es' ? 'Por:' : 'Por:'} {est.por}
-                                </Text>
-                              ) : null}
-                            </View>
-                          ))}
-                        </View>
-                      )}
+                    <View key={p.id} style={S.pLinha}>
+                      <Text style={S.pNum}>#{p.numero_parcela}</Text>
+                      <Text style={S.pVenc} numberOfLines={1}>{fmtData(p.data_vencimento)}</Text>
+                      <Text style={S.pValor}>{fmt(p.valor_parcela)}</Text>
+                      <Text style={[S.pEstado, estiloEstado]}>
+                        {isPago ? t.pago : t.naoPago}
+                      </Text>
                     </View>
                   );
                 })}
@@ -1472,28 +1425,32 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
     );
   };
   const renderEmprestimo = () => {
-    // ⭐ Cliente está em dia se nenhum empréstimo ativo tem parcela vencida.
-    //
-    // Só `_temAtraso`, que carregarDados calcula contra a data operacional.
-    // As duas outras condições que havia aqui — `parcelas_vencidas` da view e
-    // `status === 'VENCIDO'` — derivam do CURRENT_DATE do trigger, e bastava
-    // uma delas para o cliente aparecer em atraso numa liquidação retroativa
-    // mesmo sem nenhuma parcela vencida no dia que se está operando.
-    const temAlgumAtraso = empAtivos.some(e => (e as any)._temAtraso === true);
-    const clienteEmDia = !temAlgumAtraso;
-    const temEmprestimoAtivo = empAtivos.length > 0;
-    
-    // Permissões do cliente (vindas do banco via clienteCompleto)
-    const permiteAdicional = clienteCompleto?.permite_emprestimo_adicional === true 
-      || clienteCompleto?.permite_emprestimo_adicional === 'true';
-    
-    // ⭐ Botão "Novo empréstimo" aparece quando:
-    //   - Sem empréstimo ativo (renovação livre) OU
-    //   - Com empréstimo ativo em dia + cliente autorizado para adicional
-    const podeMostrarNovoEmprestimo = clienteEmDia && (!temEmprestimoAtivo || permiteAdicional);
+    // As derivações e `comEmprestimo` vivem no escopo do COMPONENTE, não
+    // aqui: o popup das operações é renderizado no `return` principal, e
+    // duas cópias das mesmas regras divergiriam.
+
+    // Encerrados (QUITADO, RENEGOCIADO, CANCELADO) entram NESTA aba,
+    // abaixo dos ativos — "todos, atuais e antigos", pedido do Mauricio em
+    // 12/11/2026. Antes eram uma aba separada, e ninguém ia nela.
+    const encerrados = empHistorico;
     
     return (
       <ScrollView style={S.abaContent} showsVerticalScrollIndicator={false}>
+        {/* ⭐ O GATILHO. Um botão, um popup — ver o bloco das operações no
+            escopo do componente. Sem nenhuma opção disponível ele não aparece,
+            em vez de abrir um menu vazio. */}
+        {opcoesOps.length > 0 && (
+          <TouchableOpacity
+            style={S.btnOperacoes}
+            onPress={() => setOpsAberto(true)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="add-circle" size={19} color="#fff" />
+            <Text style={S.btnOperacoesTx}>{t.operacoes}</Text>
+            <Ionicons name="chevron-down" size={15} color="rgba(255,255,255,0.9)" />
+          </TouchableOpacity>
+        )}
+
         {/* ⭐ Botão Novo Empréstimo (cliente-level) */}
         {podeMostrarNovoEmprestimo && cliente && onNovoEmprestimo && (
           solicitacoesPendentes.renovacao_excede && solicitacoesPendentes.renovacao_solic_id ? (
@@ -1570,79 +1527,59 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                   : (lang === 'es' ? 'Solicitud pendiente' : 'Solicitação pendente')}
               </Text>
             </TouchableOpacity>
-          ) : (
-            // Sem solicitação pendente — fluxo normal
-            <TouchableOpacity 
-              style={S.btnNovoEmprestimo} 
-              onPress={() => {
-                onClose();
-                onNovoEmprestimo(cliente);
-              }}
-              activeOpacity={0.7}
-            >
-              <Text style={S.btnNovoEmprestimoIcon}>➕</Text>
-              <Text style={S.btnNovoEmprestimoText}>{t.novoEmprestimo}</Text>
-            </TouchableOpacity>
-          )
+          ) : null
         )}
-        
-        {/* ⭐ Aviso quando precisa de autorização — agora é botão clicável */}
-        {clienteEmDia && temEmprestimoAtivo && !permiteAdicional && (
-          solicitacoesPendentes.adicional ? (
-            <View style={S.btnAguardando}>
-              <Ionicons name="time-outline" size={14} color="#92400E" />
-              <Text style={S.btnAguardandoText}>
-                {lang === 'es' ? 'Aguardando aprobación' : 'Aguardando aprovação'}
-              </Text>
-            </View>
-          ) : (
-            <TouchableOpacity
-              style={S.btnSolicitar}
-              onPress={() => {
-                setSolicitando({ tipo: 'EMPRESTIMO_ADICIONAL' });
-                setMotivoSolicitacao('');
-              }}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="lock-closed-outline" size={14} color="#374151" />
-              <Text style={S.btnSolicitarText}>
-                {lang === 'es' 
-                  ? 'Solicitar autorización para nuevo préstamo' 
-                  : 'Solicitar autorização para novo empréstimo'}
-              </Text>
-            </TouchableOpacity>
-          )
+
+        {/* ⚠ "Aguardando aprovação" FICA no corpo, e não é opção: é ESTADO.
+            Opção é o que o vendedor pode fazer; isto é o que ele já fez e
+            está esperando. Pôr no popup esconderia a espera atrás de um
+            toque. O pedido em si virou opção ("Solicitar autorização"). */}
+        {clienteEmDia && temEmprestimoAtivo && !permiteAdicional
+          && solicitacoesPendentes.adicional && (
+          <View style={S.btnAguardando}>
+            <Ionicons name="time-outline" size={14} color="#92400E" />
+            <Text style={S.btnAguardandoText}>
+              {lang === 'es' ? 'Aguardando aprobación' : 'Aguardando aprovação'}
+            </Text>
+          </View>
         )}
-        
+
         {loading ? (
           <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
-        ) : empAtivos.length === 0 ? (
-          <View style={S.emptyBox}>
-            <Ionicons name="document-text-outline" size={40} color="#D1D5DB" style={{ marginBottom: 8 }} />
-            <Text style={S.emptyText}>{t.semEmprestimo}</Text>
-          </View>
         ) : (
-          empAtivos.map(emp => renderEmprestimoCard(emp, false))
+          <>
+            {empAtivos.length === 0 ? (
+              <View style={S.emptyBox}>
+                <Ionicons name="document-text-outline" size={40} color="#D1D5DB" style={{ marginBottom: 8 }} />
+                <Text style={S.emptyText}>{t.semEmprestimo}</Text>
+              </View>
+            ) : (
+              empAtivos.map(emp => renderEmprestimoCard(emp, false))
+            )}
+
+            {/* Encerrados, na mesma aba. `somenteLeitura` = true: deles não
+                sai operação nenhuma. */}
+            {encerrados.length > 0 && (
+              <>
+                <View style={S.grupoEncerrados}>
+                  <Text style={S.grupoEncerradosTx}>
+                    {t.encerrados} ({encerrados.length})
+                  </Text>
+                </View>
+                {encerrados.map(emp => renderEmprestimoCard(emp, true))}
+              </>
+            )}
+          </>
         )}
       </ScrollView>
     );
   };
 
   // ==================== ABA HISTÓRICO ====================
-  const renderHistorico = () => (
-    <ScrollView style={S.abaContent} showsVerticalScrollIndicator={false}>
-      {loading ? (
-        <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
-      ) : empHistorico.length === 0 ? (
-        <View style={S.emptyBox}>
-          <Text style={S.emptyIcon}>📂</Text>
-          <Text style={S.emptyText}>{t.semHistorico}</Text>
-        </View>
-      ) : (
-        empHistorico.map(emp => renderEmprestimoCard(emp, true))
-      )}
-    </ScrollView>
-  );
+  // `renderHistorico` foi APAGADO em 12/11/2026, junto com a aba. Os
+  // encerrados passaram para o fim da aba Empréstimos. Não ficou condicionado
+  // a nada nem comentado de propósito: código que compila, passa no `tsc` e
+  // nas duas conferências e nunca roda foi o defeito do dia anterior.
 
   // Documentos e evidências do cliente (comprovante de endereço, documento,
   // foto do local/negócio). Ficam em bucket privado — ver services/anexos.ts.
@@ -1709,9 +1646,6 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
                 {a === 'emprestimo' && empAtivos.length > 0 && (
                   <View style={S.tabBadge}><Text style={S.tabBadgeText}>{empAtivos.length}</Text></View>
                 )}
-                {a === 'historico' && empHistorico.length > 0 && (
-                  <View style={S.tabBadgeHist}><Text style={S.tabBadgeHistText}>{empHistorico.length}</Text></View>
-                )}
               </TouchableOpacity>
             ))}
           </View>
@@ -1719,10 +1653,46 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
           {/* Conteúdo */}
           {aba === 'pessoais' && renderPessoais()}
           {aba === 'emprestimo' && renderEmprestimo()}
-          {aba === 'historico' && renderHistorico()}
           {aba === 'documentos' && renderDocumentos()}
         </View>
       </View>
+
+      {/* ⭐ O POPUP DAS OPERAÇÕES.
+          `Modal` e não `Alert.alert` porque cada opção carrega um subtítulo
+          dizendo o que acontece com o empréstimo atual — o Alert não os mostra,
+          e no alvo web ele vira `window.confirm`, que só tem dois botões.
+          Mesma razão pela qual o popup da Ficha era assim. */}
+      <Modal
+        visible={opsAberto}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setOpsAberto(false)}
+      >
+        <TouchableOpacity
+          style={S.opsOverlay}
+          activeOpacity={1}
+          onPress={() => setOpsAberto(false)}
+        >
+          <View style={S.opsCaixa}>
+            <Text style={S.opsTitulo}>{t.opTitulo}</Text>
+            {opcoesOps.map(o => (
+              <TouchableOpacity
+                key={o.chave}
+                style={S.opsLinha}
+                activeOpacity={0.7}
+                onPress={o.onPress}
+              >
+                <Ionicons name={o.icone} size={19} color={o.cor} />
+                <View style={{ flex: 1 }}>
+                  <Text style={S.opsLinhaTx}>{o.titulo}</Text>
+                  <Text style={S.opsLinhaSub}>{o.sub}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* ⭐ MODAL DE CONFIRMAÇÃO DE SOLICITAÇÃO DE AUTORIZAÇÃO */}
       <Modal
@@ -2125,6 +2095,66 @@ const S = StyleSheet.create({
   // Parcelas
   parcelasBox: { marginTop: 12 },
   parcelasTitle: { fontSize: 12, fontWeight: '600', color: '#374151', marginBottom: 6 },
+
+  // ⭐ Linha de parcela enxuta. `pVenc` é quem CEDE largura (flexShrink: 1),
+  // porque no React Native o filho de uma linha nasce com flexShrink 0 e o
+  // Android corta o que excede em silêncio — ver a seção das linhas que cortam
+  // no CLAUDE.md. O valor fica rígido: dinheiro não quebra no meio.
+  pLinha: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingVertical: 8, paddingHorizontal: 10, marginBottom: 4,
+    backgroundColor: '#FAFAFA', borderRadius: 8,
+    borderWidth: 1, borderColor: '#F3F4F6',
+  },
+  pNum: { fontSize: 11, fontWeight: '700', color: '#9CA3AF', minWidth: 26 },
+  pVenc: { flex: 1, flexShrink: 1, fontSize: 12, color: '#6B7280' },
+  pValor: { fontSize: 14, fontWeight: '700', color: '#374151' },
+  pEstado: {
+    fontSize: 10, fontWeight: '700', paddingHorizontal: 6, paddingVertical: 3,
+    borderRadius: 4, overflow: 'hidden',
+  },
+  pEstadoPago: { backgroundColor: '#D1FAE5', color: '#065F46' },
+  pEstadoVencido: { backgroundColor: '#FEE2E2', color: '#991B1B' },
+  pEstadoParcial: { backgroundColor: '#FEF3C7', color: '#92400E' },
+  pEstadoAberto: { backgroundColor: '#F3F4F6', color: '#6B7280' },
+
+  // O gatilho das operações e o popup dele.
+  btnOperacoes: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: '#2563EB', borderRadius: 12,
+    paddingVertical: 13, paddingHorizontal: 14, marginBottom: 12,
+  },
+  btnOperacoesTx: { fontSize: 14, fontWeight: '700', color: '#fff', flexShrink: 1 },
+  opsOverlay: {
+    flex: 1, backgroundColor: 'rgba(17,24,39,0.45)',
+    justifyContent: 'center', paddingHorizontal: 22,
+  },
+  opsCaixa: {
+    backgroundColor: '#fff', borderRadius: 16, paddingVertical: 14,
+    paddingHorizontal: 14, gap: 6,
+  },
+  opsTitulo: {
+    fontSize: 12, fontWeight: '700', color: '#6B7280',
+    textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 4,
+  },
+  opsLinha: {
+    flexDirection: 'row', alignItems: 'center', gap: 11,
+    paddingVertical: 11, paddingHorizontal: 10, borderRadius: 11,
+    backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#F3F4F6',
+  },
+  // Os dois cedem largura: no React Native o filho de uma linha nasce com
+  // flexShrink 0, e texto traduzido é mais comprido em espanhol.
+  opsLinhaTx: { fontSize: 14, fontWeight: '700', color: '#111827', flexShrink: 1 },
+  opsLinhaSub: { fontSize: 11.5, color: '#6B7280', marginTop: 2, flexShrink: 1 },
+
+  grupoEncerrados: {
+    marginTop: 18, marginBottom: 8, paddingTop: 12,
+    borderTopWidth: 1, borderTopColor: '#E5E7EB',
+  },
+  grupoEncerradosTx: {
+    fontSize: 11, fontWeight: '700', color: '#9CA3AF', letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
   parcelaRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#F3F4F6', gap: 8 },
   parcelaIcon: { fontSize: 14, width: 22 },
   parcelaInfo: { flex: 1 },
@@ -2160,24 +2190,8 @@ const S = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 2,
   },
-  btnNovoEmprestimoIcon: { fontSize: 18, color: '#FFFFFF', fontWeight: '700' },
   btnNovoEmprestimoText: { fontSize: 15, color: '#FFFFFF', fontWeight: '700' },
   // ⭐ Botão Renegociar (empréstimo-level, dentro do card)
-  btnRenegociar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FED7AA',
-    borderWidth: 1,
-    borderColor: '#FB923C',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    marginTop: 10,
-    gap: 6,
-  },
-  btnRenegociarIcon: { fontSize: 14, color: '#C2410C', fontWeight: '700' },
-  btnRenegociarText: { fontSize: 13, color: '#C2410C', fontWeight: '600' },
   // ⭐ Aviso quando precisa de autorização
   avisoAutorizacao: {
     flexDirection: 'row',

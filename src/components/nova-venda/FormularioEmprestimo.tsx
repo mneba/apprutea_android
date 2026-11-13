@@ -96,6 +96,20 @@ export default function FormularioEmprestimo(props: Props) {
           <Text style={[styles.fieldLabel, camposComErro.has('valorEmprestimo') && styles.fieldLabelError]}>
             Valor <Text style={styles.required}>*</Text>
           </Text>
+          {/* ⚠ TRAVADO NA RENEGOCIAÇÃO, de novo desde 12/11/2026.
+              Ele foi aberto por algumas horas naquele dia, para servir de
+              conserto de empréstimo lançado errado. O conserto saiu do app
+              inteiro: o vendedor não alcança empréstimo de dias atrás, e a
+              operação foi para o web, como processo de admin.
+
+              E havia um motivo de dinheiro para não deixar aberto aqui:
+              `fn_renegociar_emprestimo` NÃO toca em `caixa_final` — está no
+              corpo dela, "renegociação não desembolsa" —, então valor acima do
+              saldo seria dívida que cresce sem nenhuma saída de caixa
+              registrada. Preso ao saldo, essa diferença é sempre zero.
+
+              A TAXA continua livre, e sempre esteve: ela chega em
+              `taxaJurosPersonalizada = true`, no campo de digitar. */}
           <TextInput
             style={[
               styles.input,
