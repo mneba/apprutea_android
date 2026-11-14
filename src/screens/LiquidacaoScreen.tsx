@@ -1,20 +1,8 @@
 import NetInfo from '@react-native-community/netinfo';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Dimensions,
-  Modal,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
-} from 'react-native';
+import { ActivityIndicator, Alert, Animated, Dimensions, Modal, RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text, TextInput } from '../components/texto';
 import { ModalExtrato, ModalFinanceiro, ModalMicroseguro, ModalPagamentos } from '../components/LiquidacaoDetalhes';
 import { ModalNotasLista } from '../components/NotasComponent';
 import { useAuth } from '../contexts/AuthContext';

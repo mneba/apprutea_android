@@ -1,10 +1,6 @@
 import React, { useState } from 'react';
-import {
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text } from '../texto';
 import { DIAS_SEMANA_CURTO, MESES_NOME, type Lang } from '../../constants/novaVendaConstants';
 import { data } from '../../utils/formato';
 

@@ -1,15 +1,8 @@
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import {
-  Alert,
-  Image,
-  Platform,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
-} from 'react-native';
+import { Alert, Image, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text } from './texto';
 import Svg, { Path } from 'react-native-svg';
 import { Language } from '../contexts/LiquidacaoContext';
 import { diasAtraso as calcAtraso, corAtraso, COR_EM_DIA, type ConfigCobranca } from '../utils/diasCobranca';

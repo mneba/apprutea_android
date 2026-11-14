@@ -1,16 +1,8 @@
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Image,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
-} from 'react-native';
+import { ActivityIndicator, Image, Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text } from './texto';
 import { supabase } from '../services/supabase';
 import CalendarioSelector from './nova-venda/CalendarioSelector';
 import { numeroBr } from '../utils/formato';

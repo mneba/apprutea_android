@@ -1,13 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { moeda } from '../utils/formato';
-import {
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text } from './texto';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 

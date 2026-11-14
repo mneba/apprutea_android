@@ -1,14 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text } from './texto';
 import { useAuth } from '../contexts/AuthContext';
 import { diasCobrancaEntre } from '../utils/diasCobranca';
 import AnexosLista from './AnexosLista';

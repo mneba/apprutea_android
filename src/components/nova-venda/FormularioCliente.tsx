@@ -1,12 +1,6 @@
 import React from 'react';
-import {
-  ActivityIndicator,
-  Image,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Image, TouchableOpacity, View } from 'react-native';
+import { Text, TextInput } from '../texto';
 import type { Textos } from '../../constants/novaVendaConstants';
 import { styles } from '../../styles/novaVendaStyles';
 

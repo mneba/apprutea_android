@@ -1,16 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Modal,
-  Platform,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View
-} from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Modal, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text, TextInput } from './texto';
 import { supabase } from '../services/supabase';
 
 import { mensagemErro } from '../utils/mensagemErro';

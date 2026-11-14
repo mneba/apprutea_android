@@ -2,22 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Dimensions,
-  FlatList,
-  LayoutAnimation,
-  Platform,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  UIManager,
-  View
-} from 'react-native';
+import { ActivityIndicator, Alert, Animated, Dimensions, FlatList, LayoutAnimation, Platform, RefreshControl, StyleSheet, TouchableOpacity, UIManager, View } from 'react-native';
+import { Text, TextInput } from '../components/texto';
 import AlphabetSidebar from '../components/AlphabetSidebar';
 import Carregando from '../components/Carregando';
 import AutorizacaoEstornoModal from '../components/AutorizacaoEstornoModal';

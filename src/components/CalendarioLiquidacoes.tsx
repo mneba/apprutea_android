@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import {
-  View, Text, StyleSheet, TouchableOpacity, Dimensions,
-} from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
+import { Text } from './texto';
 
 interface LiquidacaoDiaria {
   id: string;

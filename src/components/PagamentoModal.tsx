@@ -1,15 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { moeda, data } from '../utils/formato';
-import {
-  ActivityIndicator,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text, TextInput } from './texto';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 

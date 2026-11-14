@@ -1,12 +1,7 @@
 import React from 'react';
 import { moeda } from '../utils/formato';
-import {
-  Modal,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text } from './texto';
 
 interface ResumoPagamentoModalProps {
   visible: boolean;

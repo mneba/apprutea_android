@@ -1,15 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import {
-  Animated,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Animated, Platform, ScrollView, StyleSheet, Switch, TouchableOpacity, View } from 'react-native';
+import { Text } from './texto';
 import { Language } from '../contexts/LiquidacaoContext';
 
 // ─── Types ──────────────────────────────────────────────────────────────────

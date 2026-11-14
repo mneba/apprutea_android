@@ -12,7 +12,8 @@
 // a ficha…" é a diferença entre esperar e achar que travou.
 
 import React from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { Text } from './texto';
 
 interface Props {
   /** O que está sendo carregado. Sem isto fica só o spinner. */

@@ -38,18 +38,8 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  LayoutAnimation,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  UIManager,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { LayoutAnimation, Modal, Platform, ScrollView, StyleSheet, TouchableOpacity, UIManager, useWindowDimensions, View } from 'react-native';
+import { Text } from '../texto';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../services/supabase';
 import Carregando from '../Carregando';

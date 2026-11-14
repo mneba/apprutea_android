@@ -1,5 +1,6 @@
 import React from 'react';
-import { Text, View } from 'react-native';
+import { View } from 'react-native';
+import { Text } from '../texto';
 import { styles } from '../../styles/novaVendaStyles';
 import { fmt, formatarData, FREQ_LABELS, type Textos } from '../../constants/novaVendaConstants';
 

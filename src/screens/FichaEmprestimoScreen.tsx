@@ -20,17 +20,8 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  LayoutAnimation,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  UIManager,
-  View,
-} from 'react-native';
+import { LayoutAnimation, Modal, Platform, ScrollView, StyleSheet, TouchableOpacity, UIManager, View } from 'react-native';
+import { Text } from '../components/texto';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AnexosLista from '../components/AnexosLista';
 import Carregando from '../components/Carregando';

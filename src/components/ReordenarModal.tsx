@@ -1,12 +1,6 @@
 import React, { useState } from 'react';
-import {
-    Modal,
-    ScrollView,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
-} from 'react-native';
+import { Modal, ScrollView, TouchableOpacity, View } from 'react-native';
+import { Text, TextInput } from './texto';
 import { Language } from '../contexts/LiquidacaoContext';
 
 interface ClienteTodos {

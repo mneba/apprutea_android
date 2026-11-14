@@ -1,13 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { moeda } from '../utils/formato';
-import {
-  Modal,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text, TextInput } from './texto';
 
 interface ValorLivreModalProps {
   visible: boolean;

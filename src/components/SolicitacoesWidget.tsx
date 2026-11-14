@@ -6,17 +6,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import * as Clipboard from 'expo-clipboard';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Modal,
-  Platform,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Modal, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text } from './texto';
 import { supabase } from '../services/supabase';
 
 import { mensagemErro } from '../utils/mensagemErro';

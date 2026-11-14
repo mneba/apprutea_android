@@ -6,7 +6,8 @@ import { NavigationContainer, useNavigationState } from '@react-navigation/nativ
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import Constants from 'expo-constants';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, Image, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, AppState, Image, Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text } from '../components/texto';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SolicitacoesWidget } from '../components/SolicitacoesWidget';
 import { useAuth } from '../contexts/AuthContext';

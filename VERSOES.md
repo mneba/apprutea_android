@@ -125,3 +125,8 @@ campo mostra nao mapeia para nada.
 - **1.2.125** - 2026-11-13 10:30 - `src/components/nova-venda/FormularioEmprestimo.tsx`
 - **1.2.126** - 2026-11-13 10:30 - `src/screens/NovaVendaScreen.tsx`
 - **1.2.127** - 2026-11-13 10:30 - `src/components/nova-venda/ResumoVenda.tsx`
+- **1.2.128** - 2026-11-13 23:15 - `src/components/texto.tsx`
+- **1.2.129** - 2026-11-13 23:15 - `App.tsx`
+- **1.2.130** - 2026-11-13 23:16 - `src/components/texto.tsx`
+- **1.2.131** - 2026-11-13 23:22 - `src/utils/fonte.ts`
+- **1.2.132** - 2026-11-13 23:24 - `src/utils/fonte.ts`

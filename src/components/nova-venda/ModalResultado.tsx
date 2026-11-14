@@ -1,11 +1,6 @@
 import React from 'react';
-import {
-  Modal,
-  ScrollView,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Modal, ScrollView, TouchableOpacity, View } from 'react-native';
+import { Text } from '../texto';
 import { styles } from '../../styles/novaVendaStyles';
 import { fmt, type Textos } from '../../constants/novaVendaConstants';
 import { data } from '../../utils/formato';

@@ -1,5 +1,6 @@
 import React from 'react';
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text } from './texto';
 
 // Uma linha do detalhamento: rotulo a esquerda, valor a direita,
 // alinhados em coluna. Texto corrido nao alinha em fonte proporcional,

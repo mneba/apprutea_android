@@ -1,13 +1,7 @@
 import React from 'react';
 import { CORES_NIVEL } from '../utils/diasCobranca';
-import {
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text } from './texto';
 
 interface LegendaCoresModalProps {
   visible: boolean;

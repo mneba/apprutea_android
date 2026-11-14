@@ -1,14 +1,6 @@
 import React, { RefObject } from 'react';
-import {
-  ActivityIndicator,
-  Modal,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, TouchableOpacity, View } from 'react-native';
+import { Text, TextInput } from '../texto';
 import { DDI_LIST, type DDIOption, type Lang, type Segmento, type SegmentoGrupo, type Textos } from '../../constants/novaVendaConstants';
 import { styles } from '../../styles/novaVendaStyles';
 import CalendarioSelector from './CalendarioSelector';

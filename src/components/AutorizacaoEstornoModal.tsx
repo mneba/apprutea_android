@@ -1,13 +1,6 @@
 import React from 'react';
-import {
-    ActivityIndicator,
-    Modal,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
-} from 'react-native';
+import { ActivityIndicator, Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Text, TextInput } from './texto';
 import { Language } from '../contexts/LiquidacaoContext';
 import { moeda } from '../utils/formato';
 
