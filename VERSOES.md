@@ -130,3 +130,35 @@ campo mostra nao mapeia para nada.
 - **1.2.130** - 2026-11-13 23:16 - `src/components/texto.tsx`
 - **1.2.131** - 2026-11-13 23:22 - `src/utils/fonte.ts`
 - **1.2.132** - 2026-11-13 23:24 - `src/utils/fonte.ts`
+
+> **14/11/2026 - o padrao mudou, e o numero ANDA PARA TRAS aqui.** A terceira
+> casa passou a transbordar em 99: `1.2.99` -> `1.3.0`, e `1.99.99` -> `2.0.0`
+> (decisao do Mauricio). A serie `1.2.x` acima chegou a **1.2.132**, que e
+> ilegivel para quem le o Painel de Controle -- dai a troca. As linhas antigas
+> NAO foram renumeradas: elas dizem o que aquelas builds de fato reportaram.
+> A proxima versao e **1.3.0**, e nenhuma build de `1.2.x` passou de 1.2.53.
+
+- **1.3.0** - 2026-11-14 - troca de padrao (nenhuma alteracao de codigo)
+- **1.3.1** - 2026-11-14 14:37 - `src/components/EstornoModal.tsx`
+- **1.3.2** - 2026-11-14 14:37 - `src/components/EstornoModal.tsx`
+- **1.3.3** - 2026-11-14 14:37 - `src/components/EstornoModal.tsx`
+- **1.3.4** - 2026-11-14 14:37 - `src/components/EstornoModal.tsx`
+- **1.3.5** - 2026-11-14 14:37 - `src/components/EstornoModal.tsx`
+- **1.3.6** - 2026-11-14 14:37 - `src/components/EstornoModal.tsx`
+- **1.3.7** - 2026-11-14 14:37 - `src/components/AutorizacaoEstornoModal.tsx`
+- **1.3.8** - 2026-11-14 14:37 - `src/components/AutorizacaoEstornoModal.tsx`
+- **1.3.9** - 2026-11-14 14:38 - `src/components/AutorizacaoEstornoModal.tsx`
+- **1.3.10** - 2026-11-14 14:38 - `src/components/AutorizacaoEstornoModal.tsx`
+- **1.3.11** - 2026-11-14 14:38 - `src/components/AutorizacaoEstornoModal.tsx`
+- **1.3.12** - 2026-11-14 14:38 - `src/screens/ClientesScreen.tsx`
+- **1.3.13** - 2026-11-14 14:38 - `src/screens/ClientesScreen.tsx`
+- **1.3.14** - 2026-11-14 14:39 - `src/screens/ClientesScreen.tsx`
+- **1.3.15** - 2026-11-14 14:39 - `src/screens/ClientesScreen.tsx`
+- **1.3.16** - 2026-11-14 14:39 - `src/screens/ClientesScreen.tsx`
+- **1.3.17** - 2026-11-14 14:39 - `src/screens/ClientesScreen.tsx`
+- **1.3.18** - 2026-11-14 14:39 - `src/screens/ClientesScreen.tsx`
+- **1.3.19** - 2026-11-14 14:39 - `src/screens/ClientesScreen.tsx`
+- **1.3.20** - 2026-11-14 14:40 - `src/screens/ClientesScreen.tsx`
+- **1.3.21** - 2026-11-14 14:40 - `src/screens/ClientesScreen.tsx`
+- **1.3.22** - 2026-11-14 15:37 - `src/hooks/useBuscaDocumento.ts`
+- **1.3.23** - 2026-11-14 15:37 - `src/hooks/useBuscaDocumento.ts`

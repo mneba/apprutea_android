@@ -10,7 +10,7 @@ import AutorizacaoEstornoModal from '../components/AutorizacaoEstornoModal';
 import ClienteCardLiquidacao from '../components/ClienteCardLiquidacao';
 import ClienteCardTodos from '../components/ClienteCardTodos';
 import ClienteDetalhesModal from '../components/ClienteDetalhesModal';
-import EstornoModal from '../components/EstornoModal';
+import EstornoModal, { RecebimentoEstorno } from '../components/EstornoModal';
 import FiltrosDrawer from '../components/FiltrosDrawer';
 import LegendaCoresModal from '../components/LegendaCoresModal';
 import { ModalCriarNota, ModalNotasLista, buscarNotasCountPorClientes } from '../components/NotasComponent';
@@ -765,6 +765,12 @@ export default function ClientesScreen({ navigation, route }: any) {
 
   const [parcelaEstorno, setParcelaEstorno] = useState<ParcelaModal | null>(null);
   const [motivoEstorno, setMotivoEstorno] = useState('');
+  // Os RECEBIMENTOS vivos da parcela, e qual deles o vendedor escolheu
+  // desfazer. Com um só a tela não muda; com dois ou mais ele escolhe, e
+  // sem isto o estorno apagaria todos — o desastre de 02/10/2026.
+  // Ver sql/2026-11-14_estorno_mira_a_operacao.sql
+  const [recebimentosEstorno, setRecebimentosEstorno] = useState<RecebimentoEstorno[]>([]);
+  const [operacaoEstorno, setOperacaoEstorno] = useState<string | null>(null);
 
   // Configurações do vendedor e autorização de estorno
   const [configVendedor, setConfigVendedor] = useState<{
@@ -2218,6 +2224,59 @@ export default function ClientesScreen({ navigation, route }: any) {
     }
 
     // ============================================================
+    // QUAIS RECEBIMENTOS ESTA PARCELA TEM
+    // ------------------------------------------------------------
+    // Um recebimento é um ato do vendedor — 1 para 1 com o lançamento em
+    // `financeiro` —, e uma parcela pode ter vários, de dias diferentes.
+    // O estorno apagava TODOS: era o desastre de 02/10/2026, em que o
+    // Allan estornou para corrigir 14/08 e perdeu 07, 12 e 13/08 junto.
+    // Ver sql/2026-11-14_estorno_mira_a_operacao.sql
+    // ============================================================
+    let recebimentos: RecebimentoEstorno[] = [];
+    try {
+      const { data: pgs, error: errPg } = await supabase
+        .from('pagamentos_parcelas')
+        .select('operacao_id, data_pagamento, valor_pago_atual, valor_credito_usado, forma_pagamento')
+        .eq('parcela_id', parcela.parcela_id)
+        .eq('estornado', false)
+        .order('data_hora_pagamento', { ascending: false });
+      if (errPg) throw errPg;
+
+      // Agrupa por operação: uma operação pode ter mais de uma linha nesta
+      // parcela, e o que o vendedor desfaz é a OPERAÇÃO.
+      const porOperacao = new Map<string, RecebimentoEstorno>();
+      for (const p of (pgs || []) as any[]) {
+        const op: string | null = p.operacao_id || null;
+        if (!op) continue;   // zero na base em 14/11; se aparecer, fica fora da escolha
+        const atual = porOperacao.get(op);
+        if (atual) {
+          atual.valor += Number(p.valor_pago_atual || 0);
+          atual.credito_usado += Number(p.valor_credito_usado || 0);
+        } else {
+          porOperacao.set(op, {
+            operacao_id: op,
+            data_pagamento: p.data_pagamento || null,
+            valor: Number(p.valor_pago_atual || 0),
+            credito_usado: Number(p.valor_credito_usado || 0),
+            forma_pagamento: p.forma_pagamento || null,
+          });
+        }
+      }
+      recebimentos = Array.from(porOperacao.values());
+    } catch (e) {
+      console.error('[ESTORNO] Erro ao buscar recebimentos:', e);
+      // Degradação, não regressão: sem a lista o estorno vale a parcela
+      // inteira, que é o comportamento de antes de 14/11/2026.
+      recebimentos = [];
+    }
+    setRecebimentosEstorno(recebimentos);
+    // Pré-escolhe o mais recente (a consulta vem DESC): é quase sempre o que
+    // ele acabou de fazer e quer desfazer. Ele troca na lista; com um
+    // recebimento só, lista nenhuma aparece.
+    setOperacaoEstorno(recebimentos.length > 0 ? recebimentos[0].operacao_id : null);
+    console.log('[ESTORNO] recebimentos vivos:', recebimentos.length);
+
+    // ============================================================
     // VERIFICAÇÃO DE PERMISSÃO
     // ============================================================
     
@@ -2331,6 +2390,9 @@ export default function ClientesScreen({ navigation, route }: any) {
         p_cliente_id: clienteModal?.id || null,  // Cliente (clienteModal.id é o cliente_id)
         p_emprestimo_id: clienteModal?.emprestimo_id || null,
         p_parcela_id: parcelaAguardandoAutorizacao?.parcela_id || null,  // Parcela específica
+        // QUAL recebimento, para o supervisor aprovar o que ele pediu e não
+        // a parcela inteira. Nulo cai no comportamento de antes de 14/11.
+        p_operacao_id: operacaoEstorno,
       });
 
       if (error) throw error;
@@ -2360,7 +2422,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     } finally {
       setEnviandoSolicitacaoEstorno(false);
     }
-  }, [vendedor, parcelaAguardandoAutorizacao, motivoSolicitacaoEstorno, clienteModal, t, lang, showAlert]);
+  }, [vendedor, parcelaAguardandoAutorizacao, motivoSolicitacaoEstorno, clienteModal, operacaoEstorno, t, lang, showAlert]);
 
   const confirmarEstorno = useCallback(async () => {
     if (!parcelaEstorno || !motivoEstorno.trim() || processando) return;
@@ -2375,7 +2437,10 @@ export default function ClientesScreen({ navigation, route }: any) {
         // (auditoria). Mesmo coords usado no pagamento (useGPSTracking).
         p_latitude_estorno: coords?.lat || null,
         p_longitude_estorno: coords?.lng || null,
-        p_precisao_gps_estorno: coords?.acc || null
+        p_precisao_gps_estorno: coords?.acc || null,
+        // SÓ este recebimento. Nulo (consulta falhou) estorna a parcela
+        // inteira, que é o comportamento de antes de 14/11/2026.
+        p_operacao_id: operacaoEstorno
       });
       
       if (error) throw error;
@@ -2389,11 +2454,17 @@ export default function ClientesScreen({ navigation, route }: any) {
         if (clienteModal?.emprestimo_id) { atualizarSaldoLocalLiq(clienteModal.emprestimo_id); atualizarSaldoLocalTodos(clienteModal.emprestimo_id); }
         if (clienteModal) abrirParcelas(clienteModal.id, clienteModal.nome, clienteModal.emprestimo_id);
 
-        // ⭐ Atualização otimista: remover parcela do estado de pagas
+        // ⭐ Atualização otimista: remover parcela do estado de pagas.
+        // SÓ quando não sobrou recebimento: com estorno de uma operação a
+        // parcela continua paga (parcial), e tirá-la daqui a mostraria como
+        // não paga por um instante até o loadLiq corrigir.
+        const sobrouRecebimento = !!operacaoEstorno && recebimentosEstorno.length > 1;
         const parcelaId = parcelaEstorno.parcela_id;
         const clienteId = clienteModal?.id || '';
-        setPagasSet(prev => { const s = new Set(prev); s.delete(parcelaId); return s; });
-        setPagMap(prev => { const m = new Map(prev); m.delete(parcelaId); return m; });
+        if (!sobrouRecebimento) {
+          setPagasSet(prev => { const s = new Set(prev); s.delete(parcelaId); return s; });
+          setPagMap(prev => { const m = new Map(prev); m.delete(parcelaId); return m; });
+        }
         // Verificar se cliente tem outras parcelas pagas antes de removê-lo de clientesPagosNaLiq
         // (loadLiq em background vai corrigir)
 
@@ -2423,7 +2494,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       Alert.alert(t.erroGenerico, mensagemErro(e, t.estornoErro)); 
     }
     finally { setProcessando(false); }
-  }, [parcelaEstorno, motivoEstorno, vendedor, t, clienteModal, abrirParcelas, loadLiq, processando]);
+  }, [parcelaEstorno, motivoEstorno, operacaoEstorno, recebimentosEstorno, vendedor, t, clienteModal, abrirParcelas, loadLiq, processando]);
 
   const grouped = useMemo((): ClienteAgrupado[] => {
     const m = new Map<string, ClienteAgrupado>();
@@ -3690,6 +3761,9 @@ return (
         setMotivoEstorno={setMotivoEstorno}
         processando={processando}
         onConfirmar={confirmarEstorno}
+        recebimentos={recebimentosEstorno}
+        operacaoEscolhida={operacaoEstorno}
+        setOperacaoEscolhida={setOperacaoEstorno}
         lang={lang}
         t={t}
       />
@@ -3704,6 +3778,9 @@ return (
         setMotivo={setMotivoSolicitacaoEstorno}
         enviando={enviandoSolicitacaoEstorno}
         onEnviar={enviarSolicitacaoEstorno}
+        recebimentos={recebimentosEstorno}
+        operacaoEscolhida={operacaoEstorno}
+        setOperacaoEscolhida={setOperacaoEstorno}
         lang={lang}
         t={t}
       />

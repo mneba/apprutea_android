@@ -3,6 +3,7 @@ import { ActivityIndicator, Modal, StyleSheet, TouchableOpacity, View } from 're
 import { Text, TextInput } from './texto';
 import { Language } from '../contexts/LiquidacaoContext';
 import { moeda } from '../utils/formato';
+import { ListaRecebimentos, RecebimentoEstorno } from './EstornoModal';
 
 const fmt = (v: number) => moeda(v);
 
@@ -22,6 +23,13 @@ interface AutorizacaoEstornoModalProps {
   setMotivo: (v: string) => void;
   enviando: boolean;
   onEnviar: () => void;
+  // QUAL recebimento ele está pedindo para desfazer. O pedido grava a
+  // operação em `solicitacoes_autorizacao.operacao_id`, e é ela que o
+  // supervisor aprova — sem isso a aprovação volta a estornar a parcela
+  // inteira. Ver sql/2026-11-14_estorno_mira_a_operacao.sql
+  recebimentos?: RecebimentoEstorno[];
+  operacaoEscolhida?: string | null;
+  setOperacaoEscolhida?: (operacaoId: string) => void;
   lang: Language;
   t: {
     parcela: string;
@@ -39,9 +47,15 @@ export default function AutorizacaoEstornoModal({
   setMotivo,
   enviando,
   onEnviar,
+  recebimentos = [],
+  operacaoEscolhida = null,
+  setOperacaoEscolhida,
   lang,
   t,
 }: AutorizacaoEstornoModalProps) {
+  const varios = recebimentos.length > 1;
+  const escolhido = varios ? recebimentos.find((r) => r.operacao_id === operacaoEscolhida) : null;
+  const faltaEscolher = varios && !escolhido;
   return (
     <Modal visible={visible} animationType="fade" transparent={true} onRequestClose={onClose}>
       <View style={S.modalOverlay}>
@@ -72,7 +86,21 @@ export default function AutorizacaoEstornoModal({
                 <Text style={S.estInfoParcela}>{t.parcela} {parcela.numero_parcela}</Text>
                 <Text style={S.estInfoCliente}>{clienteNome}</Text>
                 <Text style={S.estInfoValor}>{t.pago} {fmt(parcela.valor_pago || parcela.valor_parcela)}</Text>
+                {varios && (
+                  <Text style={S.estInfoCliente}>
+                    {lang === 'es' ? 'Se pedirá deshacer' : 'Vai pedir para desfazer'}: {escolhido ? fmt(escolhido.valor) : '—'}
+                  </Text>
+                )}
               </View>
+
+              {!!setOperacaoEscolhida && (
+                <ListaRecebimentos
+                  recebimentos={recebimentos}
+                  escolhido={operacaoEscolhida}
+                  onEscolher={setOperacaoEscolhida}
+                  lang={lang}
+                />
+              )}
 
               {/* Campo de motivo */}
               <View style={S.estInputBox}>
@@ -95,9 +123,9 @@ export default function AutorizacaoEstornoModal({
                   <Text style={S.estBtnCancelTx}>{t.cancelar}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[S.estBtnConfirm, { backgroundColor: '#F59E0B' }, (!motivo.trim() || enviando) && S.estBtnDisabled]}
+                  style={[S.estBtnConfirm, { backgroundColor: '#F59E0B' }, (!motivo.trim() || enviando || faltaEscolher) && S.estBtnDisabled]}
                   onPress={onEnviar}
-                  disabled={!motivo.trim() || enviando}
+                  disabled={!motivo.trim() || enviando || faltaEscolher}
                 >
                   {enviando ? (
                     <ActivityIndicator color="#fff" />

@@ -122,12 +122,19 @@ export function useBuscaDocumento({
     try {
       const docSemMask = doc;
 
-      // Verificar venda pendente aprovada
-      const { data: vpAprovada } = await supabase
+      // Verificar venda pendente aprovada — SÓ a da rota dele.
+      // `vendas_pendentes` não tem `cliente_id`: liga pelo documento, que é
+      // único por EMPRESA e não globalmente. Sem o filtro, documento repetido
+      // em outra rota ofereceria a venda dela para carregar. Hoje são 2
+      // aprovadas na base e nenhuma colide — isto é preventivo, mesma causa
+      // do filtro de empresa logo abaixo.
+      let qvp = supabase
         .from('vendas_pendentes')
         .select('id, cliente_nome')
         .eq('cliente_documento', docSemMask)
-        .eq('status', 'APROVADO')
+        .eq('status', 'APROVADO');
+      if (vendedor?.rota_id) qvp = qvp.eq('rota_id', vendedor.rota_id);
+      const { data: vpAprovada } = await qvp
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -154,11 +161,28 @@ export function useBuscaDocumento({
       }
 
       // ⭐ Busca APENAS exata (sem fallback por substring para evitar falsos positivos)
-      const { data: clientes } = await supabase
+      //
+      // ⚠ E SEMPRE DENTRO DA EMPRESA DO VENDEDOR. A unicidade de documento no
+      // banco é POR EMPRESA (`ux_clientes_empresa_documento`), porque a mesma
+      // pessoa pode ser cliente de duas empresas e lá ela é nova. Sem este
+      // filtro a consulta varria a tabela inteira e o `.limit(1)` sorteava um
+      // cliente de outra empresa.
+      //
+      // Relatado em 14/11/2026: documento `18` — que é CONTADOR, não documento,
+      // metade da base tem isso — existe em 8 empresas. O vendedor recebia
+      // "Cliente de outra rota" ao cadastrar alguém novo. Medido no dia: 176
+      // documentos em mais de uma empresa, 603 clientes; 568 bloqueavam e
+      // **35 carregavam calado** nome, telefone e endereço de outra empresa
+      // para dentro da venda, que é a face pior.
+      //
+      // `empresa_id` está preenchido em 66/66 vendedores e 3.297/3.297
+      // clientes, então o filtro não esconde ninguém.
+      let q = supabase
         .from('clientes')
         .select('id, nome, documento, telefone_celular, endereco, codigo_cliente, status, permite_emprestimo_adicional, permite_renegociacao')
-        .or(`documento.eq.${docSemMask},documento.eq.${docBusca}`)
-        .limit(1);
+        .or(`documento.eq.${docSemMask},documento.eq.${docBusca}`);
+      if (vendedor?.empresa_id) q = q.eq('empresa_id', vendedor.empresa_id);
+      const { data: clientes } = await q.limit(1);
 
       const cli = clientes?.[0];
       if (!cli) {
