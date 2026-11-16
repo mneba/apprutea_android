@@ -38,6 +38,9 @@ interface PagarMultiplasModalProps {
     creditoDisponivelLbl?: string;
     selecioneEspecie?: string;
     pagaLbl?: string;
+    /** "(pago 50,00)" ao lado da parcela com pagamento parcial. Nao e `pagaLbl`,
+     *  que e o cabecalho da coluna. */
+    pagoLbl?: string;
     vencLbl?: string;
     totalParcelasLbl?: string;
     receberAgoraLbl?: string;

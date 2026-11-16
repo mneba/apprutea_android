@@ -59,7 +59,7 @@ interface ModalSegmentoProps {
   segmentosLoading: boolean;
   segmentoId: string | null;
   segmentoBusca: string;
-  segmentoBuscaRef: RefObject<TextInput>;
+  segmentoBuscaRef: RefObject<TextInput | null>;
   t: Textos;
   onSelect: (seg: Segmento) => void;
   onClear: () => void;

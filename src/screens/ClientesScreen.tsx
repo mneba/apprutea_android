@@ -94,6 +94,9 @@ interface EmprestimoData {
   is_parcela_atrasada?: boolean;
   pagamento_info?: { valorPago: number; creditoGerado: number; valorParcela: number; dataPagamento?: string | null };
   data_emprestimo?: string;
+  /** Dia operacional a que a linha pertence, vindo do payload do dia. Era
+   *  copiado via `(r as any).dia_referencia` sem existir no tipo. */
+  dia_referencia?: string | null;
 }
 
 interface ClienteAgrupado {
@@ -208,7 +211,7 @@ const textos = {
     estePagamento: 'Este pagamento', novoSaldoLbl: 'Novo saldo',
     erro: 'Erro ao registrar pagamento',
     motivoEstorno: 'Motivo do estorno', estornarPagamento: 'Estornar Pagamento',
-    confirmarEstorno: 'CONFIRMAR ESTORNO', cancelar: 'Cancelar',
+    confirmarEstorno: 'CONFIRMAR ESTORNO',
     estornoSucesso: 'Estorno realizado!', estornoErro: 'Erro ao estornar',
     liquidacaoNecessaria: 'É necessário ter uma liquidação aberta para esta operação.',
     // As tres palavras da decomposicao da quitacao. Usadas pelo menu de
@@ -227,6 +230,12 @@ const textos = {
     abrirLiquidacao: 'Abra uma liquidação para operar',
     // Strings adicionais para Alerts e popups
     atencao: 'Atenção', erroGenerico: 'Erro', sucessoGenerico: 'Sucesso', aviso: 'Aviso',
+    // 16/11/2026: estas seis eram lidas via `t.x || 'texto'` sem existir em
+    // nenhum idioma -- o espanhol mostrava o fallback em portugues.
+    semCredito: 'Não há crédito disponível', usarCredito: 'Usar crédito',
+    seraAplicadoCascata: 'será aplicado nas próximas parcelas (quita as que cobrir).',
+    semSaldoQuitar: 'Empréstimo já está quitado', quitarEmprestimo: 'Quitar empréstimo',
+    pagoLbl: 'pago',
     erroCarregarParcelas: 'Não foi possível carregar as parcelas.',
     dadosClienteIndisponiveis: 'Dados do cliente não disponíveis',
     nenhumaParcela: 'Nenhuma parcela pendente encontrada',
@@ -235,9 +244,9 @@ const textos = {
     valorInvalido: 'Valor inválido',
     informeValor: 'Informe um valor para pagar ou use o crédito disponível',
     nenhumaParcelaEncontrada: 'Nenhuma parcela encontrada',
-    dinheiro: 'Dinheiro', transferencia: 'Transf/PIX',
+    transferencia: 'Transf/PIX',
     pagoStatus: 'PAGO', parcialStatus: 'PARCIAL', vencidaStatus: 'VENCIDA',
-    creditoUsado: 'Crédito usado:', creditoGerado: 'Crédito gerado:',
+    creditoGerado: 'Crédito gerado:',
     semNumero: 'Sem número',
     existemParcelas: 'Existem',
     parcelasAnteriores: 'parcela(s) anterior(es) pendente(s) com saldo de',
@@ -336,7 +345,7 @@ const textos = {
     estePagamento: 'Este pago', novoSaldoLbl: 'Nuevo saldo',
     erro: 'Error al registrar pago',
     motivoEstorno: 'Motivo de reversión', estornarPagamento: 'Reversar Pago',
-    confirmarEstorno: 'CONFIRMAR REVERSIÓN', cancelar: 'Cancelar',
+    confirmarEstorno: 'CONFIRMAR REVERSIÓN',
     estornoSucesso: '¡Reversión realizada!', estornoErro: 'Error al reversar',
     liquidacaoNecessaria: 'Es necesario tener una liquidación abierta para esta operación.',
     parcelasAbertoLbl: 'Cuotas en abierto',
@@ -353,6 +362,10 @@ const textos = {
     abrirLiquidacao: 'Abra una liquidación para operar',
     // Strings adicionais para Alerts e popups
     atencao: 'Atención', erroGenerico: 'Error', sucessoGenerico: 'Éxito', aviso: 'Aviso',
+    semCredito: 'No hay crédito disponible', usarCredito: 'Usar crédito',
+    seraAplicadoCascata: 'se aplicará a las próximas cuotas (liquida las que alcance).',
+    semSaldoQuitar: 'El préstamo ya está liquidado', quitarEmprestimo: 'Liquidar préstamo',
+    pagoLbl: 'pagado',
     erroCarregarParcelas: 'No fue posible cargar las cuotas.',
     dadosClienteIndisponiveis: 'Datos del cliente no disponibles',
     nenhumaParcela: 'Ninguna cuota pendiente encontrada',
@@ -457,8 +470,8 @@ export default function ClientesScreen({ navigation, route }: any) {
   useEffect(() => {
     if (!rotaId) return;
     supabase.from('rotas').select('trabalha_domingo').eq('id', rotaId).single()
-      .then(({ data }) => { if (data) setTrabalhaDomingo(data.trabalha_domingo !== false); })
-      .catch(() => {});
+      // `.then(ok, erro)`: o builder do Supabase e PromiseLike e nao tem `.catch`.
+      .then(({ data }) => { if (data) setTrabalhaDomingo(data.trabalha_domingo !== false); }, () => {});
   }, [rotaId]);
 
   // Feriados da rota: dia sem cobrança não é atraso do cliente — a rota não
@@ -1693,7 +1706,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       // Buscar todas as parcelas do empréstimo (para calcular a cascata do crédito)
       const { data, error } = await supabase
         .from('emprestimo_parcelas')
-        .select('id, numero_parcela, data_vencimento, valor_parcela, valor_pago, valor_saldo, status')
+        .select('id, numero_parcela, data_vencimento, valor_parcela, valor_pago, valor_saldo, status, data_pagamento')
         .eq('emprestimo_id', clienteModal.emprestimo_id)
         .order('numero_parcela', { ascending: true });
       if (error) throw error;
@@ -1705,6 +1718,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         valor_pago: Number(p.valor_pago || 0),
         valor_saldo: Number(p.valor_saldo ?? p.valor_parcela),
         status: p.status,
+        data_pagamento: p.data_pagamento ?? null,
         valor_multa: 0,
       })));
     } catch (e: any) {
@@ -2045,7 +2059,9 @@ export default function ClientesScreen({ navigation, route }: any) {
     
     // Se vai quitar, pedir confirmação
     if (vaiQuitar) {
-      const msgQuitar = t.confirmarQuitacao || 
+      // Sem chave de traducao aqui de proposito: a mensagem carrega os
+      // valores (`saldoEmp`, `totalPagando`), e uma string estatica os perderia.
+      const msgQuitar = 
         `Este pagamento irá QUITAR o empréstimo.\n\nSaldo: ${fmt(saldoEmp)}\nPagando: ${fmt(totalPagando)}\n\nTodas as parcelas restantes serão marcadas como pagas.\n\nEsta ação é irreversível.`;
       
       if (Platform.OS === 'web') {
@@ -3129,12 +3145,19 @@ export default function ClientesScreen({ navigation, route }: any) {
         solicitacaoRenovacao={solicitacoesRenovacaoMap.get(c.id) || null}
         onNovoEmprestimo={(cli) => {
           const nav = navigation.getParent() || navigation;
+          // ⚠ NAO mande `documento` aqui. Ate 14/11/2026 as quatro
+          // chamadas deste arquivo mandavam `documento: cli.codigo_cliente`,
+          // e o submit da venda regravava o CODIGO sobre o documento de
+          // verdade -- 1.083 de 3.297 clientes. Ver o comentario em
+          // `useNovaVendaSubmit`. O payload do card NAO TEM o documento (nem
+          // o da aba Todos, nem o do modal de detalhes), e `useBuscaDocumento`
+          // ja consulta o cliente por id quando entra por aqui: e dali que o
+          // documento tem de vir, nunca de um campo parecido.
           nav.navigate('NovoCliente', { dataLiq, 
             clienteExistente: { 
               id: cli.id, 
               nome: cli.nome, 
-              telefone_celular: cli.telefone_celular, 
-              documento: cli.codigo_cliente?.toString() || '' 
+              telefone_celular: cli.telefone_celular 
             } 
           });
         }}
@@ -3158,7 +3181,7 @@ export default function ClientesScreen({ navigation, route }: any) {
 
           const nav = navigation.getParent() || navigation;
           nav.navigate('NovoCliente', { dataLiq,
-            clienteExistente: { id: cli.id, nome: cli.nome, telefone_celular: cli.telefone_celular, documento: cli.codigo_cliente?.toString() || '' },
+            clienteExistente: { id: cli.id, nome: cli.nome, telefone_celular: cli.telefone_celular },
             solicitacaoRenovacao: {
               solic_id: solicId,
               // APROVADO trava valor e taxa no formulário; PENDENTE deixa livre
@@ -3476,7 +3499,11 @@ return (
                   // parcela paga + pendente, o card guarda a PENDENTE e o
                   // pagMap, chaveado por parcela, não acharia a data).
                   const empsDoItem = new Set(item.emprestimos.map(x => x.emprestimo_id));
-                  let dtSrc: string | null = null;
+                  // `null as string | null`, e nao `: string | null = null`: a
+                  // atribuicao acontece dentro do callback do forEach, que o
+                  // TypeScript nao rastreia -- com a anotacao normal ele
+                  // estreita para `never` logo abaixo.
+                  let dtSrc = null as string | null;
                   let dtSrcMs = Infinity;
                   pagMap.forEach((p, parcelaId) => {
                     const eid = empDaParcela.get(parcelaId);
@@ -3839,7 +3866,6 @@ return (
         lang={lang}
         coords={coords}
         permitirCriar={!!(liqId && ['ABERTO', 'ABERTA', 'REABERTO', 'REABERTA'].includes(liqCtx.liquidacaoAtual?.status || ''))}
-        mensagemSemLiq={lang === 'es' ? 'Abra una liquidación para crear notas' : 'Abra uma liquidação para criar notas'}
         obsLocalPadrao="Cliente"
       />
 
@@ -3857,8 +3883,7 @@ return (
               clienteExistente: { 
                 id: cli.id, 
                 nome: cli.nome, 
-                telefone_celular: (cli as any).telefone_celular || '', 
-                documento: (cli as any).codigo_cliente?.toString() || '' 
+                telefone_celular: (cli as any).telefone_celular || '' 
               } 
             }); 
           };
@@ -3891,7 +3916,7 @@ return (
 
           const nav = navigation.getParent() || navigation;
           nav.navigate('NovoCliente', { dataLiq,
-            clienteExistente: { id: cli.id, nome: cli.nome, telefone_celular: (cli as any).telefone_celular, documento: (cli as any).codigo_cliente?.toString() || '' },
+            clienteExistente: { id: cli.id, nome: cli.nome, telefone_celular: (cli as any).telefone_celular },
             solicitacaoRenovacao: {
               solic_id: solicId,
               // APROVADO trava valor e taxa no formulário; PENDENTE deixa livre

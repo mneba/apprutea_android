@@ -2205,7 +2205,7 @@ const confirmarConflitoAbertura = (
               }).then(({ data }) => {
                 const res = Array.isArray(data) ? data[0] : data;
                 setNotasCount(res?.total || 0);
-              }).catch(() => {});
+              }, () => {});
             }}
             rotaId={vendedor?.rota_id || ''}
             empresaId={vendedor?.empresa_id || ''}

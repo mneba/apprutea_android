@@ -32,7 +32,7 @@ const MAX_FOTOS = 5;
 
 const textos = {
   'pt-BR': {
-    titulo: 'NOVA MOVIMENTAÇÃO', tituloHeader: 'MOVIMENTAÇÃO',
+    titulo: 'NOVA MOVIMENTAÇÃO', tituloHeader: 'MOVIMENTAÇÃO', atencao: 'Atenção',
     registrada: 'Movimentação Registrada!',
     fechar: '✓ Fechar',
     tipo: 'Tipo:', categoria: 'Categoria:', valor: 'Valor:', descricao: 'Descrição',
@@ -63,7 +63,7 @@ const textos = {
     camera: 'Câmera', galeria: 'Galeria',
   },
   'es': {
-    titulo: 'NUEVO MOVIMIENTO', tituloHeader: 'MOVIMIENTO',
+    titulo: 'NUEVO MOVIMIENTO', tituloHeader: 'MOVIMIENTO', atencao: 'Atención',
     registrada: '¡Movimiento Registrado!',
     fechar: '✓ Cerrar',
     tipo: 'Tipo:', categoria: 'Categoría:', valor: 'Valor:', descricao: 'Descripción',

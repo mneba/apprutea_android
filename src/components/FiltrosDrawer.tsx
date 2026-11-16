@@ -17,6 +17,11 @@ interface ClienteTodos {
   status: string;
   tem_atraso: boolean;
   permite_renegociacao: boolean;
+  // Os dois abaixo existem no ClienteTodos de ClienteCardTodos, que e o tipo
+  // do estado em ClientesScreen. Sem eles, a lista que `onReordenar` devolve
+  // nao cabe no setState de la (tsc: "two different types with this name").
+  permite_emprestimo_adicional: boolean;
+  foto_url: string | null;
   cliente_created_at?: string;
   emprestimos: any[];
 }

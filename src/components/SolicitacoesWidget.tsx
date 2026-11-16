@@ -125,7 +125,7 @@ export const SolicitacoesWidget: React.FC<Props> = ({ vendedorId, rotaId, lang =
   const [erro, setErro] = useState<string | null>(null);
   const [temNovasResolucoes, setTemNovasResolucoes] = useState(false);
   const [countPendentes, setCountPendentes] = useState(0);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const liqCtx = useLiquidacaoContext();
 
   const STORAGE_KEY = `@solicitacoes_ultima_viz_${vendedorId}`;

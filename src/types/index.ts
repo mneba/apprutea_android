@@ -77,6 +77,12 @@ export interface LiquidacaoDiaria {
   qtd_emprestimos_dia: number | null;
   total_despesas_dia: number | null;
   qtd_despesas_dia: number | null;
+  /** O DIA a que a liquidacao se refere -- nao confundir com `data_abertura`,
+   *  que e QUANDO foi aberta (ver CLAUDE.md, "A liquidacao e a regua do
+   *  tempo"). Opcional aqui porque quem le ja faz fallback para
+   *  `data_abertura`, e tornar obrigatorio quebraria literais do tipo. */
+  data_liquidacao?: string;
+  clientes_quitados?: number | null;
 }
 
 export interface Conta {

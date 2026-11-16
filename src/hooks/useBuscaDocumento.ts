@@ -529,6 +529,33 @@ ${msg}`);
           .single();
         if (!cli) return;
 
+        // O DOCUMENTO VEM DAQUI, e de lugar nenhum mais.
+        //
+        // O payload do card não tem o documento -- nem o da aba Todos, nem o
+        // do modal de detalhes --, e era por isso que `ClientesScreen`
+        // mandava `codigo_cliente` no lugar dele até 14/11/2026. Esta
+        // consulta JA EXISTIA e JA TRAZIA `documento` no `select`: nenhuma
+        // consulta nova, nenhuma coluna nova.
+        //
+        // Por que é seguro escrever no campo aqui:
+        //   - o bloco cadastral abre SOMENTE-LEITURA neste caminho, então não
+        //     há digitação do vendedor para sobrescrever;
+        //   - `fv.documento` só chega ao banco no ramo de CLIENTE NOVO
+        //     (`fn_nova_venda_completa` e `vendas_pendentes`), onde
+        //     `clienteExistente` é nulo e este efeito não roda;
+        //   - a validação só exige documento quando NÃO há `clienteExistente`
+        //     (`hasClienteId` em `isValido`), então campo vazio não trava
+        //     venda nenhuma;
+        //   - a busca automática por documento não dispara: `modalDocVisible`
+        //     nasce `!clienteExistente && ...`.
+        //
+        // ⚠ Rascunho de até 12 h gravado por uma build ANTIGA ainda carrega o
+        //   `codigo_cliente` e pode restaurá-lo por cima: as duas gravações
+        //   são assíncronas (AsyncStorage contra rede) e a ordem não é
+        //   garantida. É só EXIBIÇÃO -- nada deste caminho escreve cadastro
+        //   desde 14/11/2026 -- e passa quando o rascunho vence.
+        if (cli.documento) s.setDocumento(cli.documento);
+
         // Mesma trava do caminho por documento: cliente vindo pré-selecionado
         // pelo card também não pode iniciar renovação estando suspenso.
         if (String((cli as any).status || '').toUpperCase() === 'SUSPENSO') {

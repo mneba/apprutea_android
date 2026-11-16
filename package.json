@@ -8,7 +8,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "conferir": "node scripts/conferir.mjs"
   },
   "dependencies": {
     "@expo-google-fonts/roboto": "^0.4.3",

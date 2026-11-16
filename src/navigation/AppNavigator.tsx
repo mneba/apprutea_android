@@ -365,7 +365,11 @@ function AppStack() {
       />
       <Stack.Screen 
         name="Pagamento" 
-        component={PagamentoScreen}
+        // PagamentoScreen tipa `route.params` a mao em vez de usar
+        // NativeStackScreenProps, e o navigator nao tem ParamList -- entao o
+        // tipo dela nao casa com o que `component` espera. O cast e local;
+        // tipar o navigator inteiro e trabalho de outro tamanho.
+        component={PagamentoScreen as React.ComponentType<any>}
         options={{ title: 'Registrar Pagamento' }}
       />
       <Stack.Screen 

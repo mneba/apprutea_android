@@ -202,19 +202,35 @@ export function useNovaVendaSubmit(ctx: SubmitContext) {
         const clienteId = ctx.clienteExistente?.id || ctx.clienteEncontradoId;
         const isAdicional = ctx.tipoEmprestimoDetectado === 'ADICIONAL';
 
-        // Atualizar dados cadastrais
-        const updateData: Record<string, any> = {};
-        if (fv.nome.trim()) updateData.nome = fv.nome.trim();
-        if (fv.documento.trim()) updateData.documento = fv.documento.trim();
-        if (fv.telefoneCelular) updateData.telefone_celular = `${fv.ddiCelular}${fv.telefoneCelular}`;
-        if (fv.telefoneFixo) updateData.telefone_fixo = `${fv.ddiFixo}${fv.telefoneFixo}`;
-        if (fv.email.trim()) updateData.email = fv.email.trim();
-        if (fv.endereco.trim()) updateData.endereco = fv.endereco.trim();
-        if (fv.enderecoComercial.trim()) updateData.endereco_comercial = fv.enderecoComercial.trim();
-        if (fv.observacoesCliente.trim()) updateData.observacoes = fv.observacoesCliente.trim();
-        if (Object.keys(updateData).length > 0 && clienteId) {
-          await supabase.from('clientes').update(updateData).eq('id', clienteId);
-        }
+        // ⚠ NAO reescreve o cadastro do cliente, e isso nao e omissao.
+        //
+        // Este ramo e EXATAMENTE a condicao em que o bloco cadastral abre
+        // SOMENTE-LEITURA: `isClienteReadOnly` em NovaVendaScreen e
+        // `clienteExistente?.id || clienteEncontradoId`, a mesma linha do
+        // `else if` acima. O vendedor nao digita nome, documento nem telefone
+        // aqui -- logo um UPDATE nunca carrega edicao dele, so o valor que o
+        // formulario recebeu como semente.
+        //
+        // E a semente estava errada: `ClientesScreen` mandava
+        // `documento: cli.codigo_cliente` no `clienteExistente`, e este
+        // UPDATE gravava o CODIGO sobre o documento de verdade. Medido em
+        // 14/11/2026: 1.083 dos 3.297 clientes (33%) ficaram com
+        // `documento = codigo_cliente`, por 43 autores diferentes -- e foi
+        // isto que o Julio reportou como "a migracao nao trouxe os
+        // documentos iguais ao Excel". A importacao estava certa; esta linha
+        // apagava depois.
+        //
+        // O telefone era o mesmo defeito, CUMULATIVO: `telefoneCelular`
+        // nascia com o numero JA com DDI e `ddiCelular` com o DDI da rota,
+        // entao `${fv.ddiCelular}${fv.telefoneCelular}` virava
+        // `+555519988801833`, e na venda seguinte `+55+555519...`. 234
+        // telefones na base.
+        //
+        // E a forma de erro que o CLAUDE.md ja registra em "o Salvar generico
+        // dessuspendia em silencio": formulario que reenvia o estado inteiro
+        // sobrescreve o que outro caminho gravou, e o bug e silencioso porque
+        // o valor reenviado e plausivel. Cadastro tem UM dono -- a tela de
+        // cliente, por `fn_atualizar_cliente`. Nao e a venda.
 
         const isRenegociacaoViaDoc = ctx.tipoEmprestimoDetectado === 'RENOVACAO' && !!ctx.emprestimOrigemId;
 

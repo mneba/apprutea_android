@@ -155,6 +155,7 @@ interface ClienteCardTodosProps {
     emprestimo: string;
     toqueDetalhes: string;
     novoEmprestimo: string;
+    pagar?: string;
   };
   /** Chave desta linha na lista. Vai de volta no onToggleExpand para o
    *  handler poder ser estável (useCallback sem dependências) — é o que

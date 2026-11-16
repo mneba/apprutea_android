@@ -4,7 +4,7 @@ import { Text } from './texto';
 
 interface AlphabetSidebarProps {
   data: { nome: string }[];
-  flatRef: React.RefObject<FlatList>;
+  flatRef: React.RefObject<FlatList | null>;
   activeLetter: string | null;
   setActive: (l: string | null) => void;
 }

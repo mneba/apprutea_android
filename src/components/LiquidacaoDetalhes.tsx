@@ -2316,7 +2316,10 @@ export function ModalFinanceiro({ visible, onClose, liquidacaoId, tipo, totalVal
     // Se item está anulado, mostrar com estilo diferente
     const isAnulado = item.status === 'ANULADO';
     const isExcluindoEste = excluindo === item.id;
-    const podeExcluir = isLiquidacaoAberta && !isAnulado && tipo !== 'VENDAS';
+    // Sem `tipo !== 'VENDAS'`: o card de VENDAS ja retornou mais acima, entao
+    // aqui `tipo` so pode ser RECEITAS ou DESPESAS e a clausula era sempre
+    // verdadeira (o tsc acusava comparacao sem sobreposicao).
+    const podeExcluir = isLiquidacaoAberta && !isAnulado;
 
     return (
     <View style={[dStyles.finItem, isAnulado && { opacity: 0.5, backgroundColor: '#F9FAFB' }]}>
