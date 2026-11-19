@@ -237,6 +237,9 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const [resumoOp, setResumoOp] = useState({ pagos: 0, naoPagos: 0, novos: 0, renovados: 0, renegociados: 0 });
   const [vendasDia, setVendasDia] = useState<any[]>([]);
   const [renegociacoesDia, setRenegociacoesDia] = useState<any[]>([]);
+  // Blocos do extrato (mockup B): fechados ao abrir, cada um abre ao toque.
+  const [blocosAbertos, setBlocosAbertos] = useState<Set<string>>(new Set());
+  const [buscaCob, setBuscaCob] = useState('');
   const extratoViewRef = useRef<View>(null);
   // Selo de fechamento. `quando` é `data_fechamento`; `por` é o nome de quem
   // fechou, resolvido por `fn_nome_usuario` — que procura em `vendedores` e
@@ -680,6 +683,116 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   const diferencaNaoExplicada = caixaFinal - somaDasLinhas;
   const temDiferenca = Math.abs(diferencaNaoExplicada) > 0.01;
 
+  // ══ O EXTRATO REDESENHADO (19/11/2026) ════════════════════════════════
+  // A conta primeiro e o detalhe em blocos — o "B" do mockup aprovado pelo
+  // Mauricio. Uma linha por RECEBIMENTO (a regra de 08/11 segue valendo), o
+  // empréstimo sem dado de contrato (juros, taxa e 1º vencimento são da
+  // ficha, não do caixa), e o resumo operacional saiu: era número de
+  // supervisor. Clientes que faltam também NÃO entram — isso é a aba
+  // Clientes. A tela e o PDF leem as MESMAS listas abaixo.
+  //
+  // ⚠ OS TOTAIS NÃO MUDAM: todos saem das contas de cima.
+  const L = (pt: string, es: string) => (lang === 'es' ? es : pt);
+  const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
+
+  type LinhaCob = {
+    key: string; nome: string; criado: string; sub: string; valor: number;
+    quitacao: boolean; emprestimoId?: string;
+    usado: number; gerado: number; nota: string; soCredito: number;
+  };
+  const linhasCobranca: LinhaCob[] = (() => {
+    const subParcelas = (nums: number[]) =>
+      nums.length === 1 ? `${L('parcela', 'cuota')} ${nums[0]}` : fraseParcelas(nums);
+    const out: LinhaCob[] = recebimentos.map(rec => ({
+      key: rec.key,
+      nome: rec.nomeCliente,
+      criado: rec.linhas[rec.linhas.length - 1].created_at,
+      sub: subParcelas(rec.parcelas),
+      valor: rec.dinheiro,
+      quitacao: rec.quitacao,
+      emprestimoId: rec.linhas[0].emprestimo_id,
+      usado: rec.linhas.reduce((s: number, p: any) => s + parseFloat(p.valor_credito_usado || 0), 0),
+      gerado: rec.linhas.reduce((s: number, p: any) => s + creditoLiquido(p).excedente, 0),
+      nota: rec.linhas.map((p: any) => fraseCredito(creditoLiquido(p))).join('').replace(/^ · /, ''),
+      soCredito: 0,
+    }));
+    // Recebimento SÓ de crédito, de empréstimo que não teve linha em
+    // dinheiro no dia: sem isto ele sumia do extrato (a nota de crédito só
+    // tem onde pendurar quando há linha visível). Aparece com 0,00 — o
+    // valor NÃO entra na cobrança, que é dinheiro.
+    const comLinha = new Set(pagamentosDinheiro.map((p: any) => p.emprestimo_id).filter(Boolean));
+    const soCred = new Map<string, any[]>();
+    for (const p of pagamentos) {
+      if (p.forma_pagamento !== 'CREDITO' || comLinha.has((p as any).emprestimo_id)) continue;
+      const k = (p as any).operacao_id || p.id;
+      const arr = soCred.get(k);
+      if (arr) arr.push(p); else soCred.set(k, [p]);
+    }
+    for (const [k, ls] of soCred) {
+      const nums = ls.map((p: any) => Number(p.numero_parcela || 0)).sort((a: number, b: number) => a - b);
+      out.push({
+        key: 'c' + k,
+        nome: (ls[0].clientes as any)?.nome || '—',
+        criado: ls[ls.length - 1].created_at,
+        sub: subParcelas(nums),
+        valor: 0,
+        quitacao: ls.some((p: any) => p.tipo_operacao === 'QUITACAO'),
+        emprestimoId: ls[0].emprestimo_id,
+        usado: 0, gerado: 0, nota: '',
+        soCredito: ls.reduce((s: number, p: any) => s + parseFloat(p.valor_credito_usado || p.valor_pago_atual || 0), 0),
+      });
+    }
+    return out.sort((a, b) => (a.criado < b.criado ? -1 : a.criado > b.criado ? 1 : 0));
+  })();
+  const qtdParcelasCob = recebimentos.reduce((s, r) => s + r.parcelas.length, 0);
+  const notaSoCredito = (v: number) => mostrarCredito
+    ? L(`pago só com crédito: ${fmt(v)}`, `pagado solo con crédito: ${fmt(v)}`)
+    : L(`adiantamento aplicado: ${fmt(v)}`, `anticipo aplicado: ${fmt(v)}`);
+
+  const tipoEmp = (e: any) => e.tipo_emprestimo === 'RENOVACAO'
+    ? { rot: L('RENOVOU', 'RENOVÓ'), cor: '#92400E', fundo: '#FEF3C7' }
+    : e.tipo_emprestimo === 'ADICIONAL'
+      ? { rot: 'ADICIONAL', cor: '#1E40AF', fundo: '#DBEAFE' }
+      : { rot: L('NOVO', 'NUEVO'), cor: '#065F46', fundo: '#D1FAE5' };
+  const nRenov = vendasDia.filter((e: any) => e.tipo_emprestimo === 'RENOVACAO').length;
+  const nAdic = vendasDia.filter((e: any) => e.tipo_emprestimo === 'ADICIONAL').length;
+  const nNovos = vendasDia.length - nRenov - nAdic;
+  const resumoEmprestimos = vendasDia.length === 0 ? L('nenhum', 'ninguno') : [
+    nNovos ? plural(nNovos, L('novo', 'nuevo'), L('novos', 'nuevos')) : '',
+    nRenov ? plural(nRenov, L('renovação', 'renovación'), L('renovações', 'renovaciones')) : '',
+    nAdic ? plural(nAdic, 'adicional', L('adicionais', 'adicionales')) : '',
+  ].filter(Boolean).join(' · ');
+  const totalRenegociado = renegociacoesDia.reduce((s, e) => s + parseFloat(e.valor_principal || 0), 0);
+
+  const despesasVivas = registrosSaidas.filter(r => r.status !== 'ANULADO');
+  const nAnuladas = registrosSaidas.length - despesasVivas.length;
+  const resumoDespesas = despesasVivas.length === 0 && nAnuladas === 0 ? L('nenhuma', 'ninguno') : [
+    plural(despesasVivas.length, L('lançamento', 'movimiento'), L('lançamentos', 'movimientos')),
+    nAnuladas ? plural(nAnuladas, L('anulado', 'anulado'), L('anulados', 'anulados')) : '',
+  ].filter(Boolean).join(' · ');
+  const nomeLanc = (r: any) => r.descricao || r.cliente_nome || formatarCategoria(r.categoria);
+
+  // A conta que FECHA, nas duas pontas (tela e PDF).
+  type LinhaConta = { rot: string; txt: string; cor: string };
+  const sinal = (v: number) => `${v >= 0 ? '+' : ''}${fmt(v)}`;
+  const linhasConta: LinhaConta[] = [
+    { rot: L('Abriu com', 'Abrió con'), txt: fmt(caixaInicial), cor: '#111827' },
+    { rot: L('Cobrou', 'Cobró'), txt: `+${fmt(totalCobrancas)}`, cor: '#047857' },
+  ];
+  if (totalOutrasReceitas > 0) linhasConta.push({ rot: L('Outras receitas', 'Otros ingresos'), txt: `+${fmt(totalOutrasReceitas)}`, cor: '#047857' });
+  if (totalVendasEmprestimos > 0) linhasConta.push({ rot: L('Emprestou', 'Prestó'), txt: `-${fmt(totalVendasEmprestimos)}`, cor: '#B91C1C' });
+  if (totalSaidasDespesas > 0) linhasConta.push({ rot: L('Gastou', 'Gastó'), txt: `-${fmt(totalSaidasDespesas)}`, cor: '#B91C1C' });
+  if (temAjustes) linhasConta.push({ rot: L('Ajustes de saldo', 'Ajustes de saldo'), txt: sinal(totalAjustes), cor: '#1D4ED8' });
+  if (temDiferenca) linhasConta.push({ rot: L('Diferença não explicada', 'Diferencia no explicada'), txt: sinal(diferencaNaoExplicada), cor: '#B91C1C' });
+  const rotTopo = isLiquidacaoAberta
+    ? L('Saldo do caixa agora', 'Saldo de caja ahora')
+    : L('Saldo do caixa no fim do dia', 'Saldo de caja al final del día');
+  const rotFim = isLiquidacaoAberta ? L('Caixa agora', 'Caja ahora') : L('Fechou com', 'Cerró con');
+  const avisoDiferenca = L(
+    'Dinheiro que mexeu na conta fora deste dia — em geral uma correção de um dia anterior.',
+    'Dinero que movió la cuenta fuera de este día — en general una corrección de un día anterior.',
+  );
+
   const dataHoje = data(new Date());
   const horaAgora = hora(new Date());
 
@@ -692,6 +805,21 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
     if (compartilhando) return;
     setCompartilhando(true);
     try {
+
+      // O PDF segue a TELA (mockup B): a conta primeiro, depois os blocos —
+      // abertos, porque papel não tem toque. Mesmas listas da tela.
+      const esc = (s: any) => String(s ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const secao = (titulo: string, resumo: string, total: string, cor: string) => `
+  <hr class="sep2">
+  <div class="sec-row"><span class="secao" style="color:${cor}">${titulo}</span></div>
+  ${resumo ? `<div class="sec-res">${esc(resumo)}</div>` : ''}
+  <hr class="sep">`;
+      const mov = (nome: string, valor: string, sub: string, opc: { cor?: string; cls?: string; badge?: string; badgeCor?: string; extra?: string } = {}) => `
+  <div class="mov${opc.cls || ''}">
+    <div class="mov-row"><span class="mov-cat">${esc(nome)}</span><span class="mov-val" style="color:${opc.cor || '#111827'}">${valor}</span></div>
+    <div class="mov-sub">${opc.badge ? `<span class="badge" style="color:${opc.badgeCor}">${opc.badge}</span> ` : ''}${esc(sub)}</div>${opc.extra || ''}
+  </div>`;
 
       const html = `
 <!DOCTYPE html>
@@ -709,208 +837,110 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
           color: #666; font-size: 10px; line-height: 1.5; }
   .selo-t { font-weight: 700; color: #333; letter-spacing: 0.5px; }
   .sep { border: none; border-top: 1px dashed #CCC; margin: 6px 0; }
-  .sep2 { border: none; border-top: 2px solid #AAA; margin: 6px 0; }
-  .row { display: flex; justify-content: space-between; align-items: baseline; padding: 2px 0; font-size: 12px; line-height: 1.6; }
+  .sep2 { border: none; border-top: 2px solid #AAA; margin: 8px 0 6px; }
+  .row { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; padding: 2px 0; font-size: 12px; line-height: 1.5; }
   .row .r { text-align: right; white-space: nowrap; }
-  .sm { font-size: 11px; }
   .b { font-weight: 700; }
   .lg { font-size: 14px; font-weight: 700; }
-  .verde { color: #059669; }
-  .verm { color: #DC2626; }
-  .azul { color: #2563EB; }
-  .risc { color: #9CA3AF; text-decoration: line-through; }
-  .cinza { color: #999; }
+  .topo-rot { text-align: center; font-size: 10px; color: #666; margin-top: 4px; }
+  .topo-val { text-align: center; font-size: 18px; font-weight: 700; margin: 2px 0 4px; }
+  .aviso { font-size: 9px; color: #991B1B; margin-top: 3px; line-height: 1.4; }
+  .sec-row { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
+  .secao { font-weight: 700; font-size: 12px; }
+  .sec-res { font-size: 10px; color: #666; margin-top: 1px; }
   .mov { margin-top: 5px; padding-bottom: 4px; border-bottom: 1px dotted #DDD; }
   .mov:last-child { border-bottom: none; }
-  .mov-row { display: flex; align-items: baseline; }
-  .mov-idx { color: #999; width: 20px; font-size: 11px; flex-shrink: 0; }
-  .mov-cat { flex: 1; font-weight: 600; font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 160px; min-width: 0; }
-  .mov-val { font-weight: 700; font-size: 12px; flex-shrink: 0; white-space: nowrap; padding-left: 6px; }
-  .mov-sub { color: #666; font-size: 10px; padding-left: 20px; margin-top: 1px; }
-  .mov-meta { display: flex; justify-content: space-between; color: #999; font-size: 9px; padding-left: 20px; }
-  .secao { text-align: center; font-weight: 700; font-size: 12px; margin-top: 14px; }
+  .mov.quit { background: #F5F3FF; padding: 3px 4px; border-radius: 3px; }
+  .mov.risc .mov-cat, .mov.risc .mov-val { color: #9CA3AF !important; text-decoration: line-through; }
+  .mov-row { display: flex; align-items: baseline; gap: 6px; }
+  .mov-cat { flex: 1; font-weight: 600; font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+  .mov-val { font-weight: 700; font-size: 12px; flex-shrink: 0; white-space: nowrap; }
+  .mov-sub { color: #666; font-size: 10px; margin-top: 1px; }
+  .badge { font-weight: 700; font-size: 9px; }
+  .cred { font-size: 10px; color: #78350F; margin-top: 2px; }
+  .cred .row { font-size: 10px; padding: 0; line-height: 1.4; }
+  .vazio { text-align: center; color: #999; font-size: 10px; padding: 4px 0; }
 </style></head>
 <body>
 <div class="cupom">
 
-  <div class="cb" style="font-size:14px">${rotaNome || 'Rota'}</div>
-  ${vendedorNome ? `<div class="sub">${vendedorNome}</div>` : ''}
+  <div class="cb" style="font-size:14px">${esc(rotaNome || 'Rota')}</div>
+  ${vendedorNome ? `<div class="sub">${esc(vendedorNome)}</div>` : ''}
   <div class="sub">${dataLiquidacao || dataHoje}</div>
   ${fechamento ? `<div class="selo">
     <div class="selo-t">${lang === 'es' ? '🔒 SISTEMA CERRADO' : '🔒 SISTEMA FECHADO'}</div>
     <div>${fmtDataHora(fechamento.quando)}</div>
-    ${fechamento.por ? `<div>por ${fechamento.por}</div>` : ''}
+    ${fechamento.por ? `<div>por ${esc(fechamento.por)}</div>` : ''}
   </div>` : ''}
-  <hr class="sep2">
 
-  <div class="row"><span>${lang === 'es' ? 'Caja inicial' : 'Caixa inicial'}</span><span class="r">${fmt(caixaInicial)}</span></div>
-  <div class="row"><span class="verde">(+) ${lang === 'es' ? 'Cobros del día' : 'Cobrança do dia'}</span><span class="r verde">${fmt(totalCobrancas)}</span></div>
-  <div class="row"><span class="verde">(+) ${lang === 'es' ? 'Ingresos del día' : 'Receitas do dia'}</span><span class="r verde">${fmt(totalOutrasReceitas)}</span></div>
-  <div class="row"><span class="verm">(-) ${lang === 'es' ? 'Gastos del día' : 'Despesas do dia'}</span><span class="r verm">${fmt(totalSaidasDespesas)}</span></div>
-  ${temAjustes ? `<div class="row"><span class="azul">(±) ${lang === 'es' ? 'Ajustes de saldo' : 'Ajustes de saldo'}</span><span class="r azul">${totalAjustes >= 0 ? '+' : ''}${fmt(totalAjustes)}</span></div>` : ''}
-  ${totalVendasEmprestimos > 0 ? `<div class="row"><span class="verm">(-) ${lang === 'es' ? 'Préstamos del día' : 'Empréstimos do dia'}</span><span class="r verm">${fmt(totalVendasEmprestimos)}</span></div>` : ''}
   <hr class="sep2">
-  ${temDiferenca ? `<div class="row"><span class="verm">(±) ${lang === 'es' ? 'Diferencia no explicada' : 'Diferença não explicada'}</span><span class="r verm">${fmt(diferencaNaoExplicada)}</span></div>` : ''}
-  <div class="row"><span class="lg">(=) ${lang === 'es' ? 'Caja final' : 'Caixa final'}</span><span class="r lg">${fmt(caixaFinal)}</span></div>
-  <hr class="sep2">
-  ${totalMicroseguros > 0 ? `
-  <div class="row"><span style="color:#7C3AED">(+) ${lang === 'es' ? 'Microseguro del día' : 'Microseguro do dia'}</span><span class="r" style="color:#7C3AED">${fmt(totalMicroseguros)}</span></div>
-  <hr class="sep2">
-  <div class="row"><span class="lg" style="color:#7C3AED">(=) ${lang === 'es' ? 'Caja final microseguro' : 'Caixa final microseguro'}</span><span class="r lg" style="color:#7C3AED">${fmt(totalMicroseguros)}</span></div>
-  <hr class="sep2">
-  ` : ''}
+  <div class="topo-rot">${rotTopo}</div>
+  <div class="topo-val" style="color:${caixaFinal < 0 ? '#B91C1C' : '#111827'}">${fmt(caixaFinal)}</div>
+  <hr class="sep">
+  ${linhasConta.map(l => `<div class="row"><span style="color:${l.cor}">${l.rot}</span><span class="r" style="color:${l.cor}">${l.txt}</span></div>`).join('')}
+  <hr class="sep">
+  <div class="row"><span class="lg">${rotFim}</span><span class="r lg">${fmt(caixaFinal)}</span></div>
+  ${temDiferenca ? `<div class="aviso">${avisoDiferenca}</div>` : ''}
 
-  <div class="secao">${t.detalheEntradas} (${recebimentos.length + entradasOutras.length})</div>
-  <hr class="sep">
-  ${pagamentosDinheiro.length === 0 && entradasOutras.length === 0 ? `<div class="c cinza">${t.nenhumaEntrada}</div>` : `
-    ${pagamentosDinheiro.length > 0 ? `
-      <div class="c cinza" style="font-size:10px">── ${t.cobrancasParcelas} (${recebimentos.length}) ──</div>
-      ${itensCobranca.map((item, idx) => {
-        const rec = item.rec;
-        const num = String(idx + 1).padStart(2, '0');
-
-        // Recebimento que cobriu várias parcelas: o valor da OPERAÇÃO em
-        // cima. A tela e o papel têm de contar a mesma história — se só um
-        // dos dois agrupasse, o vendedor passaria a conferir dois extratos
-        // diferentes do mesmo dia.
-        if (item.grupo) {
-          const base = rec.linhas[0];
-          return `<div class="mov">
-          <div class="mov-row"><span class="mov-idx">${num}</span><span class="mov-cat">${rec.nomeCliente}</span><span class="mov-val" style="color:${rec.quitacao ? '#7C3AED' : '#059669'}">+${fmt(rec.dinheiro)}</span></div>
-          <div class="mov-sub" style="color:#6B7280">${fraseParcelas(rec.parcelas)}${rec.quitacao ? ` · ${lang === 'es' ? 'liquidación' : 'quitação'}` : ''}</div>
-          <div class="mov-meta"><span>${fmtHora(base.created_at)}</span>${base.forma_pagamento ? `<span>${base.forma_pagamento}</span>` : ''}</div>
-        </div>`;
-        }
-
-        const p = item.p;
-        // ⭐ Mostrar o valor que entrou no caixa (dinheiro), não o valor_pago_total
-        const valorPagoAtual = parseFloat(p.valor_pago_atual || p.valor_pago_total || 0);
-        const creditoUsado = parseFloat(p.valor_credito_usado || 0);
-        const dinheiroRecebido = valorPagoAtual - creditoUsado;
-        const liqH = creditoLiquido(p);
-        return `<div class="mov">
-          <div class="mov-row"><span class="mov-idx">${num}</span><span class="mov-cat">${rec.nomeCliente}</span><span class="mov-val verde">+${fmt(dinheiroRecebido)}</span></div>
-          <div class="mov-sub" style="color:#6B7280">${lang === 'es' ? 'Cuota' : 'Parcela'} ${p.numero_parcela}: ${fmt(parseFloat(p.valor_parcela || 0))}${creditoUsado > 0 && mostrarCredito ? ` · ${fmt(creditoUsado)} ${lang === 'es' ? 'con crédito' : 'com crédito'}` : ''}${fraseCredito(liqH)}${liqH.excedente > 0 && mostrarCredito ? ` · ${lang === 'es' ? 'Crédito generado' : 'Crédito gerado'}: ${fmt(liqH.excedente)}` : ''}</div>
-          <div class="mov-meta"><span>${fmtHora(p.created_at)}</span>${p.forma_pagamento ? `<span>${p.forma_pagamento}</span>` : ''}</div>
-        </div>`;
-      }).join('')}
-      <div class="row"><span class="verde" style="font-size:10px">${t.totalCobrancas}</span><span class="r verde" style="font-size:10px">${fmt(totalCobrancas)}</span></div>
-    ` : ''}
-    ${entradasOutras.length > 0 ? `
-      <div class="c cinza" style="font-size:10px">── ${t.outrasReceitas} (${entradasOutras.length}) ──</div>
-      ${entradasOutras.map((item, idx) => {
-        const sub = item.cliente_nome || item.descricao || '';
-        return `<div class="mov">
-          <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${formatarCategoria(item.categoria)}</span><span class="mov-val verde">+${fmt(parseFloat(item.valor))}</span></div>
-          ${sub ? `<div class="mov-sub">${sub}</div>` : ''}
-          <div class="mov-meta"><span>${fmtHora(item.created_at)}</span>${item.forma_pagamento ? `<span>${item.forma_pagamento}</span>` : ''}</div>
-        </div>`;
-      }).join('')}
-      <div class="row"><span class="verde" style="font-size:10px">${t.totalOutrasReceitas}</span><span class="r verde" style="font-size:10px">${fmt(totalOutrasReceitas)}</span></div>
-    ` : ''}
-  `}
-  <hr class="sep">
-  ${entradasOutras.length > 0 ? `<div class="row"><span class="verde b">TOTAL ENTRADAS</span><span class="r verde b">${fmt(totalCobrancas + totalOutrasReceitas)}</span></div>` : ''}
-
-  <div class="secao">${t.detalheSaidas} (${registrosSaidas.length})</div>
-  <hr class="sep">
-  ${registrosSaidas.length === 0 ? `<div class="c cinza">${t.nenhunaSaida}</div>` :
-    registrosSaidas.map((item, idx) => {
-      const isAnulado = item.status === 'ANULADO';
-      const principal = (isAnulado ? '❌ ' : '') + (item.cliente_nome || formatarCategoria(item.categoria));
-      const sub = isAnulado ? t.anulado : (item.cliente_nome && item.descricao ? item.descricao : '');
-      return `<div class="mov">
-        <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat${isAnulado ? ' risc' : ''}">${principal}</span><span class="mov-val ${isAnulado ? 'risc' : 'verm'}">-${fmt(parseFloat(item.valor))}</span></div>
-        ${sub ? `<div class="mov-sub${isAnulado ? ' risc' : ''}">${sub}</div>` : ''}
-        <div class="mov-meta"><span>${fmtHora(item.created_at)}</span>${item.forma_pagamento ? `<span>${item.forma_pagamento}</span>` : ''}</div>
-      </div>`;
-    }).join('')}
-  <hr class="sep">
-  <div class="row"><span class="verm b">${t.totalSaidas}</span><span class="r verm b">${fmt(totalSaidasDespesas)}</span></div>
-
-  ${entradasMicroseguro.length > 0 ? `
-  <hr class="sep2">
-  <div class="secao" style="color:#7C3AED">MICROSEGUROS</div>
-  <hr class="sep">
-  ${entradasMicroseguro.map((item, idx) => `
-    <div class="mov">
-      <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${item.cliente_nome || item.descricao || '—'}</span><span class="mov-val" style="color:#7C3AED">+${fmt(parseFloat(item.valor))}</span></div>
-      <div class="mov-meta"><span>${fmtHora(item.created_at)}</span></div>
-    </div>`).join('')}
-  <hr class="sep">
-  <div class="row"><span class="b" style="color:#7C3AED">(=) ${lang === 'es' ? 'Caja final microseguro' : 'Caixa final microseguro'}</span><span class="r b" style="color:#7C3AED">${fmt(totalMicroseguros)}</span></div>
-  ` : ''}
-
-  ${vendasDia.length > 0 ? `
-  <hr class="sep2">
-  <div class="secao" style="color:#EF4444">${lang === 'es' ? 'PRÉSTAMOS DEL DÍA' : 'EMPRÉSTIMOS DO DIA'}</div>
-  <hr class="sep">
-  ${vendasDia.map((emp, idx) => {
-    const clienteNome = emp.cliente?.nome || '—';
-    const clienteCodigo = emp.cliente?.codigo_cliente || '';
-    const primeiroPgto = emp.data_primeiro_vencimento
-      ? data(emp.data_primeiro_vencimento)
-      : '—';
-    const isRenovacao = emp.tipo_emprestimo === 'RENOVACAO';
-    const isAdicional = emp.tipo_emprestimo === 'ADICIONAL';
-    const tipoLabel = isRenovacao ? (lang === 'es' ? '🔄 RENOVACIÓN' : '🔄 RENOVAÇÃO') 
-      : isAdicional ? (lang === 'es' ? '➕ ADICIONAL' : '➕ ADICIONAL')
-      : (lang === 'es' ? '🆕 NUEVO' : '🆕 NOVO');
-    const tipoCor = isRenovacao ? '#F59E0B' : isAdicional ? '#8B5CF6' : '#10B981';
-    return `<div class="mov">
-      <div style="margin-bottom:2px"><span style="font-size:9px;font-weight:700;color:${tipoCor};background:${tipoCor}20;padding:1px 6px;border-radius:4px">${tipoLabel}</span></div>
-      <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${clienteCodigo ? '#' + clienteCodigo + ' ' : ''}${clienteNome}</span><span class="mov-val verm">-${fmt(parseFloat(emp.valor_principal))}</span></div>
-      <div class="mov-sub">${lang === 'es' ? '1° pago' : '1° pgto'}: ${primeiroPgto} · ${emp.numero_parcelas}x ${fmt(parseFloat(emp.valor_parcela))} · ${lang === 'es' ? 'intereses' : 'juros'} ${fmt(parseFloat(emp.valor_total || 0) - parseFloat(emp.valor_principal || 0))} (${emp.taxa_juros}%)</div>
-      <div class="mov-meta"><span>${fmtHora(emp.created_at)}</span></div>
-    </div>`;
+  ${secao(L('COBRANÇAS', 'COBROS'),
+    `${plural(linhasCobranca.length, L('recebimento', 'cobro'), L('recebimentos', 'cobros'))} · ${plural(qtdParcelasCob, L('parcela', 'cuota'), L('parcelas', 'cuotas'))}`,
+    fmt(totalCobrancas), '#047857')}
+  ${linhasCobranca.length === 0 ? `<div class="vazio">${t.nenhumaEntrada}</div>` : linhasCobranca.map(l => {
+    const cred = mostrarCredito && (l.usado > 0 || l.gerado > 0)
+      ? `<div class="cred">${l.usado > 0
+          ? `<div class="row"><span>${L('Abateu das parcelas', 'Abonó a las cuotas')}</span><span class="r">${fmt(l.valor + l.usado)}</span></div>
+             <div class="row"><span>${L('Usou de crédito', 'Usó de crédito')}</span><span class="r">-${fmt(l.usado)}</span></div>`
+          : ''}${l.gerado > 0
+          ? `<div class="row"><span>${L('Crédito gerado', 'Crédito generado')}</span><span class="r">+${fmt(l.gerado)}</span></div>`
+          : ''}</div>`
+      : '';
+    const notas = [l.soCredito > 0 ? notaSoCredito(l.soCredito) : '', l.nota].filter(Boolean)
+      .map(n => `<div class="mov-sub">${esc(n)}</div>`).join('');
+    return mov(l.nome, fmt(l.valor), `${fmtHora(l.criado)} · ${l.sub}`, {
+      cor: l.soCredito > 0 ? '#9CA3AF' : l.quitacao ? '#6D28D9' : '#111827',
+      cls: l.quitacao ? ' quit' : '',
+      badge: l.quitacao ? L('QUITOU', 'LIQUIDÓ') : '',
+      badgeCor: '#5B21B6',
+      extra: cred + notas,
+    });
   }).join('')}
-  <hr class="sep">
-  <div class="row"><span class="verm b">${lang === 'es' ? 'TOTAL PRÉSTAMOS' : 'TOTAL EMPRÉSTIMOS'}</span><span class="r verm b">-${fmt(vendasDia.reduce((s, e) => s + parseFloat(e.valor_principal || 0), 0))}</span></div>
+
+  ${entradasOutras.length > 0 ? `
+  ${secao(L('OUTRAS RECEITAS', 'OTROS INGRESOS'), plural(entradasOutras.length, L('lançamento', 'movimiento'), L('lançamentos', 'movimientos')), `+${fmt(totalOutrasReceitas)}`, '#047857')}
+  ${entradasOutras.map(r => mov(nomeLanc(r), `+${fmt(parseFloat(r.valor))}`, `${fmtHora(r.created_at)} · ${formatarCategoria(r.categoria)}`, { cor: '#047857' })).join('')}
   ` : ''}
+
+  ${secao(L('EMPRÉSTIMOS', 'PRÉSTAMOS'), resumoEmprestimos, `-${fmt(totalVendasEmprestimos)}`, '#B91C1C')}
+  ${vendasDia.map((e: any) => {
+    const tp = tipoEmp(e);
+    return mov((e.cliente as any)?.nome || '—', `-${fmt(parseFloat(e.valor_principal || 0))}`, fmtHora(e.created_at), { cor: '#B91C1C', badge: tp.rot, badgeCor: tp.cor });
+  }).join('')}
 
   ${renegociacoesDia.length > 0 ? `
-  <hr class="sep2">
-  <div class="secao" style="color:#F59E0B">${lang === 'es' ? 'RENEGOCIACIONES' : 'RENEGOCIAÇÕES'}</div>
-  <hr class="sep">
-  ${renegociacoesDia.map((emp, idx) => {
-    const clienteNome = emp.cliente?.nome || '—';
-    const primeiroPgto = emp.data_primeiro_vencimento
-      ? data(emp.data_primeiro_vencimento)
-      : '—';
-    return `<div class="mov">
-      <div class="mov-row"><span class="mov-idx">${String(idx + 1).padStart(2, '0')}</span><span class="mov-cat">${clienteNome}</span><span class="mov-val" style="color:#F59E0B">${fmt(parseFloat(emp.valor_principal))}</span></div>
-      <div class="mov-sub">${lang === 'es' ? '1° pago' : '1° pgto'}: ${primeiroPgto} · ${emp.numero_parcelas}x ${fmt(parseFloat(emp.valor_parcela))} · ${lang === 'es' ? 'intereses' : 'juros'} ${fmt(parseFloat(emp.valor_total || 0) - parseFloat(emp.valor_principal || 0))} (${emp.taxa_juros}%)</div>
-      <div class="mov-meta"><span>${fmtHora(emp.created_at)}</span></div>
-    </div>`;
+  ${secao(L('RENEGOCIAÇÕES', 'RENEGOCIACIONES'), `${plural(renegociacoesDia.length, L('renegociação', 'renegociación'), L('renegociações', 'renegociaciones'))} · ${L('não sai do caixa', 'no sale de caja')}`, fmt(totalRenegociado), '#B45309')}
+  ${renegociacoesDia.map((e: any) => mov((e.cliente as any)?.nome || '—', fmt(parseFloat(e.valor_principal || 0)), fmtHora(e.created_at), { cor: '#B45309' })).join('')}
+  ` : ''}
+
+  ${secao(L('DESPESAS', 'GASTOS'), resumoDespesas, `-${fmt(totalSaidasDespesas)}`, '#B91C1C')}
+  ${registrosSaidas.map(r => {
+    const anulado = r.status === 'ANULADO';
+    return mov(nomeLanc(r), `-${fmt(parseFloat(r.valor))}`,
+      `${fmtHora(r.created_at)} · ${anulado ? t.anulado : formatarCategoria(r.categoria)}`,
+      { cor: '#B91C1C', cls: anulado ? ' risc' : '' });
   }).join('')}
-  <hr class="sep">
-  <div class="row"><span class="b" style="color:#F59E0B">${lang === 'es' ? 'TOTAL RENEGOCIACIONES' : 'TOTAL RENEGOCIAÇÕES'}</span><span class="r b" style="color:#F59E0B">${fmt(renegociacoesDia.reduce((s, e) => s + parseFloat(e.valor_principal || 0), 0))}</span></div>
+
+  ${entradasMicroseguro.length > 0 ? `
+  ${secao(L('MICROSSEGURO', 'MICROSEGURO'), `${plural(entradasMicroseguro.length, L('venda', 'venta'), L('vendas', 'ventas'))} · ${L('caixa próprio', 'caja propia')}`, `+${fmt(totalMicroseguros)}`, '#7C3AED')}
+  ${entradasMicroseguro.map(r => mov(r.cliente_nome || r.descricao || '—', `+${fmt(parseFloat(r.valor))}`, fmtHora(r.created_at), { cor: '#7C3AED' })).join('')}
   ` : ''}
 
   ${reaberturas.length > 0 ? `
-  <hr class="sep2">
-  <div class="c b" style="color:#2563EB">${t.reaberturas}</div>
-  <hr class="sep">
-  ${reaberturas.map((ev: any) => `
-    <div class="mov">
-      <div class="mov-row">
-        <span class="mov-cat">${ev.tipo === 'REABERTURA' ? t.reaberta : t.fechadaDeNovo}</span>
-        <span class="mov-val">${fmtHora(ev.momento)}</span>
-      </div>
-      <div class="mov-sub">${ev.usuario || '—'}</div>
-    </div>`).join('')}
-  <div class="c b" style="margin-top:6px">${t.aposReabertura}</div>
-  <hr class="sep">
+  ${secao(t.reaberturas, '', '', '#2563EB')}
+  ${reaberturas.map((ev: any) => mov(ev.tipo === 'REABERTURA' ? t.reaberta : t.fechadaDeNovo, fmtHora(ev.momento), ev.usuario || '—')).join('')}
+  <div class="sec-res b" style="margin-top:6px">${t.aposReabertura}</div>
   ${alteracoesPos.length === 0
-    ? `<div class="mov"><div class="mov-sub">${t.semAlteracoes}</div></div>`
-    : alteracoesPos.map((ev: any) => `
-    <div class="mov">
-      <div class="mov-row">
-        <span class="mov-cat">${ev.descricao || ev.tipo}</span>
-        <span class="mov-val">${ev.impacto_caixa === null ? '—' : fmt(Number(ev.impacto_caixa))}</span>
-      </div>
-      <div class="mov-meta"><span>${fmtHora(ev.momento)} · ${ev.usuario || '—'}</span></div>
-    </div>`).join('')}
+    ? `<div class="vazio">${t.semAlteracoes}</div>`
+    : alteracoesPos.map((ev: any) => mov(ev.descricao || ev.tipo, ev.impacto_caixa === null ? '—' : fmt(Number(ev.impacto_caixa)), `${fmtHora(ev.momento)} · ${ev.usuario || '—'}`)).join('')}
   ` : ''}
 
   <hr class="sep2">
@@ -960,471 +990,309 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
     }
   };
 
+  const alternarBloco = (id: string) => setBlocosAbertos(prev => {
+    const n = new Set(prev);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    return n;
+  });
+  const abrirFicha = (emprestimoId?: string) => {
+    if (!emprestimoId) return;
+    onClose();
+    setTimeout(() => nav.navigate('FichaEmprestimo', { emprestimoId }), 250);
+  };
+  const buscaNorm = normalizarBusca(buscaCob);
+  const linhasCobVisiveis = buscaNorm
+    ? linhasCobranca.filter(l => normalizarBusca(l.nome).includes(buscaNorm))
+    : linhasCobranca;
+  const credLinha = (rot: string, val: string) => (
+    <View style={ex.credLinha}>
+      <Text style={ex.credRot}>{rot}</Text>
+      <Text style={ex.credVal}>{val}</Text>
+    </View>
+  );
+
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={cupom.container}>
-        {/* Header */}
-        <View style={cupom.header}>
-          <Text style={cupom.headerTxt}>{t.extratoDia}</Text>
-          <TouchableOpacity onPress={onClose} style={cupom.closeBtn}>
-            <Text style={cupom.closeTxt}>✕</Text>
+      <View style={ex.container}>
+        <View style={ex.header}>
+          <View style={ex.headerTxts}>
+            <Text style={ex.headerTitulo}>{L('Extrato do dia', 'Extracto del día')}</Text>
+            <Text style={ex.headerSub} numberOfLines={1}>
+              {rotaNome || 'Rota'} · {dataLiquidacao || dataHoje}{vendedorNome ? ` · ${vendedorNome}` : ''}
+            </Text>
+          </View>
+          <TouchableOpacity onPress={onClose} style={ex.fecharBtn} accessibilityLabel={t.fechar}>
+            <Ionicons name="close" size={20} color="#fff" />
           </TouchableOpacity>
         </View>
 
-        <ScrollView style={cupom.scroll} showsVerticalScrollIndicator={false}>
-          <View ref={extratoViewRef} collapsable={false} style={cupom.papel}>
-            {/* ═══ CABEÇALHO ═══ */}
-            <Text style={cupom.centro}>{rotaNome || 'Rota'}</Text>
-            {vendedorNome ? <Text style={cupom.centroSub}>{vendedorNome}</Text> : null}
-            <Text style={cupom.centroSub}>{dataLiquidacao || dataHoje}</Text>
-
-            {/* Selo de fechamento. Fica no cabeçalho, antes dos números,
-                porque é ele que diz o que este extrato É: a fotografia de um
-                dia oficialmente encerrado, e não um parcial do dia em curso. */}
-            {fechamento && (
-              <View style={cupom.selo}>
-                <Text style={cupom.seloTitulo}>
-                  {lang === 'es' ? '🔒 SISTEMA CERRADO' : '🔒 SISTEMA FECHADO'}
-                </Text>
-                <Text style={cupom.seloTxt}>{fmtDataHora(fechamento.quando)}</Text>
-                {!!fechamento.por && (
-                  <Text style={cupom.seloTxt}>
-                    {lang === 'es' ? 'por' : 'por'} {fechamento.por}
-                  </Text>
-                )}
-              </View>
-            )}
-
-            <Text style={cupom.div2}>{DDIV}</Text>
-
-            {/* ═══ RESUMO CAIXA ═══ */}
-            <View style={cupom.linha}>
-              <Text style={cupom.txt}>{lang === 'es' ? 'Caja inicial' : 'Caixa inicial'}</Text>
-              <Text style={cupom.txt}>{fmt(caixaInicial)}</Text>
-            </View>
-            <View style={cupom.linha}>
-              <Text style={cupom.txtVerde}>(+) {lang === 'es' ? 'Cobros del día' : 'Cobrança do dia'}</Text>
-              <Text style={cupom.txtVerde}>{fmt(totalCobrancas)}</Text>
-            </View>
-            <View style={cupom.linha}>
-              <Text style={cupom.txtVerde}>(+) {lang === 'es' ? 'Ingresos del día' : 'Receitas do dia'}</Text>
-              <Text style={cupom.txtVerde}>{fmt(totalOutrasReceitas)}</Text>
-            </View>
-            <View style={cupom.linha}>
-              <Text style={cupom.txtVerm}>(-) {lang === 'es' ? 'Gastos del día' : 'Despesas do dia'}</Text>
-              <Text style={cupom.txtVerm}>{fmt(totalSaidasDespesas)}</Text>
-            </View>
-            {temAjustes && (
-              <View style={cupom.linha}>
-                <Text style={cupom.txtAzul}>(±) {lang === 'es' ? 'Ajustes de saldo' : 'Ajustes de saldo'}</Text>
-                <Text style={cupom.txtAzul}>{totalAjustes >= 0 ? '+' : ''}{fmt(totalAjustes)}</Text>
-              </View>
-            )}
-            {totalVendasEmprestimos > 0 && (
-              <View style={cupom.linha}>
-                <Text style={cupom.txtVerm}>(-) {lang === 'es' ? 'Préstamos del día' : 'Empréstimos do dia'}</Text>
-                <Text style={cupom.txtVerm}>{fmt(totalVendasEmprestimos)}</Text>
-              </View>
-            )}
-            {temDiferenca && (
-              <View style={cupom.linha}>
-                <Text style={cupom.txtVerm}>
-                  (±) {lang === 'es' ? 'Diferencia no explicada' : 'Diferença não explicada'}
-                </Text>
-                <Text style={cupom.txtVerm}>{fmt(diferencaNaoExplicada)}</Text>
-              </View>
-            )}
-            <Text style={cupom.div2}>{DDIV}</Text>
-            <View style={cupom.linha}>
-              <Text style={cupom.txtBold}>(=) {lang === 'es' ? 'Caja final' : 'Caixa final'}</Text>
-              <Text style={cupom.txtBold}>{fmt(caixaFinal)}</Text>
-            </View>
-            <Text style={cupom.div2}>{DDIV}</Text>
-
-            {/* ═══ MICROSEGUROS ═══ */}
-            {entradasMicroseguro.length > 0 && (
-              <>
-                <Text style={[cupom.centro, { fontSize: 11, fontWeight: '700', marginBottom: 4, color: '#7C3AED' }]}>
-                  {lang === 'es' ? 'MICROSEGUROS' : 'MICROSEGUROS'}
-                </Text>
-                <Text style={cupom.div1}>{DIV}</Text>
-                {entradasMicroseguro.map((item, idx) => (
-                  <View key={item.id}>
-                    <View style={cupom.itemRow}>
-                      <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
-                      <Text style={cupom.itemCat} numberOfLines={1}>{item.cliente_nome || item.descricao || '—'}</Text>
-                      <Text style={[cupom.itemVal, { color: '#7C3AED' }]}>+{fmt(parseFloat(item.valor))}</Text>
+        <ScrollView
+          style={ex.scroll}
+          contentContainerStyle={ex.scrollConteudo}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {loading ? (
+            <ActivityIndicator size="large" color="#1F2937" style={{ marginVertical: 40 }} />
+          ) : (
+            <>
+              {/* ═══ A CONTA — o que o vendedor precisa, sem rolar ═══ */}
+              <View style={ex.conta}>
+                <Text style={ex.contaRot}>{rotTopo}</Text>
+                <Text style={[ex.contaGrande, caixaFinal < 0 && { color: '#B91C1C' }]}>{fmt(caixaFinal)}</Text>
+                <View style={ex.contaLinhas}>
+                  {linhasConta.map((l, i) => (
+                    <View key={i} style={ex.contaLinha}>
+                      <Text style={[ex.contaLinhaRot, { color: i === 0 ? '#4B5563' : l.cor }]}>{l.rot}</Text>
+                      <Text style={[ex.contaLinhaVal, { color: l.cor }]}>{l.txt}</Text>
                     </View>
-                    <View style={cupom.itemMeta}>
-                      <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
-                    </View>
-                    {idx < entradasMicroseguro.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
+                  ))}
+                  <View style={[ex.contaLinha, ex.contaFim]}>
+                    <Text style={ex.contaFimRot}>{rotFim}</Text>
+                    <Text style={ex.contaFimVal}>{fmt(caixaFinal)}</Text>
                   </View>
-                ))}
-                <Text style={cupom.div2}>{DDIV}</Text>
-                <View style={cupom.linha}>
-                  <Text style={[cupom.txtBold, { color: '#7C3AED' }]}>(=) {lang === 'es' ? 'Caja final microseguro' : 'Caixa final microseguro'}</Text>
-                  <Text style={[cupom.txtBold, { color: '#7C3AED' }]}>{fmt(totalMicroseguros)}</Text>
                 </View>
-                <Text style={cupom.div2}>{DDIV}</Text>
-              </>
-            )}
+                {temDiferenca && <Text style={ex.contaAviso}>{avisoDiferenca}</Text>}
+              </View>
 
-            {/* ═══ VENDAS/EMPRÉSTIMOS DO DIA (SAÍDAS DE CAIXA) ═══ */}
-            {vendasDia.length > 0 && (
-              <>
-                <Text style={[cupom.centro, { fontSize: 11, fontWeight: '700', marginBottom: 4, color: '#EF4444' }]}>
-                  {lang === 'es' ? 'PRÉSTAMOS DEL DÍA' : 'EMPRÉSTIMOS DO DIA'}
-                </Text>
-                <Text style={cupom.div1}>{DIV}</Text>
-                {vendasDia.map((emp, idx) => {
-                  const clienteNome = (emp.cliente as any)?.nome || '—';
-                  const clienteCodigo = (emp.cliente as any)?.codigo_cliente || '';
-                  const primeiroPgto = emp.data_primeiro_vencimento
-                    ? data(emp.data_primeiro_vencimento)
-                    : '—';
-                  // ⭐ Identificar tipo: NOVO, RENOVACAO, ADICIONAL
-                  const isRenovacao = emp.tipo_emprestimo === 'RENOVACAO';
-                  const isAdicional = emp.tipo_emprestimo === 'ADICIONAL';
-                  const tipoLabel = isRenovacao ? (lang === 'es' ? '🔄 RENOVACIÓN' : '🔄 RENOVAÇÃO') 
-                    : isAdicional ? (lang === 'es' ? '➕ ADICIONAL' : '➕ ADICIONAL')
-                    : (lang === 'es' ? '🆕 NUEVO' : '🆕 NOVO');
-                  const tipoCor = isRenovacao ? '#F59E0B' : isAdicional ? '#8B5CF6' : '#10B981';
-                  return (
-                    <View key={emp.id}>
-                      {/* ⭐ Badge do tipo em destaque */}
-                      <View style={{ flexDirection: 'row', justifyContent: 'flex-start', marginBottom: 2 }}>
-                        <Text style={{ fontSize: 9, fontWeight: '700', color: tipoCor, backgroundColor: tipoCor + '20', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
-                          {tipoLabel}
-                        </Text>
-                      </View>
-                      <View style={cupom.itemRow}>
-                        <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
-                        <Text style={cupom.itemCat} numberOfLines={1}>{clienteCodigo ? `#${clienteCodigo} ` : ''}{clienteNome}</Text>
-                        {/* ⭐ Sinal NEGATIVO e cor VERMELHA (é saída de caixa) */}
-                        <Text style={[cupom.itemVal, { color: '#EF4444' }]}>-{fmt(parseFloat(emp.valor_principal))}</Text>
-                      </View>
-                      <Text style={[cupom.itemSub, { fontSize: 9 }]}>
-                        {'   '}{lang === 'es' ? '1° pago' : '1° pgto'}: {primeiroPgto}
-                        {'  '}{emp.numero_parcelas}x {fmt(parseFloat(emp.valor_parcela))}
-                        {'  '}{lang === 'es' ? 'intereses' : 'juros'} {fmt(parseFloat(emp.valor_total || 0) - parseFloat(emp.valor_principal || 0))} ({emp.taxa_juros}%)
-                      </Text>
-                      <View style={cupom.itemMeta}>
-                        <Text style={cupom.itemHora}>   {fmtHora(emp.created_at)}</Text>
-                      </View>
-                      {idx < vendasDia.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
-                    </View>
-                  );
-                })}
-                <View style={cupom.linha}>
-                  {/* ⭐ Total em VERMELHO (é saída) */}
-                  <Text style={[cupom.txtVerm, { fontSize: 10 }]}>{lang === 'es' ? 'TOTAL PRÉSTAMOS' : 'TOTAL EMPRÉSTIMOS'}</Text>
-                  <Text style={[cupom.txtVerm, { fontSize: 10 }]}>-{fmt(vendasDia.reduce((s, e) => s + parseFloat(e.valor_principal), 0))}</Text>
+              {/* Selo: o que este extrato É — um dia oficialmente encerrado. */}
+              {fechamento && (
+                <View style={ex.selo}>
+                  <Ionicons name="lock-closed" size={13} color="#374151" />
+                  <Text style={ex.seloTx}>
+                    {L('Sistema fechado', 'Sistema cerrado')} · {fmtDataHora(fechamento.quando)}
+                    {fechamento.por ? ` · ${fechamento.por}` : ''}
+                  </Text>
                 </View>
-                <Text style={cupom.div1}>{DIV}</Text>
-              </>
-            )}
+              )}
 
-            {/* ═══ RENEGOCIAÇÕES DO DIA ═══ */}
-            {renegociacoesDia.length > 0 && (
-              <>
-                <Text style={[cupom.centro, { fontSize: 11, fontWeight: '700', marginBottom: 4, color: '#F59E0B' }]}>
-                  {lang === 'es' ? 'RENEGOCIACIONES' : 'RENEGOCIAÇÕES'}
-                </Text>
-                <Text style={cupom.div1}>{DIV}</Text>
-                {renegociacoesDia.map((emp, idx) => {
-                  const clienteNome = (emp.cliente as any)?.nome || '—';
-                  const primeiroPgto = emp.data_primeiro_vencimento
-                    ? data(emp.data_primeiro_vencimento)
-                    : '—';
-                  return (
-                    <View key={emp.id}>
-                      <View style={cupom.itemRow}>
-                        <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
-                        <Text style={cupom.itemCat} numberOfLines={1}>{clienteNome}</Text>
-                        <Text style={[cupom.itemVal, { color: '#F59E0B' }]}>{fmt(parseFloat(emp.valor_principal))}</Text>
-                      </View>
-                      <Text style={[cupom.itemSub, { fontSize: 9 }]}>
-                        {'   '}{lang === 'es' ? '1° pago' : '1° pgto'}: {primeiroPgto}
-                        {'  '}{emp.numero_parcelas}x {fmt(parseFloat(emp.valor_parcela))}
-                        {'  '}{lang === 'es' ? 'intereses' : 'juros'} {fmt(parseFloat(emp.valor_total || 0) - parseFloat(emp.valor_principal || 0))} ({emp.taxa_juros}%)
-                      </Text>
-                      <View style={cupom.itemMeta}>
-                        <Text style={cupom.itemHora}>   {fmtHora(emp.created_at)}</Text>
-                      </View>
-                      {idx < renegociacoesDia.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
-                    </View>
-                  );
-                })}
-                <View style={cupom.linha}>
-                  <Text style={[cupom.txt, { fontSize: 10, color: '#F59E0B' }]}>{lang === 'es' ? 'TOTAL RENEGOCIACIONES' : 'TOTAL RENEGOCIAÇÕES'}</Text>
-                  <Text style={[cupom.txt, { fontSize: 10, color: '#F59E0B' }]}>{fmt(renegociacoesDia.reduce((s, e) => s + parseFloat(e.valor_principal), 0))}</Text>
-                </View>
-                <Text style={cupom.div1}>{DIV}</Text>
-              </>
-            )}
-
-            {/* ═══ RESUMO OPERACIONAL ═══ */}
-            <Text style={[cupom.centro, { fontSize: 10, marginBottom: 6, color: '#6B7280' }]}>
-              {lang === 'es' ? 'RESUMEN OPERACIONAL' : 'RESUMO OPERACIONAL'}
-            </Text>
-            <View style={cupom.linha}>
-              <Text style={[cupom.txt, { fontSize: 10 }]}>{lang === 'es' ? 'Clientes pagados' : 'Clientes pagos'}</Text>
-              <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{resumoOp.pagos}</Text>
-            </View>
-            <View style={cupom.linha}>
-              <Text style={[cupom.txt, { fontSize: 10 }]}>{lang === 'es' ? 'Clientes no pagados' : 'Clientes não pagos'}</Text>
-              <Text style={[cupom.txtVerm, { fontSize: 10 }]}>{resumoOp.naoPagos}</Text>
-            </View>
-            <View style={cupom.linha}>
-              <Text style={[cupom.txt, { fontSize: 10 }]}>{lang === 'es' ? 'Clientes nuevos' : 'Clientes novos'}</Text>
-              <Text style={[cupom.txt, { fontSize: 10 }]}>{resumoOp.novos}</Text>
-            </View>
-            <View style={cupom.linha}>
-              <Text style={[cupom.txt, { fontSize: 10 }]}>{lang === 'es' ? 'Renovaciones' : 'Renovações'}</Text>
-              <Text style={[cupom.txt, { fontSize: 10 }]}>{resumoOp.renovados}</Text>
-            </View>
-            <View style={cupom.linha}>
-              <Text style={[cupom.txt, { fontSize: 10 }]}>{lang === 'es' ? 'Renegociaciones' : 'Renegociações'}</Text>
-              <Text style={[cupom.txt, { fontSize: 10 }]}>{resumoOp.renegociados}</Text>
-            </View>
-            <Text style={cupom.div2}>{DDIV}</Text>
-
-            {loading ? (
-              <ActivityIndicator size="small" color="#333" style={{ marginVertical: 20 }} />
-            ) : (
-              <>
-                {/* ═══ DETALHES ENTRADAS ═══ */}
-                <Text style={[cupom.centro, { marginTop: 14 }]}>{t.detalheEntradas} ({recebimentos.length + entradasOutras.length})</Text>
-                <Text style={cupom.div1}>{DIV}</Text>
-
-                {pagamentosDinheiro.length === 0 && entradasOutras.length === 0 ? (
-                  <Text style={cupom.centro}>{t.nenhumaEntrada}</Text>
-                ) : (
-                  <>
-                    {/* ── COBRANÇAS DE PARCELAS — usa pagamentos_parcelas diretamente ── */}
-                    {pagamentosDinheiro.length > 0 && (
-                      <>
-                        {/* A contagem é de RECEBIMENTOS — atos do vendedor —, não de parcelas. */}
-                        <Text style={[cupom.centro, { fontSize: 10, marginTop: 6, color: '#6B7280' }]}>── {t.cobrancasParcelas} ({recebimentos.length}) ──</Text>
-                        {itensCobranca.map((item, idx) => {
-                          const rec = item.rec;
-                          const base = item.grupo ? rec.linhas[0] : item.p;
-                          const emprestimoId = (base as any).emprestimo_id;
-                          const abrirFicha = () => {
-                            onClose();
-                            setTimeout(() => nav.navigate('FichaEmprestimo', { emprestimoId }), 250);
-                          };
-                          const divisor = idx < itensCobranca.length - 1
-                            ? <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>
-                            : null;
-
-                          // ── UM RECEBIMENTO QUE COBRIU VÁRIAS PARCELAS ──
-                          // O valor da OPERAÇÃO em cima, a quantidade de
-                          // parcelas embaixo. É o pedido do Julio em 07/11/2026.
-                          if (item.grupo) {
-                            return (
-                              <TouchableOpacity key={rec.key} disabled={!emprestimoId} onPress={abrirFicha}>
-                                <View style={cupom.itemRow}>
-                                  <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
-                                  <Text style={cupom.itemCat} numberOfLines={1}>{rec.nomeCliente}</Text>
-                                  {/* Quitação tem cor própria: é ela que explica o salto do valor. */}
-                                  <Text style={[cupom.itemVal, { color: rec.quitacao ? '#7C3AED' : '#059669' }]}>+{fmt(rec.dinheiro)}</Text>
-                                </View>
-                                <Text style={[cupom.itemSub, { color: '#6B7280', fontSize: 9 }]}>
-                                  {'   '}
-                                  {fraseParcelas(rec.parcelas)}
-                                  {rec.quitacao && ` · ${lang === 'es' ? 'liquidación' : 'quitação'}`}
-                                </Text>
-                                <View style={cupom.itemMeta}>
-                                  <Text style={cupom.itemHora}>   {fmtHora(base.created_at)}</Text>
-                                  {base.forma_pagamento && <Text style={cupom.itemHora}>{base.forma_pagamento}</Text>}
-                                </View>
-                                {divisor}
-                              </TouchableOpacity>
-                            );
-                          }
-
-                          // ── LINHA POR PARCELA, como sempre foi ──
-                          // Recebimento de uma parcela só, ou operação com
-                          // crédito, onde o detalhe é o que vale.
-                          const p = item.p;
-                          const valorPagoAtual = parseFloat(p.valor_pago_atual || p.valor_pago_total || 0);
-                          const creditoUsado = parseFloat(p.valor_credito_usado || 0);
-                          const dinheiroRecebido = valorPagoAtual - creditoUsado;
-                          const liq = creditoLiquido(p);
-                          return (
-                            <TouchableOpacity key={p.id} disabled={!emprestimoId} onPress={abrirFicha}>
-                              <View style={cupom.itemRow}>
-                                <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
-                                <Text style={cupom.itemCat} numberOfLines={1}>{rec.nomeCliente}</Text>
-                                <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(dinheiroRecebido)}</Text>
-                              </View>
-                              <Text style={[cupom.itemSub, { color: '#6B7280', fontSize: 9 }]}>
-                                {'   '}
-                                {lang === 'es' ? 'Cuota' : 'Parcela'} {p.numero_parcela}: {fmt(parseFloat(p.valor_parcela || 0))}
-                                {creditoUsado > 0 && mostrarCredito && ` · ${fmt(creditoUsado)} ${lang === 'es' ? 'con crédito' : 'com crédito'}`}
-                                {fraseCredito(liq)}
-                                {liq.excedente > 0 && mostrarCredito && ` · ${lang === 'es' ? 'Crédito generado' : 'Crédito gerado'}: ${fmt(liq.excedente)}`}
-                              </Text>
-                              <View style={cupom.itemMeta}>
-                                <Text style={cupom.itemHora}>   {fmtHora(p.created_at)}</Text>
-                                {p.forma_pagamento && <Text style={cupom.itemHora}>{p.forma_pagamento}</Text>}
-                              </View>
-                              {divisor}
-                            </TouchableOpacity>
-                          );
-                        })}
-                        <View style={cupom.linha}>
-                          <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{t.totalCobrancas}</Text>
-                          <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{fmt(totalCobrancas)}</Text>
-                        </View>
-                      </>
-                    )}
-
-                    {/* ── OUTRAS RECEITAS ── */}
-                    {entradasOutras.length > 0 && (
-                      <>
-                        <Text style={[cupom.centro, { fontSize: 10, marginTop: 6, color: '#6B7280' }]}>── {t.outrasReceitas} ({entradasOutras.length}) ──</Text>
-                        {entradasOutras.map((item, idx) => (
-                          <View key={item.id}>
-                            <View style={cupom.itemRow}>
-                              <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
-                              <Text style={cupom.itemCat} numberOfLines={1}>{formatarCategoria(item.categoria)}</Text>
-                              <Text style={[cupom.itemVal, { color: '#059669' }]}>+{fmt(parseFloat(item.valor))}</Text>
-                            </View>
-                            {(item.cliente_nome || item.descricao) && (
-                              <Text style={cupom.itemSub} numberOfLines={1}>   {item.cliente_nome || item.descricao}</Text>
-                            )}
-                            <View style={cupom.itemMeta}>
-                              <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
-                              {item.forma_pagamento && <Text style={cupom.itemHora}>{item.forma_pagamento}</Text>}
-                            </View>
-                            {idx < entradasOutras.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
-                          </View>
-                        ))}
-                        <View style={cupom.linha}>
-                          <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{t.totalOutrasReceitas}</Text>
-                          <Text style={[cupom.txtVerde, { fontSize: 10 }]}>{fmt(totalOutrasReceitas)}</Text>
-                        </View>
-                      </>
-                    )}
-                  </>
+              {/* ═══ COBRANÇAS — uma linha por recebimento ═══ */}
+              <BlocoExtrato
+                id="cob" aberto={blocosAbertos.has('cob')} onToggle={alternarBloco}
+                icone="arrow-down" cor="#047857" fundo="#D1FAE5"
+                titulo={L('Cobranças', 'Cobros')}
+                resumo={linhasCobranca.length === 0 ? L('nenhuma', 'ninguno')
+                  : `${plural(linhasCobranca.length, L('recebimento', 'cobro'), L('recebimentos', 'cobros'))} · ${plural(qtdParcelasCob, L('parcela', 'cuota'), L('parcelas', 'cuotas'))}`}
+                valor={fmt(totalCobrancas)}
+                vazio={linhasCobranca.length === 0}
+              >
+                {linhasCobranca.length > 8 && (
+                  <TextInput
+                    value={buscaCob}
+                    onChangeText={setBuscaCob}
+                    placeholder={L('Procurar cliente', 'Buscar cliente')}
+                    placeholderTextColor="#6B7280"
+                    style={ex.busca}
+                  />
                 )}
-
-                {entradasOutras.length > 0 && (
-                  <>
-                    <Text style={cupom.div1}>{DIV}</Text>
-                    <View style={cupom.linha}>
-                      <Text style={cupom.txtVerde}>TOTAL ENTRADAS</Text>
-                      <Text style={cupom.txtVerde}>{fmt(totalCobrancas + totalOutrasReceitas)}</Text>
-                    </View>
-                  </>
-                )}
-
-                {/* ═══ DETALHES SAÍDAS ═══ */}
-                <Text style={[cupom.centro, { marginTop: 14 }]}>{t.detalheSaidas} ({registrosSaidas.length})</Text>
-                <Text style={cupom.div1}>{DIV}</Text>
-
-                {registrosSaidas.length === 0 ? (
-                  <Text style={cupom.centro}>{t.nenhunaSaida}</Text>
-                ) : (
-                  registrosSaidas.map((item, idx) => {
-                    // Anulado continua na lista, riscado: o vendedor lembra de
-                    // ter lançado, e sumir sem rastro é o que faz ele procurar
-                    // o dinheiro. Fora do total, porém — ver
-                    // `totalSaidasDespesas`.
-                    const isAnulado = item.status === 'ANULADO';
-                    return (
-                    <View key={item.id}>
-                      <View style={cupom.itemRow}>
-                        <Text style={cupom.itemIdx}>{String(idx + 1).padStart(2, '0')}</Text>
-                        <Text
-                          style={[cupom.itemCat, isAnulado && { color: '#9CA3AF', textDecorationLine: 'line-through' }]}
-                          numberOfLines={1}
-                          ellipsizeMode="tail"
-                        >
-                          {isAnulado ? '❌ ' : ''}{item.cliente_nome || formatarCategoria(item.categoria)}
-                        </Text>
-                        <Text style={[cupom.itemVal, { color: isAnulado ? '#9CA3AF' : '#DC2626' }, isAnulado && { textDecorationLine: 'line-through' }]}>-{fmt(parseFloat(item.valor))}</Text>
-                      </View>
-                      {isAnulado ? (
-                        <Text style={[cupom.itemSub, { color: '#9CA3AF' }]} numberOfLines={1}>   {t.anulado}</Text>
-                      ) : item.cliente_nome && item.descricao ? (
-                        <Text style={cupom.itemSub} numberOfLines={1}>   {item.descricao}</Text>
-                      ) : null}
-                      <View style={cupom.itemMeta}>
-                        <Text style={cupom.itemHora}>   {fmtHora(item.created_at)}</Text>
-                        {item.forma_pagamento && <Text style={cupom.itemHora}>{item.forma_pagamento}</Text>}
-                      </View>
-                      {idx < registrosSaidas.length - 1 && <Text style={cupom.divPonto}>· · · · · · · · · · · ·</Text>}
-                    </View>
-                    );
-                  })
-                )}
-
-                <Text style={cupom.div1}>{DIV}</Text>
-                <View style={cupom.linha}>
-                  <Text style={cupom.txtVerm}>{t.totalSaidas}</Text>
-                  <Text style={cupom.txtVerm}>{fmt(totalSaidasDespesas)}</Text>
-                </View>
-
-                {/* ═══ DIA REABERTO ═══
-                    Sem o motivo: ele fica no extrato do web. Aqui vale o fato
-                    e o que mudou depois. */}
-                {reaberturas.length > 0 && (
-                  <>
-                    <Text style={cupom.div2}>{DDIV}</Text>
-                    <Text style={[cupom.centro, cupom.txtBold, { color: '#2563EB' }]}>{t.reaberturas}</Text>
-                    {reaberturas.map((ev: any, i: number) => (
-                      <View key={`reab-${i}`} style={{ marginTop: 4 }}>
-                        <View style={cupom.linha}>
-                          <Text style={cupom.txt}>
-                            {ev.tipo === 'REABERTURA' ? t.reaberta : t.fechadaDeNovo}
-                          </Text>
-                          <Text style={cupom.txt}>{fmtHora(ev.momento)}</Text>
-                        </View>
-                        <Text style={cupom.seloTxt}>{ev.usuario || '—'}</Text>
-                      </View>
-                    ))}
-
-                    <Text style={[cupom.centro, cupom.txtBold, { marginTop: 6 }]}>{t.aposReabertura}</Text>
-                    {alteracoesPos.length === 0 ? (
-                      <Text style={cupom.seloTxt}>{t.semAlteracoes}</Text>
-                    ) : (
-                      alteracoesPos.map((ev: any, i: number) => (
-                        <View key={`alt-${i}`} style={{ marginTop: 4 }}>
-                          <View style={cupom.linha}>
-                            <Text style={cupom.txt}>{ev.descricao || ev.tipo}</Text>
-                            <Text style={cupom.txt}>
-                              {ev.impacto_caixa === null ? '—' : fmt(Number(ev.impacto_caixa))}
+                {linhasCobVisiveis.map((l, i) => (
+                  <TouchableOpacity
+                    key={l.key}
+                    disabled={!l.emprestimoId}
+                    onPress={() => abrirFicha(l.emprestimoId)}
+                    style={[ex.item, i > 0 && ex.itemSep, l.quitacao && ex.itemQuit]}
+                  >
+                    <View style={ex.itemTopo}>
+                      <View style={ex.itemEsq}>
+                        <Text style={ex.itemNome} numberOfLines={1}>{l.nome}</Text>
+                        <View style={ex.itemSubLinha}>
+                          {l.quitacao && (
+                            <Text style={[ex.badge, { color: '#5B21B6', backgroundColor: '#EDE9FE' }]}>
+                              {L('QUITOU', 'LIQUIDÓ')}
                             </Text>
+                          )}
+                          <Text style={ex.itemSub}>{fmtHora(l.criado)} · {l.sub}</Text>
+                        </View>
+                      </View>
+                      <Text style={[
+                        ex.itemValor,
+                        l.quitacao && { color: '#6D28D9', fontWeight: '700' },
+                        l.soCredito > 0 && { color: '#9CA3AF' },
+                      ]}>
+                        {fmt(l.valor)}
+                      </Text>
+                    </View>
+                    {l.soCredito > 0 && <Text style={ex.itemNota}>{notaSoCredito(l.soCredito)}</Text>}
+                    {mostrarCredito && (l.usado > 0 || l.gerado > 0) && (
+                      <View style={ex.credBox}>
+                        {l.usado > 0 && credLinha(L('Abateu das parcelas', 'Abonó a las cuotas'), fmt(l.valor + l.usado))}
+                        {l.usado > 0 && credLinha(L('Usou de crédito', 'Usó de crédito'), `-${fmt(l.usado)}`)}
+                        {l.gerado > 0 && credLinha(L('Crédito gerado', 'Crédito generado'), `+${fmt(l.gerado)}`)}
+                      </View>
+                    )}
+                    {!!l.nota && <Text style={ex.itemNota}>{l.nota}</Text>}
+                  </TouchableOpacity>
+                ))}
+                {linhasCobVisiveis.length === 0 && (
+                  <Text style={ex.vazioTx}>{L('Nenhum cliente com esse nome', 'Ningún cliente con ese nombre')}</Text>
+                )}
+              </BlocoExtrato>
+
+              {/* ═══ OUTRAS RECEITAS ═══ */}
+              {entradasOutras.length > 0 && (
+                <BlocoExtrato
+                  id="rec" aberto={blocosAbertos.has('rec')} onToggle={alternarBloco}
+                  icone="add" cor="#047857" fundo="#D1FAE5"
+                  titulo={L('Outras receitas', 'Otros ingresos')}
+                  resumo={plural(entradasOutras.length, L('lançamento', 'movimiento'), L('lançamentos', 'movimientos'))}
+                  valor={fmt(totalOutrasReceitas)}
+                >
+                  {entradasOutras.map((r, i) => (
+                    <View key={r.id} style={[ex.item, i > 0 && ex.itemSep]}>
+                      <View style={ex.itemTopo}>
+                        <View style={ex.itemEsq}>
+                          <Text style={ex.itemNome} numberOfLines={1}>{nomeLanc(r)}</Text>
+                          <Text style={ex.itemSub}>{fmtHora(r.created_at)} · {formatarCategoria(r.categoria)}</Text>
+                        </View>
+                        <Text style={[ex.itemValor, { color: '#047857' }]}>+{fmt(parseFloat(r.valor))}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </BlocoExtrato>
+              )}
+
+              {/* ═══ EMPRÉSTIMOS — quem, quanto saiu, novo ou renovação ═══ */}
+              <BlocoExtrato
+                id="emp" aberto={blocosAbertos.has('emp')} onToggle={alternarBloco}
+                icone="arrow-up" cor="#B91C1C" fundo="#FEE2E2"
+                titulo={L('Empréstimos', 'Préstamos')}
+                resumo={resumoEmprestimos}
+                valor={fmt(totalVendasEmprestimos)}
+                vazio={vendasDia.length === 0}
+              >
+                {vendasDia.map((e: any, i) => {
+                  const tp = tipoEmp(e);
+                  return (
+                    <TouchableOpacity key={e.id} onPress={() => abrirFicha(e.id)} style={[ex.item, i > 0 && ex.itemSep]}>
+                      <View style={ex.itemTopo}>
+                        <View style={ex.itemEsq}>
+                          <Text style={ex.itemNome} numberOfLines={1}>{(e.cliente as any)?.nome || '—'}</Text>
+                          <View style={ex.itemSubLinha}>
+                            <Text style={[ex.badge, { color: tp.cor, backgroundColor: tp.fundo }]}>{tp.rot}</Text>
+                            <Text style={ex.itemSub}>{fmtHora(e.created_at)}</Text>
                           </View>
-                          <Text style={cupom.seloTxt}>
-                            {fmtHora(ev.momento)} · {ev.usuario || '—'}
+                        </View>
+                        <Text style={[ex.itemValor, { color: '#B91C1C' }]}>-{fmt(parseFloat(e.valor_principal || 0))}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </BlocoExtrato>
+
+              {/* ═══ RENEGOCIAÇÕES — não sai do caixa ═══ */}
+              {renegociacoesDia.length > 0 && (
+                <BlocoExtrato
+                  id="reneg" aberto={blocosAbertos.has('reneg')} onToggle={alternarBloco}
+                  icone="swap-horizontal" cor="#B45309" fundo="#FEF3C7"
+                  titulo={L('Renegociações', 'Renegociaciones')}
+                  resumo={`${plural(renegociacoesDia.length, L('renegociação', 'renegociación'), L('renegociações', 'renegociaciones'))} · ${L('não sai do caixa', 'no sale de caja')}`}
+                  valor={fmt(totalRenegociado)}
+                >
+                  {renegociacoesDia.map((e: any, i) => (
+                    <TouchableOpacity key={e.id} onPress={() => abrirFicha(e.id)} style={[ex.item, i > 0 && ex.itemSep]}>
+                      <View style={ex.itemTopo}>
+                        <View style={ex.itemEsq}>
+                          <Text style={ex.itemNome} numberOfLines={1}>{(e.cliente as any)?.nome || '—'}</Text>
+                          <Text style={ex.itemSub}>{fmtHora(e.created_at)}</Text>
+                        </View>
+                        <Text style={[ex.itemValor, { color: '#B45309' }]}>{fmt(parseFloat(e.valor_principal || 0))}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </BlocoExtrato>
+              )}
+
+              {/* ═══ DESPESAS — anulada fica, riscada e fora do total ═══ */}
+              <BlocoExtrato
+                id="desp" aberto={blocosAbertos.has('desp')} onToggle={alternarBloco}
+                icone="remove" cor="#B91C1C" fundo="#FEE2E2"
+                titulo={L('Despesas', 'Gastos')}
+                resumo={resumoDespesas}
+                valor={fmt(totalSaidasDespesas)}
+                vazio={registrosSaidas.length === 0}
+              >
+                {registrosSaidas.map((r, i) => {
+                  const anulado = r.status === 'ANULADO';
+                  return (
+                    <View key={r.id} style={[ex.item, i > 0 && ex.itemSep]}>
+                      <View style={ex.itemTopo}>
+                        <View style={ex.itemEsq}>
+                          <Text style={[ex.itemNome, anulado && ex.itemRisc]} numberOfLines={1}>{nomeLanc(r)}</Text>
+                          <Text style={ex.itemSub}>
+                            {fmtHora(r.created_at)} · {anulado ? t.anulado : formatarCategoria(r.categoria)}
                           </Text>
                         </View>
-                      ))
-                    )}
-                  </>
-                )}
+                        <Text style={[ex.itemValor, { color: '#B91C1C' }, anulado && ex.itemRisc]}>-{fmt(parseFloat(r.valor))}</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </BlocoExtrato>
 
-                {/* ═══ SALDO FINAL ═══ */}
-                <Text style={cupom.div2}>{DDIV}</Text>
-                <View style={cupom.linha}>
-                  <Text style={cupom.txtBold}>{t.saldoFinal}</Text>
-                  <Text style={cupom.txtBold}>{fmt(caixaFinal)}</Text>
-                </View>
-                <Text style={cupom.div2}>{DDIV}</Text>
-                <Text style={[cupom.centro, { marginTop: 8, fontSize: 10 }]}>{t.fimExtrato}</Text>
-              </>
-            )}
-            <View style={{ height: 24 }} />
-          </View>
+              {/* ═══ MICROSSEGURO — caixa próprio, fora da conta de cima ═══ */}
+              {entradasMicroseguro.length > 0 && (
+                <BlocoExtrato
+                  id="micro" aberto={blocosAbertos.has('micro')} onToggle={alternarBloco}
+                  icone="shield-checkmark" cor="#6D28D9" fundo="#EDE9FE"
+                  titulo={L('Microsseguro', 'Microseguro')}
+                  resumo={`${plural(entradasMicroseguro.length, L('venda', 'venta'), L('vendas', 'ventas'))} · ${L('caixa próprio', 'caja propia')}`}
+                  valor={fmt(totalMicroseguros)}
+                >
+                  {entradasMicroseguro.map((r, i) => (
+                    <View key={r.id} style={[ex.item, i > 0 && ex.itemSep]}>
+                      <View style={ex.itemTopo}>
+                        <View style={ex.itemEsq}>
+                          <Text style={ex.itemNome} numberOfLines={1}>{r.cliente_nome || r.descricao || '—'}</Text>
+                          <Text style={ex.itemSub}>{fmtHora(r.created_at)}</Text>
+                        </View>
+                        <Text style={[ex.itemValor, { color: '#6D28D9' }]}>+{fmt(parseFloat(r.valor))}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </BlocoExtrato>
+              )}
+
+              {/* ═══ DIA REABERTO — sem o motivo, que fica no web ═══ */}
+              {reaberturas.length > 0 && (
+                <BlocoExtrato
+                  id="reab" aberto={blocosAbertos.has('reab')} onToggle={alternarBloco}
+                  icone="lock-open" cor="#1D4ED8" fundo="#DBEAFE"
+                  titulo={L('Dia reaberto', 'Día reabierto')}
+                  resumo={plural(alteracoesPos.length, L('alteração depois', 'cambio después'), L('alterações depois', 'cambios después'))}
+                >
+                  {reaberturas.map((ev: any, i: number) => (
+                    <View key={`reab-${i}`} style={[ex.item, i > 0 && ex.itemSep]}>
+                      <View style={ex.itemTopo}>
+                        <View style={ex.itemEsq}>
+                          <Text style={ex.itemNome}>{ev.tipo === 'REABERTURA' ? t.reaberta : t.fechadaDeNovo}</Text>
+                          <Text style={ex.itemSub}>{ev.usuario || '—'}</Text>
+                        </View>
+                        <Text style={ex.itemSub}>{fmtHora(ev.momento)}</Text>
+                      </View>
+                    </View>
+                  ))}
+                  <Text style={ex.reabTitulo}>{t.aposReabertura}</Text>
+                  {alteracoesPos.length === 0 ? (
+                    <Text style={ex.vazioTx}>{t.semAlteracoes}</Text>
+                  ) : alteracoesPos.map((ev: any, i: number) => (
+                    <View key={`alt-${i}`} style={[ex.item, i > 0 && ex.itemSep]}>
+                      <View style={ex.itemTopo}>
+                        <View style={ex.itemEsq}>
+                          <Text style={ex.itemNome}>{ev.descricao || ev.tipo}</Text>
+                          <Text style={ex.itemSub}>{fmtHora(ev.momento)} · {ev.usuario || '—'}</Text>
+                        </View>
+                        <Text style={ex.itemValor}>{ev.impacto_caixa === null ? '—' : fmt(Number(ev.impacto_caixa))}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </BlocoExtrato>
+              )}
+            </>
+          )}
         </ScrollView>
 
         {/* Botões Compartilhar + Reset */}
-        <View style={cupom.shareBar}>
+        <View style={[cupom.shareBar, { backgroundColor: '#F3F4F6' }]}>
           <TouchableOpacity style={cupom.shareBtn} onPress={compartilharExtrato} disabled={compartilhando}>
             {compartilhando ? (
               <ActivityIndicator size="small" color="#fff" />
@@ -1724,6 +1592,105 @@ const resetStyles = StyleSheet.create({
 });
 
 const MONO = Platform.OS === 'ios' ? 'Courier' : 'monospace';
+
+// ══════════════════════════════════════════════════════════════════════════
+// Extrato redesenhado (19/11/2026) — um bloco que mostra a contagem e o
+// total, e abre o detalhe ao toque. Bloco vazio não abre.
+// ══════════════════════════════════════════════════════════════════════════
+function BlocoExtrato({
+  id, aberto, onToggle, icone, cor, fundo, titulo, resumo, valor, vazio, children,
+}: {
+  id: string;
+  aberto: boolean;
+  onToggle: (id: string) => void;
+  icone: keyof typeof Ionicons.glyphMap;
+  cor: string;
+  fundo: string;
+  titulo: string;
+  resumo: string;
+  valor?: string;
+  vazio?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <View style={ex.bloco}>
+      <TouchableOpacity
+        style={ex.blocoTopo}
+        disabled={vazio}
+        onPress={() => onToggle(id)}
+        accessibilityState={{ expanded: aberto }}
+      >
+        <View style={[ex.blocoIcone, { backgroundColor: fundo }]}>
+          <Ionicons name={icone} size={17} color={cor} />
+        </View>
+        <View style={ex.blocoTxts}>
+          <Text style={ex.blocoTitulo}>{titulo}</Text>
+          <Text style={ex.blocoResumo}>{resumo}</Text>
+        </View>
+        {valor != null && <Text style={[ex.blocoValor, { color: cor }]}>{valor}</Text>}
+        {!vazio && <Ionicons name={aberto ? 'chevron-up' : 'chevron-down'} size={16} color="#6B7280" />}
+      </TouchableOpacity>
+      {aberto && !vazio && <View style={ex.blocoCorpo}>{children}</View>}
+    </View>
+  );
+}
+
+const ex = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#F3F4F6' },
+  header: { backgroundColor: '#1F2937', paddingTop: 50, paddingBottom: 14, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  headerTxts: { flex: 1, flexShrink: 1 },
+  headerTitulo: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  headerSub: { color: '#D1D5DB', fontSize: 12, marginTop: 2 },
+  fecharBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
+  scroll: { flex: 1 },
+  scrollConteudo: { padding: 14, gap: 10, paddingBottom: 24 },
+
+  conta: { backgroundColor: '#fff', borderRadius: 14, padding: 16, gap: 4 },
+  contaRot: { fontSize: 12, color: '#4B5563' },
+  contaGrande: { fontSize: 30, fontWeight: '700', color: '#111827', fontVariant: ['tabular-nums'] },
+  contaLinhas: { borderTopWidth: 1, borderTopColor: '#E5E7EB', marginTop: 6, paddingTop: 8, gap: 6 },
+  contaLinha: { flexDirection: 'row', alignItems: 'baseline', gap: 10 },
+  contaLinhaRot: { flex: 1, flexShrink: 1, fontSize: 13 },
+  contaLinhaVal: { fontSize: 13, fontWeight: '500', fontVariant: ['tabular-nums'] },
+  contaFim: { borderTopWidth: 1, borderTopColor: '#E5E7EB', paddingTop: 8, marginTop: 2 },
+  contaFimRot: { flex: 1, flexShrink: 1, fontSize: 13, fontWeight: '700', color: '#111827' },
+  contaFimVal: { fontSize: 14, fontWeight: '700', color: '#111827', fontVariant: ['tabular-nums'] },
+  contaAviso: { fontSize: 11, color: '#7F1D1D', marginTop: 6, lineHeight: 15 },
+
+  selo: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#E5E7EB', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9 },
+  seloTx: { flexShrink: 1, fontSize: 12, color: '#374151' },
+
+  bloco: { backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' },
+  blocoTopo: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 13 },
+  blocoIcone: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  blocoTxts: { flex: 1, flexShrink: 1 },
+  blocoTitulo: { fontSize: 14, fontWeight: '500', color: '#111827' },
+  blocoResumo: { fontSize: 11, color: '#4B5563', marginTop: 1 },
+  blocoValor: { fontSize: 14, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  blocoCorpo: { borderTopWidth: 1, borderTopColor: '#E5E7EB', paddingHorizontal: 12, paddingVertical: 4 },
+
+  busca: { borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, fontSize: 13, color: '#111827', marginTop: 8, marginBottom: 4 },
+  item: { paddingVertical: 9, paddingHorizontal: 2, gap: 4 },
+  itemSep: { borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+  itemQuit: { backgroundColor: '#F5F3FF', borderRadius: 8, paddingHorizontal: 6 },
+  itemTopo: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  itemEsq: { flex: 1, flexShrink: 1, gap: 2 },
+  itemNome: { fontSize: 13, color: '#111827' },
+  itemSubLinha: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  itemSub: { flexShrink: 1, fontSize: 11, color: '#4B5563' },
+  itemValor: { fontSize: 14, fontWeight: '500', color: '#111827', fontVariant: ['tabular-nums'] },
+  itemRisc: { color: '#9CA3AF', textDecorationLine: 'line-through' },
+  itemNota: { fontSize: 11, color: '#6B7280' },
+  badge: { fontSize: 10, fontWeight: '700', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, overflow: 'hidden' },
+
+  credBox: { backgroundColor: '#FFFBEB', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, gap: 2 },
+  credLinha: { flexDirection: 'row', alignItems: 'baseline', gap: 10 },
+  credRot: { flex: 1, flexShrink: 1, fontSize: 11, color: '#78350F' },
+  credVal: { fontSize: 11, color: '#78350F', fontVariant: ['tabular-nums'] },
+
+  vazioTx: { fontSize: 12, color: '#6B7280', textAlign: 'center', paddingVertical: 10 },
+  reabTitulo: { fontSize: 12, fontWeight: '700', color: '#1E40AF', marginTop: 8 },
+});
 
 const cupom = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#E8E4DF' },

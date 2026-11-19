@@ -235,3 +235,5 @@ campo mostra nao mapeia para nada.
 - **1.3.94** - 2026-11-19 08:51 - `src/components/ParcelasModal.tsx`
 - **1.3.95** - 2026-11-19 11:35 - `src/components/ParcelasModal.tsx`
 - **1.3.96** - 2026-11-19 11:36 - `src/components/ParcelasModal.tsx`
+- **1.3.97** - 2026-11-19 12:23 - `src/components/LiquidacaoDetalhes.tsx`
+- **1.3.98** - 2026-11-19 14:53 - `src/components/LiquidacaoDetalhes.tsx`
