@@ -11,6 +11,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Dimensions, FlatList, Image, Modal, Platform, ScrollView, Share, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Text, TextInput } from './texto';
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
+import { useTrabalhaCredito } from '../hooks/useTrabalhaCredito';
 import { supabase } from '../services/supabase';
 import { mensagemErro } from '../utils/mensagemErro';
 import { moeda, data, dataHora, hora } from '../utils/formato';
@@ -211,6 +212,9 @@ interface ExtratoProps {
 }
 
 export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, caixaFinal, rotaNome, vendedorNomeExterno, lang = 'pt-BR', isLiquidacaoAberta = false }: ExtratoProps) {
+  // Sem crédito à vista, as frases de crédito saem do extrato; o DINHEIRO de
+  // cada linha já é líquido dele, então os totais não mudam.
+  const mostrarCredito = useTrabalhaCredito();
   const nav = useNavigation<any>();
   const t = i18n[lang];
   const [registros, setRegistros] = useState<any[]>([]);
@@ -499,7 +503,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   /** Fragmento que declara o crédito aplicado pelo empréstimo (uma vez só). */
   const fraseCredito = (liq: { parcelasQuitadas: number; creditoOculto: number }) => {
     const qtd = liq.parcelasQuitadas;
-    if (liq.creditoOculto > 0) {
+    if (liq.creditoOculto > 0 && mostrarCredito) {
       const un = lang === 'es'
         ? (qtd === 1 ? 'cuota' : 'cuotas')
         : (qtd === 1 ? 'parcela' : 'parcelas');
@@ -786,7 +790,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         const liqH = creditoLiquido(p);
         return `<div class="mov">
           <div class="mov-row"><span class="mov-idx">${num}</span><span class="mov-cat">${rec.nomeCliente}</span><span class="mov-val verde">+${fmt(dinheiroRecebido)}</span></div>
-          <div class="mov-sub" style="color:#6B7280">${lang === 'es' ? 'Cuota' : 'Parcela'} ${p.numero_parcela}: ${fmt(parseFloat(p.valor_parcela || 0))}${creditoUsado > 0 ? ` · ${fmt(creditoUsado)} ${lang === 'es' ? 'con crédito' : 'com crédito'}` : ''}${fraseCredito(liqH)}${liqH.excedente > 0 ? ` · ${lang === 'es' ? 'Crédito generado' : 'Crédito gerado'}: ${fmt(liqH.excedente)}` : ''}</div>
+          <div class="mov-sub" style="color:#6B7280">${lang === 'es' ? 'Cuota' : 'Parcela'} ${p.numero_parcela}: ${fmt(parseFloat(p.valor_parcela || 0))}${creditoUsado > 0 && mostrarCredito ? ` · ${fmt(creditoUsado)} ${lang === 'es' ? 'con crédito' : 'com crédito'}` : ''}${fraseCredito(liqH)}${liqH.excedente > 0 && mostrarCredito ? ` · ${lang === 'es' ? 'Crédito generado' : 'Crédito gerado'}: ${fmt(liqH.excedente)}` : ''}</div>
           <div class="mov-meta"><span>${fmtHora(p.created_at)}</span>${p.forma_pagamento ? `<span>${p.forma_pagamento}</span>` : ''}</div>
         </div>`;
       }).join('')}
@@ -1259,9 +1263,9 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
                               <Text style={[cupom.itemSub, { color: '#6B7280', fontSize: 9 }]}>
                                 {'   '}
                                 {lang === 'es' ? 'Cuota' : 'Parcela'} {p.numero_parcela}: {fmt(parseFloat(p.valor_parcela || 0))}
-                                {creditoUsado > 0 && ` · ${fmt(creditoUsado)} ${lang === 'es' ? 'con crédito' : 'com crédito'}`}
+                                {creditoUsado > 0 && mostrarCredito && ` · ${fmt(creditoUsado)} ${lang === 'es' ? 'con crédito' : 'com crédito'}`}
                                 {fraseCredito(liq)}
-                                {liq.excedente > 0 && ` · ${lang === 'es' ? 'Crédito generado' : 'Crédito gerado'}: ${fmt(liq.excedente)}`}
+                                {liq.excedente > 0 && mostrarCredito && ` · ${lang === 'es' ? 'Crédito generado' : 'Crédito gerado'}: ${fmt(liq.excedente)}`}
                               </Text>
                               <View style={cupom.itemMeta}>
                                 <Text style={cupom.itemHora}>   {fmtHora(p.created_at)}</Text>
@@ -1779,7 +1783,12 @@ interface PagamentosProps {
 }
 
 interface ClienteGrupo {
+  /** cliente_id|emprestimo_id — um card por CONTA, não por cliente (ver o memo). */
+  chave: string;
   clienteId: string;
+  emprestimoId: string;
+  /** Principal da conta; mostrado só quando o cliente tem mais de uma conta na lista. */
+  valorPrincipal: number;
   clienteNome: string;
   clienteCod: string;
   totalPago: number;
@@ -1788,6 +1797,7 @@ interface ClienteGrupo {
 }
 
 export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, totalNaoPagos, lang = 'pt-BR' }: PagamentosProps) {
+  const mostrarCredito = useTrabalhaCredito();
   const t = i18n[lang];
   const [registros, setRegistros] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1806,7 +1816,7 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
         .select(`
           id, numero_parcela, valor_pago_total, valor_pago_atual, valor_parcela, valor_saldo,
           forma_pagamento, valor_credito_usado, valor_credito_gerado,
-          status_parcela_atual, created_at, cliente_id,
+          status_parcela_atual, created_at, cliente_id, emprestimo_id,
           cliente:cliente_id(nome, consecutivo),
           emprestimo:emprestimo_id(valor_principal, numero_parcelas, status)
         `)
@@ -1828,17 +1838,27 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
     return registros.filter(r => r.forma_pagamento !== 'CREDITO');
   }, [registros]);
 
-  // Agrupar por cliente. SEM deduplicar — ver o porquê no ModalExtrato acima.
-  // O dedup que havia aqui era ainda mais largo: por `numero_parcela` DENTRO
-  // do cliente, então perdia também a parcela 8 do empréstimo A quando o mesmo
-  // cliente pagou a parcela 8 do empréstimo B no mesmo dia.
+  // Agrupar por CONTA (cliente + empréstimo). SEM deduplicar — ver o porquê
+  // no ModalExtrato acima. O dedup que havia aqui era ainda mais largo: por
+  // `numero_parcela` DENTRO do cliente, então perdia também a parcela 8 do
+  // empréstimo A quando o mesmo cliente pagou a parcela 8 do empréstimo B.
+  //
+  // ⚠ Agrupava por CLIENTE até 17/11/2026, e quitar + renovar + pagar a 1ª
+  // parcela da renovação no mesmo dia virava UM card "✓ QUITADO" com as
+  // parcelas das duas contas somadas (1.885,68, 8 parcelas) — a renovação
+  // aparecia como quitada. O selo é da CONTA, então o card também.
   const clientesAgrupados: ClienteGrupo[] = React.useMemo(() => {
     const map = new Map<string, ClienteGrupo>();
     pagamentosDinheiro.forEach(r => {
       const cId = r.cliente_id || 'unknown';
-      if (!map.has(cId)) {
-        map.set(cId, {
+      const eId = r.emprestimo_id || 'unknown';
+      const chave = `${cId}|${eId}`;
+      if (!map.has(chave)) {
+        map.set(chave, {
+          chave,
           clienteId: cId,
+          emprestimoId: eId,
+          valorPrincipal: parseFloat(r.emprestimo?.valor_principal || 0),
           clienteNome: r.cliente?.nome || t.cliente,
           clienteCod: r.cliente?.consecutivo || '',
           totalPago: 0,
@@ -1846,7 +1866,7 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
           quitado: false,
         });
       }
-      const grupo = map.get(cId)!;
+      const grupo = map.get(chave)!;
       grupo.parcelas.push(r);
       // ⭐ Verificar se empréstimo foi quitado
       if (r.emprestimo?.status === 'QUITADO') {
@@ -1863,6 +1883,14 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
     });
     return Array.from(map.values());
   }, [pagamentosDinheiro]);
+
+  // Quantas contas de cada cliente estão na lista: com mais de uma, o card
+  // mostra o principal para o vendedor distinguir a quitada da renovação.
+  const contasPorCliente = React.useMemo(() => {
+    const m = new Map<string, number>();
+    clientesAgrupados.forEach(g => m.set(g.clienteId, (m.get(g.clienteId) || 0) + 1));
+    return m;
+  }, [clientesAgrupados]);
 
   // ⭐ CORREÇÃO: Calcular totais considerando apenas dinheiro efetivo
   const totalDinheiro = pagamentosDinheiro
@@ -1881,12 +1909,13 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
     }, 0);
 
   const renderCliente = ({ item: grupo }: { item: ClienteGrupo }) => {
-    const isExpanded = expandido === grupo.clienteId;
+    const isExpanded = expandido === grupo.chave;
+    const variasContas = (contasPorCliente.get(grupo.clienteId) || 0) > 1;
 
     return (
       <TouchableOpacity
         style={dStyles.pagItem}
-        onPress={() => setExpandido(isExpanded ? null : grupo.clienteId)}
+        onPress={() => setExpandido(isExpanded ? null : grupo.chave)}
         activeOpacity={0.7}
       >
         {/* Header do cliente */}
@@ -1904,6 +1933,11 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
               )}
             </View>
             {grupo.clienteCod ? <Text style={dStyles.pagClienteCod}>#{grupo.clienteCod}</Text> : null}
+            {variasContas && (
+              <Text style={dStyles.pagClienteCod}>
+                {lang === 'es' ? 'Préstamo' : 'Empréstimo'} {fmt(grupo.valorPrincipal)}
+              </Text>
+            )}
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={[dStyles.pagDetailValue, { color: '#059669', fontWeight: '700', fontSize: 15 }]}>{fmt(grupo.totalPago)}</Text>
@@ -1935,7 +1969,7 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
                   </View>
                 </View>
                 {/* ⭐ Crédito: mostrar usado sempre, mas gerado só se NÃO quitou */}
-                {(p.valor_credito_usado > 0 || (p.valor_credito_gerado > 0 && !grupo.quitado)) && (
+                {mostrarCredito && (p.valor_credito_usado > 0 || (p.valor_credito_gerado > 0 && !grupo.quitado)) && (
                   <View style={dStyles.pagCredito}>
                     {p.valor_credito_usado > 0 && <Text style={dStyles.pagCreditoText}>{t.creditoUsado}: {fmt(p.valor_credito_usado)}</Text>}
                     {p.valor_credito_gerado > 0 && !grupo.quitado && <Text style={dStyles.pagCreditoText}>{t.creditoGerado}: {fmt(p.valor_credito_gerado)}</Text>}
@@ -1998,7 +2032,7 @@ export function ModalPagamentos({ visible, onClose, liquidacaoId, totalPagos, to
         ) : (
           <FlatList
             data={clientesAgrupados}
-            keyExtractor={(item) => item.clienteId}
+            keyExtractor={(item) => item.chave}
             renderItem={renderCliente}
             contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 40 }}
             showsVerticalScrollIndicator={false}

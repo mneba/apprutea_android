@@ -1,5 +1,4 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
 import React, { useRef, useState } from 'react';
 import { Animated, Image, ScrollView, StyleSheet, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Text } from './texto';
@@ -17,6 +16,8 @@ export interface EmprestimoData {
   credito_disponivel?: number;
   valor_total?: number;
   numero_parcelas: number; status_emprestimo: string; frequencia_pagamento: string;
+  /** Quitado que já gerou renovação (não cancelada): Renovar fica desabilitado. */
+  ja_renovado?: boolean;
   /**
    * Só em SEMANAL, e só depois da leitura sob demanda — o payload da
    * liquidação não traz este campo. 0 = domingo.
@@ -177,6 +178,9 @@ interface ClienteCardLiquidacaoProps {
   expanded: boolean;
   pagasSet: Set<string>;
   naoPagosSet?: Set<string>;
+  /** `rotas.trabalha_credito`. false esconde a linha de crédito; o saldo
+   *  ao lado já é líquido dele. Ver hooks/useTrabalhaCredito. */
+  mostrarCredito?: boolean;
   liqId: string | null;
   isViz: boolean;
   isClientePago?: boolean; // ⭐ Cliente está no filtro "Pagas" - desabilita pagamento
@@ -221,6 +225,14 @@ interface ClienteCardLiquidacaoProps {
   onPagarProxima?: (clienteInfo: any) => void;
   /** Liga o caminho acima. Hoje: só na aba Pagos. */
   permiteNovoPagamento?: boolean;
+  /**
+   * Empréstimo QUITADO na aba Pagos: não existe "próxima parcela", então o
+   * botão vira RENOVAR e cai no mesmo fluxo de renovação do card de Todos
+   * (`NovoCliente` com `clienteExistente`). Pedido do Mauricio, 17/11/2026:
+   * "Novo pagamento" continuava aberto depois da quitação e levava a
+   * "Este empréstimo não tem parcelas em aberto".
+   */
+  onRenovar?: (clienteInfo: { id: string; nome: string; telefone_celular: string | null; emprestimo_id: string }) => void;
   onAbrirParcelas: (clienteId: string, clienteNome: string, emprestimoId: string) => void;
   onAbrirNotas: (clienteId: string, clienteNome: string) => void;
   onAbrirDetalhes: (cliente: { id: string; nome: string; telefone?: string | null; endereco?: string | null; codigo_cliente?: string | number | null }) => void;
@@ -243,13 +255,13 @@ interface ClienteCardLiquidacaoProps {
 // campo relatou. O memo só funciona porque ClientesScreen estabilizou os
 // handlers com useCallback; props novas a cada render anulariam tudo.
 function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
-  const nav = useNavigation<any>();
   const {
     cliente: c,
     emprestimo: e,
     expanded: ex,
     pagasSet,
     naoPagosSet,
+    mostrarCredito = true,
     liqId,
     isViz,
     isClientePago = false,
@@ -264,6 +276,7 @@ function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
     onToggleExpand,
     onPagar,
     onPagarProxima,
+    onRenovar,
     permiteNovoPagamento,
     onAbrirParcelas,
     onAbrirNotas,
@@ -467,7 +480,7 @@ function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
                 ⚠ O saldo acima JA esta liquido deste valor -- a linha existe
                 para o cobrador poder DIZER ao cliente que ele tem credito, nao
                 para ser subtraida de novo. */}
-            {(e.credito_disponivel || 0) > 0 && (
+            {(e.credito_disponivel || 0) > 0 && mostrarCredito && (
               <Text style={S.cLbl}>
                 {t.creditoDisponivel || 'Crédito disponível:'} {fmt(e.credito_disponivel || 0)}
               </Text>
@@ -509,13 +522,18 @@ function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
               // Já pago e na aba Pagos: o botão vira "+ Pagamento" e mira a
               // PRÓXIMA parcela em aberto, nunca a que acabou de ser paga.
               const novo = pg && !!permiteNovoPagamento && !!onPagarProxima;
-              const off = (novo ? (np || !liqId || isViz) : (pg || np || !liqId || isViz));
+              // Quitado não tem próxima parcela: o botão é Renovar.
+              const renovar = novo && estaQuitado(e) && !!onRenovar;
+              // Já renovado: a origem não pode gerar outro. Botão fica, desabilitado.
+              const jaRenovado = renovar && e.ja_renovado === true;
+              const off = (novo ? (np || !liqId || isViz || jaRenovado) : (pg || np || !liqId || isViz));
               return (
                 <TouchableOpacity
                   style={[S.btPagarGrande, off && S.btPagarDisabled, novo && !off && S.btPagarNovo]}
                   onPress={() => {
                     if (off) return;
                     const info = { id: c.cliente_id, nome: c.nome, emprestimo_id: e.emprestimo_id, saldo_emprestimo: e.saldo_emprestimo, emprestimo_status: e.status_emprestimo };
+                    if (renovar) { onRenovar!({ id: c.cliente_id, nome: c.nome, telefone_celular: c.telefone_celular, emprestimo_id: e.emprestimo_id }); return; }
                     if (novo) { onPagarProxima!(info); return; }
                     onPagar(
                       { parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0, valor_pago: e.valor_pago_parcela || 0, valor_saldo: e.saldo_parcela || e.valor_parcela },
@@ -524,9 +542,9 @@ function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
                   }}
                   disabled={off}
                 >
-                  <Text style={S.btPagarIcon}>{novo ? '+' : '$'}</Text>
+                  <Text style={S.btPagarIcon}>{renovar ? (jaRenovado ? '✓' : '↻') : novo ? '+' : '$'}</Text>
                   <Text style={S.btPagarText}>
-                    {novo ? (lang === 'es' ? 'Nuevo pago' : 'Novo pagamento') : t.pagar}
+                    {renovar ? (jaRenovado ? 'Renovado' : 'Renovar') : novo ? (lang === 'es' ? 'Nuevo pago' : 'Novo pagamento') : t.pagar}
                   </Text>
                 </TouchableOpacity>
               );
@@ -542,9 +560,9 @@ function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
           {/* Pagar é a única ação de verdade e fica sozinho acima, na largura toda.
               Estes três são navegação: mesmo peso entre si, discretos. Antes os
               quatro disputavam a mesma linha e nada dizia qual era o principal. */}
-          {/* Notas e Dados abrem modal AQUI; Parcelas sai para outra tela.
-              Por isso os dois primeiros ficam colados num controle segmentado e o
-              terceiro fica apartado, com o chevron de "isto te leva embora". */}
+          {/* Notas e Dados ficam colados num controle segmentado; Parcelas fica
+              apartado. Desde 18/11/2026 ele abre a tela de parcelas (com estorno)
+              AQUI, e não mais a Ficha — que fica a um toque dentro dela. */}
           <View style={S.acoesSec}>
             <View style={S.grupoModal}>
               <TouchableOpacity style={S.btGrupo} activeOpacity={0.6} onPress={() => onAbrirNotas(c.cliente_id, c.nome)}>
@@ -562,11 +580,10 @@ function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
             <TouchableOpacity
               style={S.btPagina}
               activeOpacity={0.7}
-              onPress={() => nav.navigate('FichaEmprestimo', { emprestimoId: e.emprestimo_id })}
+              onPress={() => onAbrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}
             >
               <Ionicons name="list-outline" size={16} color="#4338CA" />
               <Text style={S.btPaginaTx}>{lang === 'es' ? 'Cuotas' : 'Parcelas'}</Text>
-              <Ionicons name="chevron-forward" size={13} color="#818CF8" />
             </TouchableOpacity>
           </View>
 
@@ -612,6 +629,7 @@ function CardMultiplo({
   cliente: c,
   pagasSet,
   naoPagosSet,
+  mostrarCredito = true,
   liqId,
   isViz,
   isClientePago = false,
@@ -623,12 +641,12 @@ function CardMultiplo({
   t,
   onPagar,
   onPagarProxima,
+  onRenovar,
   permiteNovoPagamento,
   onAbrirParcelas,
   onAbrirNotas,
   onAbrirDetalhes,
 }: ClienteCardLiquidacaoProps) {
-  const nav = useNavigation<any>();
   const { width } = useWindowDimensions();
   const [idx, setIdx] = useState(0);
 
@@ -728,7 +746,7 @@ function CardMultiplo({
                 ⚠ O saldo acima JA esta liquido deste valor -- a linha existe
                 para o cobrador poder DIZER ao cliente que ele tem credito, nao
                 para ser subtraida de novo. */}
-            {(e.credito_disponivel || 0) > 0 && (
+            {(e.credito_disponivel || 0) > 0 && mostrarCredito && (
               <Text style={S.cLbl}>
                 {t.creditoDisponivel || 'Crédito disponível:'} {fmt(e.credito_disponivel || 0)}
               </Text>
@@ -765,7 +783,10 @@ function CardMultiplo({
             // inclui `pago` e `isClientePago`, que são justamente o que a aba
             // Pagos precisa destravar.
             const novo = (pago || isClientePago) && !!permiteNovoPagamento && !!onPagarProxima;
-            const off = novo ? (np || !liqId || isViz) : bloqueado;
+            // Quitado não tem próxima parcela: o botão é Renovar (ver o card único).
+            const renovar = novo && estaQuitado(e) && !!onRenovar;
+            const jaRenovado = renovar && e.ja_renovado === true;
+            const off = novo ? (np || !liqId || isViz || jaRenovado) : bloqueado;
             return (
               <TouchableOpacity
                 style={[S.btPagarGrande, off && S.btPagarDisabled, novo && !off && S.btPagarNovo]}
@@ -773,6 +794,7 @@ function CardMultiplo({
                 onPress={() => {
                   if (off) return;
                   const info = { id: c.cliente_id, nome: c.nome, emprestimo_id: e.emprestimo_id, saldo_emprestimo: e.saldo_emprestimo, emprestimo_status: e.status_emprestimo };
+                  if (renovar) { onRenovar!({ id: c.cliente_id, nome: c.nome, telefone_celular: c.telefone_celular, emprestimo_id: e.emprestimo_id }); return; }
                   if (novo) { onPagarProxima!(info); return; }
                   onPagar(
                     { parcela_id: e.parcela_id, numero_parcela: e.numero_parcela, data_vencimento: e.data_vencimento, valor_parcela: e.valor_parcela, status: e.status_parcela, data_pagamento: null, valor_multa: 0, valor_pago: e.valor_pago_parcela || 0, valor_saldo: e.saldo_parcela || e.valor_parcela },
@@ -780,9 +802,9 @@ function CardMultiplo({
                   );
                 }}
               >
-                <Text style={S.btPagarIcon}>{novo ? '+' : '$'}</Text>
+                <Text style={S.btPagarIcon}>{renovar ? (jaRenovado ? '✓' : '↻') : novo ? '+' : '$'}</Text>
                 <Text style={S.btPagarText}>
-                  {novo ? (lang === 'es' ? 'Nuevo pago' : 'Novo pagamento') : t.pagar}
+                  {renovar ? (jaRenovado ? 'Renovado' : 'Renovar') : novo ? (lang === 'es' ? 'Nuevo pago' : 'Novo pagamento') : t.pagar}
                 </Text>
               </TouchableOpacity>
             );
@@ -798,9 +820,9 @@ function CardMultiplo({
         {/* Pagar é a única ação de verdade e fica sozinho acima, na largura toda.
             Estes três são navegação: mesmo peso entre si, discretos. Antes os
             quatro disputavam a mesma linha e nada dizia qual era o principal. */}
-        {/* Notas e Dados abrem modal AQUI; Parcelas sai para outra tela.
-            Por isso os dois primeiros ficam colados num controle segmentado e o
-            terceiro fica apartado, com o chevron de "isto te leva embora". */}
+        {/* Notas e Dados ficam colados num controle segmentado; Parcelas fica
+            apartado. Desde 18/11/2026 ele abre a tela de parcelas (com estorno)
+            AQUI, e não mais a Ficha — que fica a um toque dentro dela. */}
         <View style={S.acoesSec}>
           <View style={S.grupoModal}>
             <TouchableOpacity style={S.btGrupo} activeOpacity={0.6} onPress={() => onAbrirNotas(c.cliente_id, c.nome)}>
@@ -818,11 +840,10 @@ function CardMultiplo({
           <TouchableOpacity
             style={S.btPagina}
             activeOpacity={0.7}
-            onPress={() => nav.navigate('FichaEmprestimo', { emprestimoId: e.emprestimo_id })}
+            onPress={() => onAbrirParcelas(c.cliente_id, c.nome, e.emprestimo_id)}
           >
             <Ionicons name="list-outline" size={16} color="#4338CA" />
             <Text style={S.btPaginaTx}>{lang === 'es' ? 'Cuotas' : 'Parcelas'}</Text>
-            <Ionicons name="chevron-forward" size={13} color="#818CF8" />
           </TouchableOpacity>
         </View>
       </View>

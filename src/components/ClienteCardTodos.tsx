@@ -1,4 +1,3 @@
-import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { Alert, Image, Platform, StyleSheet, TouchableOpacity, View } from 'react-native';
@@ -144,6 +143,9 @@ interface ClienteCardTodosProps {
   empIdx: number;
   expanded: boolean;
   modoReordenar: boolean;
+  /** `rotas.trabalha_credito`. false esconde a linha de crédito; o saldo
+   *  ao lado já é líquido dele. Ver hooks/useTrabalhaCredito. */
+  mostrarCredito?: boolean;
   lang: Language;
   notasCount: number;
   t: {
@@ -214,6 +216,7 @@ function ClienteCardTodos({
   empIdx: ei,
   expanded: ex,
   modoReordenar,
+  mostrarCredito = true,
   lang,
   notasCount,
   t,
@@ -235,7 +238,6 @@ function ClienteCardTodos({
   dataReferencia,
   configCobranca,
 }: ClienteCardTodosProps) {
-  const nav = useNavigation<any>();
   // Cliente suspenso pelo administrador: não pode iniciar renovação nem
   // empréstimo novo. Antes só era barrado no "Confirmar venda", depois de o
   // cobrador já ter preenchido tudo — e às vezes já ter combinado com o cliente.
@@ -382,7 +384,7 @@ function ClienteCardTodos({
                     para o cobrador ver de onde vem a diferença sem abrir o
                     cliente — pedido do campo, e a outra metade do relato de
                     22/10/2026. Cor do crédito, a mesma do resto do app. */}
-                {(emp.credito_disponivel || 0) > 0 && (
+                {(emp.credito_disponivel || 0) > 0 && mostrarCredito && (
                   <Text style={S.creditoLbl}>
                     {t.creditoDisponivel} {fmt(emp.credito_disponivel || 0)}
                   </Text>
@@ -547,10 +549,9 @@ function ClienteCardTodos({
             </TouchableOpacity>
           )}
 
-          {/* Notas e Dados abrem modal AQUI; Parcelas sai para outra tela.
-              Por isso os dois primeiros ficam colados num controle segmentado
-              e o terceiro fica apartado, com o chevron que é a convenção de
-              "isto te leva embora". */}
+          {/* Notas e Dados ficam colados num controle segmentado; Parcelas fica
+              apartado. Desde 18/11/2026 ele abre a tela de parcelas (com
+              estorno) AQUI, e não mais a Ficha — que fica a um toque dentro dela. */}
           <View style={S.acoesSec}>
             <View style={S.grupoModal}>
               <TouchableOpacity
@@ -576,11 +577,10 @@ function ClienteCardTodos({
             <TouchableOpacity
               style={S.btPagina}
               activeOpacity={0.7}
-              onPress={() => nav.navigate('FichaEmprestimo', { emprestimoId: emp.id })}
+              onPress={() => onAbrirParcelas(c.id, c.nome, emp.id, emp.status)}
             >
               <Ionicons name="list-outline" size={16} color="#4338CA" />
               <Text style={S.btPaginaTx}>{lang === 'es' ? 'Cuotas' : 'Parcelas'}</Text>
-              <Ionicons name="chevron-forward" size={13} color="#818CF8" />
             </TouchableOpacity>
           </View>
 

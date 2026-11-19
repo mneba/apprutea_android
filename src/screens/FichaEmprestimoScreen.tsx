@@ -20,15 +20,17 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { LayoutAnimation, Modal, Platform, ScrollView, StyleSheet, TouchableOpacity, UIManager, View } from 'react-native';
+import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Text } from '../components/texto';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AnexosLista from '../components/AnexosLista';
 import Carregando from '../components/Carregando';
 import { useAuth } from '../contexts/AuthContext';
+import { useTrabalhaCredito } from '../hooks/useTrabalhaCredito';
+import { parcelasPagasEquivalentes, fracaoBr } from '../utils/creditoEmTela';
 import { buscarFicha, EventoFicha, Ficha } from '../services/fichaEmprestimo';
 import { mensagemErro } from '../utils/mensagemErro';
-import { moeda, hora } from '../utils/formato';
+import { moeda, hora, numeroBr } from '../utils/formato';
 
 type Lang = 'pt-BR' | 'es';
 
@@ -39,7 +41,6 @@ const TX = {
     tentar: 'Tentar de novo',
     carregando: 'Abrindo a ficha…',
     linhaTempo: 'Linha do tempo',
-    parcelas: 'Parcelas',
     emprestado: 'Emprestado',
     saldo: 'Saldo devedor',
     recebido: 'Dinheiro recebido',
@@ -54,6 +55,7 @@ const TX = {
     pagamento: 'Pagamento',
     quitacao: 'Quitação',
     creditoCascata: 'Crédito aplicado',
+    adiantamento: 'Adiantamento aplicado',
     importacao: 'Importação',
     estornado: 'ESTORNADO',
     estornadoEm: 'Estornado em',
@@ -67,11 +69,7 @@ const TX = {
     liquidacao: 'Liquidação',
     apos: 'Depois deste evento',
     devedor: 'devedor',
-    venc: 'Venc.',
     pago: 'Pago',
-    pendente: 'Pendente',
-    parcial: 'Parcial',
-    cancelado: 'Cancelado',
     jurosLbl: 'Juros',
     creditoCurto: 'Crédito',
     saldoCurto: 'Saldo',
@@ -83,9 +81,15 @@ const TX = {
     semEventos: 'Nenhuma movimentação registrada',
     comprovantes: 'Comprovantes',
     documentos: 'Documentos do cliente',
+    semDocumentos: 'nenhum',
     observacoes: 'Observações',
-    abertas: 'Em aberto',
-    todas: 'Todas',
+    emprestimoLbl: 'Empréstimo',
+    recebidoLbl: 'Recebido',
+    restanteLbl: 'Restante',
+    totalLbl: 'Total',
+    jurosTopo: 'Juros',
+    pagas: (a: number | string, b: number) => `${a} de ${b} pagas`,
+    tipos: { NOVO: 'Novo', RENOVACAO: 'Renovação', RENEGOCIACAO: 'Renegociação', ADICIONAL: 'Adicional' } as Record<string, string>,
   },
   'es': {
     titulo: 'Ficha del préstamo',
@@ -93,7 +97,6 @@ const TX = {
     tentar: 'Intentar de nuevo',
     carregando: 'Abriendo la ficha…',
     linhaTempo: 'Línea de tiempo',
-    parcelas: 'Cuotas',
     emprestado: 'Prestado',
     saldo: 'Saldo deudor',
     recebido: 'Efectivo recibido',
@@ -108,6 +111,7 @@ const TX = {
     pagamento: 'Pago',
     quitacao: 'Liquidación total',
     creditoCascata: 'Crédito aplicado',
+    adiantamento: 'Anticipo aplicado',
     importacao: 'Importación',
     estornado: 'ANULADO',
     estornadoEm: 'Anulado el',
@@ -121,11 +125,7 @@ const TX = {
     liquidacao: 'Liquidación',
     apos: 'Después de este evento',
     devedor: 'deudor',
-    venc: 'Vence',
     pago: 'Pagada',
-    pendente: 'Pendiente',
-    parcial: 'Parcial',
-    cancelado: 'Cancelada',
     jurosLbl: 'Intereses',
     creditoCurto: 'Crédito',
     saldoCurto: 'Saldo',
@@ -137,51 +137,17 @@ const TX = {
     semEventos: 'Ninguna movimentación registrada',
     comprovantes: 'Comprobantes',
     documentos: 'Documentos del cliente',
+    semDocumentos: 'ninguno',
     observacoes: 'Observaciones',
-    abertas: 'Pendientes',
-    todas: 'Todas',
+    emprestimoLbl: 'Préstamo',
+    recebidoLbl: 'Recibido',
+    restanteLbl: 'Restante',
+    totalLbl: 'Total',
+    jurosTopo: 'Intereses',
+    pagas: (a: number | string, b: number) => `${a} de ${b} pagadas`,
+    tipos: { NOVO: 'Nuevo', RENOVACAO: 'Renovación', RENEGOCIACAO: 'Renegociación', ADICIONAL: 'Adicional' } as Record<string, string>,
   },
 };
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
-
-const ANIM = {
-  duration: 180,
-  create: { type: 'easeInEaseOut', property: 'opacity' },
-  update: { type: 'easeInEaseOut' },
-  delete: { type: 'easeInEaseOut', property: 'opacity' },
-} as const;
-
-/** Uma linha do painel: rótulo à esquerda, valor à direita. */
-const Linha = ({ rot, val, cor, forte, derivada }: {
-  rot: string; val: string; cor?: string; forte?: boolean;
-  /** Desdobra a linha de cima: recuo, cotovelo e peso menor. */
-  derivada?: boolean;
-}) => (
-  <View style={[S.linha, derivada && S.linhaDeriv]}>
-    <View style={S.linhaEsq}>
-      {derivada && (
-        <Ionicons name="return-down-forward-outline" size={13} color="rgba(255,255,255,0.45)" />
-      )}
-      {/* SEM `numberOfLines`: o rotulo cresceu com a contagem de parcelas
-          ("Saldo (19 parcelas em aberto)") e, cortado, viraria
-          "...em abert...". Com `flexShrink: 1` e sem teto de linhas, o pior
-          caso e o cartao ficar mais ALTO — nunca texto cortado, em qualquer
-          fonte do sistema e qualquer tela. E a regra do Mauricio de 03/11. */}
-      <Text
-        style={[S.linhaRot, forte && S.linhaRotForte, derivada && S.linhaRotDeriv]}
-      >{rot}</Text>
-    </View>
-    <Text style={[
-      S.linhaVal,
-      forte && S.linhaValForte,
-      derivada && S.linhaValDeriv,
-      !!cor && { color: cor },
-    ]}>{val}</Text>
-  </View>
-);
 
 const fmt = (v: number | null | undefined) =>
   moeda(Number(v || 0));
@@ -221,7 +187,8 @@ const ICONES: Record<string, any> = {
 
 export default function FichaEmprestimoScreen({ route, navigation }: any) {
   const emprestimoId: string = route?.params?.emprestimoId;
-  const { idioma, vendedor } = useAuth();
+  const { idioma } = useAuth();
+  const mostrarCredito = useTrabalhaCredito();
   const insets = useSafeAreaInsets();
   const lang: Lang = (idioma as Lang) || 'pt-BR';
   const t = TX[lang];
@@ -229,12 +196,10 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
   const [ficha, setFicha] = useState<Ficha | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
-  const [aba, setAba] = useState<'parcelas' | 'tempo'>('parcelas');
-  const [resumoAberto, setResumoAberto] = useState(true);
-  const [soAbertas, setSoAbertas] = useState(true);
   const [expandido, setExpandido] = useState<string | null>(null);
-  const [anexoAberto, setAnexoAberto] = useState<string | null>(null);
-  const [seletorAberto, setSeletorAberto] = useState(false);
+  // null = ainda carregando. Com 0, o cartão some (fica montado, para
+  // a lista poder carregar e avisar).
+  const [docsQtd, setDocsQtd] = useState<number | null>(null);
 
   const carregar = useCallback(async () => {
     if (!emprestimoId) {
@@ -339,7 +304,6 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
   // parcelas CANCELADO da base não são devidas nem pagas, e ficam fora das
   // duas contagens — somá-las ao total deixaria "23 de 24" com uma a mais.
   const parcelasPagas = Number(ficha?.totais?.parcelas_pagas || 0);
-  const parcelasAbertas = Number(ficha?.totais?.parcelas_abertas || 0);
   const parcelasTotal = Number(ficha?.totais?.parcelas_total || 0);
 
   // ⚠ O "+" DO CABEÇALHO SAIU em 12/11/2026, no mesmo dia em que entrou.
@@ -357,26 +321,26 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
   // sozinho, porque está DENTRO do `LiquidacaoProvider` e conhece a data
   // operacional, que é exatamente o que esta tela não tem.
 
-  /** "Pago (23 de 24 parcelas)" — e sem o "de 24" quando não falta nenhuma. */
-  const rotPagas = (rot: string) => {
-    if (!parcelasTotal) return rot;
-    const un = parcelasPagas === 1 ? t.pc1 : t.pcN;
-    return parcelasAbertas === 0
-      ? `${rot} (${parcelasPagas} ${un})`
-      : `${rot} (${parcelasPagas} ${t.pcDe} ${parcelasTotal} ${t.pcN})`;
-  };
-
-  /** "Saldo (1 parcela em aberto)" — e só "Saldo" quando não há nenhuma. */
-  const rotAbertas = (rot: string) => {
-    if (!parcelasAbertas) return rot;
-    return `${rot} (${parcelasAbertas} ${parcelasAbertas === 1 ? t.pcAb1 : t.pcAbN})`;
-  };
+  // Cabeçalho: o nome do cliente é o título, e o subtítulo diz QUAL empréstimo
+  // da cadeia está na tela. O título fixo "Ficha do empréstimo" saiu em
+  // 18/11/2026 — a tela já diz o que é pelo conteúdo.
+  const eloAtual = ficha?.cadeia?.find(e => e.atual);
+  const tipoAtual: string = eloAtual?.tipo_emprestimo || ficha?.emprestimo?.tipo_emprestimo || '';
+  const dataAtual: string = eloAtual?.data_emprestimo || ficha?.emprestimo?.data_emprestimo || '';
+  const subCabecalho = [t.tipos[tipoAtual] || tipoAtual, fmtData(dataAtual)].filter(Boolean).join(' · ');
+  // Juros em DINHEIRO: total a pagar menos o que saiu do caixa.
+  const jurosEmp = Math.max(totalEmp - principalEmp, 0);
+  // Sem crédito à vista: "1,5 de 24 pagas". Ver utils/creditoEmTela.
+  const pagasEquiv = parcelasPagasEquivalentes(totalEmp, saldoFaltaEmp, valorParcelaEmp, parcelasTotal);
+  const progresso = totalEmp > 0
+    ? Math.min(1, pagoEmp / totalEmp)
+    : (parcelasTotal > 0 ? parcelasPagas / parcelasTotal : 0);
 
   const rotuloEvento = (ev: EventoFicha) => ({
     CONCESSAO: t.concessao,
     PAGAMENTO: t.pagamento,
     QUITACAO: t.quitacao,
-    CREDITO_CASCATA: t.creditoCascata,
+    CREDITO_CASCATA: mostrarCredito ? t.creditoCascata : t.adiantamento,
     IMPORTACAO: t.importacao,
   }[ev.tipo] || ev.tipo);
 
@@ -387,8 +351,8 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={S.headerTitulo}>{t.titulo}</Text>
-          {!!nomeCliente && <Text style={S.headerSub} numberOfLines={1}>{nomeCliente}</Text>}
+          <Text style={S.headerTitulo} numberOfLines={1}>{nomeCliente || t.titulo}</Text>
+          {!!subCabecalho && <Text style={S.headerSub} numberOfLines={1}>{subCabecalho}</Text>}
         </View>
         {/* Espaçador que equilibra o botão de voltar, para o título ficar
             centrado. Já era isto antes do "+" e voltou a ser. */}
@@ -406,248 +370,131 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
           </TouchableOpacity>
         </View>
       ) : !ficha ? null : (
-        <>
-
-        {/* Recolhido, o painel é o MESMO card — mesma cor, mesmo raio, mesmas
-            margens —, só que de uma linha. Não vira uma faixa de ponta a
-            ponta: minimizar é encolher dentro dos próprios limites, não trocar
-            de forma.
-
-            Continua fora do ScrollView de propósito: é o único jeito de rolar
-            a lista de parcelas sem perder o saldo de vista. */}
-        {!resumoAberto && (
-          <TouchableOpacity
-            style={[S.resumo, S.resumoMin]}
-            onPress={() => { LayoutAnimation.configureNext(ANIM); setResumoAberto(true); }}
-            activeOpacity={0.85}
-          >
-            <Text style={S.linhaRotForte} numberOfLines={1}>
-              {rotAbertas(t.saldoCurto)}
-            </Text>
-            <View style={S.minDir}>
-              <Text style={[S.linhaVal, S.linhaValForte, { color: saldoFaltaEmp > 0 ? '#FCD34D' : '#6EE7B7' }]}>
-                {fmt(saldoFaltaEmp)}
-              </Text>
-              <Ionicons name="chevron-down" size={16} color="rgba(255,255,255,0.6)" />
-            </View>
-          </TouchableOpacity>
-        )}
 
         <ScrollView style={S.scroll} showsVerticalScrollIndicator={false}>
 
           {/* ── Resumo ──
-              Linha a linha, rótulo à esquerda e valor à direita: a conta do
-              empréstimo se lê de cima para baixo como um extrato, em vez de
-              exigir que o vendedor junte células espalhadas em colunas.
+              O MESMO bloco da tela de Parcelas (ParcelasModal, `R.topo`), para
+              o vendedor ler as duas do mesmo jeito. Escolhido pelo Mauricio em
+              18/11/2026 (mockup, variante B).
 
-              A cadeia fecha em `Juros − Pago = Saldo`, por construção.
-              `Pago` é tudo o que o cliente entregou e `Saldo` é o que falta
-              trazer; o `Crédito` é um pedaço do pago, não um item à parte, e
-              por isso aparece recuado sob ele.
+              O painel que recolhia saiu: ele existia para rolar a lista de
+              parcelas sem perder o saldo de vista, e a lista saiu da ficha.
 
-              Recolhido, o painel vira uma barra de uma linha só com o saldo,
-              fixa abaixo do cabeçalho: sai de dentro do scroll justamente
-              para que rolar a lista de parcelas não esconda o número. */}
-          {/* O card inteiro é o botão de recolher — o chevron lá embaixo é só
-              o indicador de que ele responde ao toque. */}
-          {resumoAberto && (
-          <TouchableOpacity
-            style={S.resumo}
-            onPress={() => { LayoutAnimation.configureNext(ANIM); setResumoAberto(false); }}
-            activeOpacity={0.9}
-          >
-
-            <Linha rot={t.emprestado} val={fmt(principalEmp)} />
-            <Linha rot={`${t.jurosLbl} (${taxaTx})`} val={fmt(totalEmp)} />
-
-            <View style={S.resumoDiv} />
-
-            <Linha rot={rotPagas(t.pago)} val={fmt(pagoEmp)} />
-            <Linha
-              rot={t.creditoCurto}
-              val={fmt(creditoEmp)}
-              cor={creditoEmp > 0 ? '#C7D2FE' : undefined}
-              derivada
-            />
-
-            <View style={S.resumoDiv} />
-
-            {/* Âmbar quando ainda deve, verde quando zerou: no fundo escuro o
-                vermelho some, e o que importa é a distinção. */}
-            <Linha
-              rot={rotAbertas(t.saldoCurto)}
-              val={fmt(saldoFaltaEmp)}
-              cor={saldoFaltaEmp > 0 ? '#FCD34D' : '#6EE7B7'}
-              forte
-            />
-            <Linha rot={t.parcela} val={fmt(valorParcelaEmp)} />
-
-            <View style={S.pega} pointerEvents="none">
-              <Ionicons name="chevron-up" size={16} color="rgba(255,255,255,0.65)" />
+              Recebido = total − saldo e Restante = saldo, que JÁ vem líquido
+              de crédito — ver o comentário de `saldoFaltaEmp`. O crédito
+              aparece numa linha própria, informativa, e NÃO se subtrai de
+              nada: é o que o vendedor diz ao cliente que ele tem. */}
+          <View style={S.topo}>
+            <View style={S.topoLinha}>
+              <View style={S.topoEsq}>
+                <Text style={S.topoRot}>{t.emprestimoLbl}</Text>
+                <Text style={S.topoGrande}>{numeroBr(principalEmp)}</Text>
+                <Text style={S.topoRot}>
+                  {t.jurosTopo} {numeroBr(jurosEmp)} · {taxaTx}
+                </Text>
+                {parcelasTotal > 0 && (
+                  <Text style={S.topoRot}>
+                    {parcelasTotal} × {numeroBr(valorParcelaEmp)}
+                  </Text>
+                )}
+              </View>
+              <View style={S.topoDir}>
+                <View style={S.kv}>
+                  <Text style={S.topoRot}>{t.recebidoLbl}</Text>
+                  <Text style={S.topoValor}>{numeroBr(pagoEmp)}</Text>
+                </View>
+                <View style={S.kv}>
+                  <Text style={S.topoRot}>{t.restanteLbl}</Text>
+                  <Text style={S.topoValor}>{numeroBr(saldoFaltaEmp)}</Text>
+                </View>
+              </View>
             </View>
-
-          </TouchableOpacity>
-          )}
-
-          {/* ── Conferência ──
-              Aparece sempre, verde ou vermelha. Um empréstimo que não fecha
-              precisa gritar, não ficar escondido atrás de um toque. */}
-          <View style={[S.selo, tudoConfere ? S.seloOk : S.seloErro]}>
-            <Ionicons
-              name={tudoConfere ? 'shield-checkmark' : 'warning'}
-              size={18}
-              color={tudoConfere ? '#059669' : '#DC2626'}
-            />
-            <View style={{ flex: 1 }}>
-              <Text style={[S.seloTx, { color: tudoConfere ? '#065F46' : '#991B1B' }]}>
-                {tudoConfere ? t.confereOk : t.confereErro}
-              </Text>
-              {!conf?.caixa_confere && <Text style={S.seloDetalhe}>{t.caixaErro}</Text>}
-              {!conf?.credito_confere && <Text style={S.seloDetalhe}>{t.creditoErro}</Text>}
+            <View style={S.barra}>
+              <View style={[S.barraFill, { width: `${Math.round(progresso * 100)}%` }]} />
             </View>
+            <View style={S.topoRodape}>
+              {parcelasTotal > 0 && (
+                <Text style={S.topoRodapeTx}>{t.pagas(!mostrarCredito && pagasEquiv != null ? fracaoBr(pagasEquiv) : parcelasPagas, parcelasTotal)}</Text>
+              )}
+              <Text style={S.topoRodapeTx}>{t.totalLbl} {numeroBr(totalEmp)}</Text>
+            </View>
+            {creditoEmp > 0.009 && mostrarCredito && (
+              <View style={S.topoCredito}>
+                <Text style={S.topoCreditoRot}>{t.credito}</Text>
+                <Text style={S.topoCreditoVal}>{numeroBr(creditoEmp)}</Text>
+              </View>
+            )}
           </View>
 
           {/* ── Cadeia de empréstimos ──
-              Dropdown, e não lista aberta: um cliente com cinco renovações
-              empurrava as parcelas para fora da tela logo na abertura. Fechado
-              ele é uma linha que diz onde você está; aberto, a escolha. */}
+              Fichas para tocar, em vez de caixa + menu. Rolam de lado: um
+              cliente com muitas renovações não empurra nada para baixo. Tocar
+              noutra troca a ficha (`replace`, para o voltar não empilhar). */}
           {ficha.cadeia?.length > 1 && (
-            <TouchableOpacity
-              style={S.seletor}
-              activeOpacity={0.7}
-              onPress={() => setSeletorAberto(true)}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={S.cadeia}
+              contentContainerStyle={S.cadeiaConteudo}
             >
-              <Ionicons name="swap-horizontal-outline" size={16} color="#4338CA" />
-              <View style={{ flex: 1 }}>
-                <Text style={S.seletorRot}>{t.cadeia}</Text>
-                <Text style={S.seletorTx} numberOfLines={1}>
-                  {(() => {
-                    const atual = ficha.cadeia.find(e => e.atual);
-                    const pos = ficha.cadeia.findIndex(e => e.atual) + 1;
-                    return atual
-                      ? `${pos}/${ficha.cadeia.length} · ${atual.tipo_emprestimo || '—'} · ${fmtData(atual.data_emprestimo)}`
-                      : `${ficha.cadeia.length}`;
-                  })()}
-                </Text>
-              </View>
-              <Ionicons name="chevron-down" size={16} color="#6B7280" />
-            </TouchableOpacity>
+              {ficha.cadeia.map(elo => (
+                <TouchableOpacity
+                  key={elo.id}
+                  style={[S.elo, elo.atual && S.eloAtual]}
+                  activeOpacity={elo.atual ? 1 : 0.7}
+                  onPress={() => {
+                    if (elo.atual) return;
+                    navigation.replace('FichaEmprestimo', { emprestimoId: elo.id });
+                  }}
+                >
+                  <Text style={[S.eloTx, elo.atual && S.eloTxAtual]}>
+                    {numeroBr(elo.valor_principal ?? 0)} · {fmtData(elo.data_emprestimo) || '—'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           )}
 
-          {/* ── Abas ── */}
-          <View style={S.abas}>
-            <TouchableOpacity
-              style={[S.aba, aba === 'parcelas' && S.abaAtiva]}
-              onPress={() => setAba('parcelas')}
-            >
-              <Text style={[S.abaTx, aba === 'parcelas' && S.abaTxAtiva]}>{t.parcelas}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[S.aba, aba === 'tempo' && S.abaAtiva]}
-              onPress={() => setAba('tempo')}
-            >
-              <Text style={[S.abaTx, aba === 'tempo' && S.abaTxAtiva]}>{t.linhaTempo}</Text>
-            </TouchableOpacity>
-          </View>
-
-          {aba === 'parcelas' ? (
-            <>
-              <View style={S.filtro}>
-                <TouchableOpacity
-                  style={[S.filtroBt, soAbertas && S.filtroBtOn]}
-                  onPress={() => setSoAbertas(true)}
-                >
-                  <Text style={[S.filtroTx, soAbertas && S.filtroTxOn]}>
-                    {t.abertas} ({ficha.totais.parcelas_abertas})
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[S.filtroBt, !soAbertas && S.filtroBtOn]}
-                  onPress={() => setSoAbertas(false)}
-                >
-                  <Text style={[S.filtroTx, !soAbertas && S.filtroTxOn]}>
-                    {t.todas} ({ficha.totais.parcelas_total})
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            <View style={S.card}>
-              {ficha.parcelas.filter((p: any) => !soAbertas || p.status !== 'PAGO').map((p: any) => {
-                const pago = p.status === 'PAGO';
-                const parcial = p.status === 'PARCIAL';
-                const rot = pago ? t.pago : parcial ? t.parcial
-                  : p.status === 'CANCELADO' ? t.cancelado : t.pendente;
-                const cor = pago ? '#059669' : parcial ? '#D97706' : '#6B7280';
-                // Anexos são gravados por PAGAMENTO. Parcela ainda não paga
-                // não tem onde pendurar arquivo — o botão some em vez de
-                // abrir uma gaveta que não aceita nada.
-                const pags: string[] = p.pagamento_ids || [];
-                const abertoAnexos = anexoAberto === p.id;
-                return (
-                  <View key={p.id} style={S.parcelaBloco}>
-                    <View style={S.parcelaLinha}>
-                      <Text style={S.parcelaNum}>{String(p.numero_parcela).padStart(2, '0')}</Text>
-                      <View style={{ flex: 1 }}>
-                        <Text style={S.parcelaTx}>
-                          {t.venc} {fmtData(p.data_vencimento)}
-                          {p.data_pagamento ? ` · ${t.pago} ${fmtData(p.data_pagamento)}` : ''}
-                        </Text>
-                        <Text style={[S.parcelaStatus, { color: cor }]}>{rot}</Text>
-                        {!!p.observacoes && (
-                          <Text style={S.parcelaObs} numberOfLines={4}>{p.observacoes}</Text>
-                        )}
-                      </View>
-                      <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={S.parcelaValor}>{fmt(p.valor_parcela)}</Text>
-                        {Number(p.valor_pago || 0) > 0 && (
-                          <Text style={S.parcelaPago}>{fmt(p.valor_pago)}</Text>
-                        )}
-                        {Number(p.saldo_excedente || 0) > 0 && (
-                          <Text style={S.parcelaCredito}>+{fmt(p.saldo_excedente)}</Text>
-                        )}
-                      </View>
-                      {pags.length > 0 && (
-                        <TouchableOpacity
-                          style={[S.clipeBt, abertoAnexos && S.clipeBtOn]}
-                          onPress={() => setAnexoAberto(abertoAnexos ? null : p.id)}
-                          hitSlop={8}
-                        >
-                          <Ionicons
-                            name="attach-outline"
-                            size={17}
-                            color={abertoAnexos ? '#fff' : '#6B7280'}
-                          />
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                    {abertoAnexos && (
-                      <View style={S.anexosBox}>
-                        {pags.map(pid => (
-                          <AnexosLista
-                            key={pid}
-                            clienteId={ficha.cliente?.id}
-                            pagamentoId={pid}
-                            lang={lang}
-                            enviadoPor={vendedor?.user_id || null}
-                            enviadoPorNome={vendedor?.nome || null}
-                            podeEditar
-                          />
-                        ))}
-                      </View>
-                    )}
-                  </View>
-                );
-              })}
+          {/* ── Conferência ──
+              Uma linha pequena quando confere. Quando NÃO confere vira caixa
+              vermelha: um empréstimo que não fecha tem de gritar. */}
+          {tudoConfere ? (
+            <View style={S.confOk}>
+              <Ionicons name="checkmark-circle" size={14} color="#059669" />
+              <Text style={S.confOkTx}>{t.confereOk}</Text>
             </View>
-            </>
           ) : (
-            ficha.eventos.length === 0 ? (
+            <View style={S.seloErro}>
+              <Ionicons name="warning" size={18} color="#DC2626" />
+              <View style={{ flex: 1 }}>
+                <Text style={S.seloTx}>{t.confereErro}</Text>
+                {!conf?.caixa_confere && <Text style={S.seloDetalhe}>{t.caixaErro}</Text>}
+                {!conf?.credito_confere && <Text style={S.seloDetalhe}>{t.creditoErro}</Text>}
+              </View>
+            </View>
+          )}
+
+          {/* ── Linha do tempo ──
+              A aba Parcelas saiu em 18/11/2026: a lista de parcelas, com
+              estorno, pagar e anexar comprovante, vive na tela de Parcelas
+              aberta pelo card. A ficha é a HISTÓRIA do empréstimo. */}
+          <Text style={S.secaoTitulo}>{t.linhaTempo}</Text>
+
+          {ficha.eventos.length === 0 ? (
               <Text style={S.vazio}>{t.semEventos}</Text>
             ) : (
               ficha.eventos.map((ev, i) => {
                 const cor = ev.estornado ? '#9CA3AF' : (CORES[ev.tipo] || '#6B7280');
                 const chave = ev.operacao_id || `${ev.tipo}-${i}`;
                 const aberto = expandido === chave;
-                const temDetalhe = !!(ev.pagamento_ids?.length || ev.observacoes);
+                // `anexos` vem contado pelo banco. Sem anexo, o botão não
+                // aparece: abria uma lista vazia por PAGAMENTO — uma quitação
+                // de 8 parcelas virava 8 caixas "Nenhum anexo enviado".
+                const temAnexo = ev.anexos == null
+                  ? !!ev.pagamento_ids?.length
+                  : ev.anexos > 0;
+                const temDetalhe = temAnexo || !!ev.observacoes;
                 return (
                   <View key={chave} style={[S.evento, ev.estornado && S.eventoEstornado]}>
                     <View style={S.eventoTopo}>
@@ -691,12 +538,12 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
                               {t.dinheiro}: {fmt(ev.dinheiro)}
                             </Text>
                           )}
-                          {(ev.credito_usado || 0) > 0 && (
+                          {(ev.credito_usado || 0) > 0 && mostrarCredito && (
                             <Text style={[S.chip, S.chipRoxo]}>
                               {t.creditoUsado}: {fmt(ev.credito_usado)}
                             </Text>
                           )}
-                          {(ev.credito_gerado || 0) > 0 && (
+                          {(ev.credito_gerado || 0) > 0 && mostrarCredito && (
                             <Text style={[S.chip, S.chipAzul]}>
                               {t.creditoGerado}: {fmt(ev.credito_gerado)}
                             </Text>
@@ -728,7 +575,7 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
                         {!ev.estornado && (
                           <Text style={S.eventoSaldo}>
                             {t.apos}: {fmt(ev.saldo_devedor)} {t.devedor}
-                            {(ev.saldo_credito || 0) > 0 ? ` · ${fmt(ev.saldo_credito)} ${t.credito.toLowerCase()}` : ''}
+                            {(ev.saldo_credito || 0) > 0 && mostrarCredito ? ` · ${fmt(ev.saldo_credito)} ${t.credito.toLowerCase()}` : ''}
                           </Text>
                         )}
 
@@ -738,7 +585,9 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
                             onPress={() => setExpandido(aberto ? null : chave)}
                           >
                             <Text style={S.btDetalheTx}>
-                              {aberto ? '▲' : '▼'} {t.comprovantes} ({ev.anexos ?? 0})
+                              {aberto ? '▲' : '▼'} {temAnexo
+                                ? `${t.comprovantes}${ev.anexos != null ? ` (${ev.anexos})` : ''}`
+                                : t.observacoes}
                             </Text>
                           </TouchableOpacity>
                         )}
@@ -748,13 +597,14 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
                             {!!ev.observacoes && (
                               <Text style={S.obsTx}>{ev.observacoes}</Text>
                             )}
-                            {ev.pagamento_ids?.map(pid => (
+                            {temAnexo && ev.pagamento_ids?.map(pid => (
                               <AnexosLista
                                 key={pid}
                                 clienteId={ficha.cliente?.id}
                                 pagamentoId={pid}
                                 lang={lang}
                                 podeEditar={false}
+                                ocultarVazio
                               />
                             ))}
                           </View>
@@ -764,74 +614,36 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
                   </View>
                 );
               })
-            )
-          )}
+            )}
 
           {/* ── Documentos do cliente ── */}
           {!!ficha.cliente?.id && (
-            <View style={S.card}>
+            // Sem documento: uma linha só, em vez da caixa vazia. Com erro
+            // a contagem não chega e o cartão inteiro aparece com a mensagem.
+            <View style={[S.card, docsQtd === 0 && S.docsVazio]}>
+              {docsQtd === 0 && (
+                <>
+                  <Text style={[S.cardTitulo, { flexShrink: 1 }]}>{t.documentos}</Text>
+                  <Text style={S.docsVazioTx}>{t.semDocumentos}</Text>
+                </>
+              )}
+              <View style={docsQtd === 0 ? { display: 'none' } : undefined}>
               <Text style={S.cardTitulo}>{t.documentos}</Text>
               <View style={S.divider} />
-              <AnexosLista clienteId={ficha.cliente.id} lang={lang} podeEditar={false} />
+              <AnexosLista
+                clienteId={ficha.cliente.id}
+                lang={lang}
+                podeEditar={false}
+                onContagem={setDocsQtd}
+              />
+              </View>
             </View>
           )}
 
           <View style={{ height: 40 }} />
         </ScrollView>
-        </>
       )}
 
-      {/* Escolha do empréstimo. Modal e não menu ancorado: no Android antigo
-          menu flutuante posicionado à mão erra em tela pequena. */}
-      <Modal
-        visible={seletorAberto}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSeletorAberto(false)}
-      >
-        <TouchableOpacity
-          style={S.selOverlay}
-          activeOpacity={1}
-          onPress={() => setSeletorAberto(false)}
-        >
-          <View style={S.selCaixa}>
-            <Text style={S.selTitulo}>{t.cadeia}</Text>
-            {ficha?.cadeia?.map(elo => {
-              const cor = elo.status === 'QUITADO' ? '#10B981'
-                : elo.status === 'RENEGOCIADO' ? '#9333EA'
-                : elo.status === 'CANCELADO' ? '#9CA3AF' : '#3B82F6';
-              return (
-                <TouchableOpacity
-                  key={elo.id}
-                  style={[S.selLinha, elo.atual && S.selLinhaAtual]}
-                  activeOpacity={elo.atual ? 1 : 0.7}
-                  onPress={() => {
-                    setSeletorAberto(false);
-                    // Não recarrega o mesmo: push da própria ficha empilharia
-                    // a mesma tela e quebraria o voltar.
-                    if (elo.atual) return;
-                    navigation.replace('FichaEmprestimo', { emprestimoId: elo.id });
-                  }}
-                >
-                  <View style={[S.eloPonto, { backgroundColor: cor }]} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[S.eloTx, elo.atual && { color: '#4338CA' }]}>
-                      {elo.tipo_emprestimo || '—'} · {fmtData(elo.data_emprestimo)}
-                    </Text>
-                    <Text style={S.eloSub}>
-                      {fmt(elo.valor_total)} · {elo.status}
-                      {(elo.valor_saldo || 0) > 0 ? ` · ${t.saldo.toLowerCase()} ${fmt(elo.valor_saldo)}` : ''}
-                    </Text>
-                  </View>
-                  {elo.atual
-                    ? <Ionicons name="checkmark-circle" size={18} color="#4338CA" />
-                    : <Ionicons name="chevron-forward" size={16} color="#9CA3AF" />}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </TouchableOpacity>
-      </Modal>
     </View>
   );
 }
@@ -867,102 +679,48 @@ const S = StyleSheet.create({
     shadowOpacity: 0.05, shadowRadius: 4, elevation: 2,
   },
   cardTitulo: { fontSize: 13, fontWeight: '700', color: '#374151' },
+  docsVazio: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  docsVazioTx: { fontSize: 13, color: '#9CA3AF' },
   divider: { height: 1, backgroundColor: '#F3F4F6', marginVertical: 10 },
 
-  resumo: {
-    // Azul da familia do cabecalho (#3B82F6), bem mais fundo. O #2563EB que
-    // tentei antes estourava: saturado demais para uma area grande e chapada,
-    // ainda por cima encostada num azul claro. Superficie grande pede tom
-    // baixo; o brilho fica para o saldo em ambar.
-    backgroundColor: '#1E40AF', borderRadius: 16, paddingVertical: 8, paddingHorizontal: 16,
-    marginBottom: 12,
-    shadowColor: '#172554', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2, shadowRadius: 6, elevation: 3,
+  // Topo: cópia de `R.topo` do ParcelasModal. Mudou lá, muda aqui.
+  topo: { backgroundColor: '#1E40AF', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, gap: 8, marginBottom: 10 },
+  topoLinha: { flexDirection: 'row', gap: 12 },
+  topoEsq: { flex: 1, flexShrink: 1 },
+  topoDir: { flex: 1, flexShrink: 1, justifyContent: 'center', gap: 2, borderLeftWidth: 1, borderLeftColor: 'rgba(255,255,255,0.25)', paddingLeft: 10 },
+  topoRot: { fontSize: 11, color: 'rgba(255,255,255,0.75)', flexShrink: 1 },
+  topoGrande: { fontSize: 20, fontWeight: '700', color: '#fff', fontVariant: ['tabular-nums'] },
+  topoValor: { fontSize: 13, fontWeight: '700', color: '#fff', fontVariant: ['tabular-nums'] },
+  kv: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  barra: { height: 6, backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 99, overflow: 'hidden' },
+  barraFill: { height: '100%', backgroundColor: '#34D399' },
+  topoRodape: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', columnGap: 8, rowGap: 2 },
+  topoRodapeTx: { fontSize: 11, color: 'rgba(255,255,255,0.85)', flexShrink: 1 },
+  topoCredito: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.2)', paddingTop: 6 },
+  topoCreditoRot: { fontSize: 12, color: '#DDD6FE', flexShrink: 1 },
+  topoCreditoVal: { fontSize: 12, fontWeight: '700', color: '#DDD6FE', fontVariant: ['tabular-nums'] },
+
+  cadeia: { flexGrow: 0, marginBottom: 10 },
+  cadeiaConteudo: { gap: 6 },
+  elo: {
+    backgroundColor: '#fff', borderWidth: 1, borderColor: '#D1D5DB',
+    borderRadius: 99, paddingHorizontal: 12, paddingVertical: 6,
   },
-  resumoDiv: { height: 1, backgroundColor: 'rgba(255,255,255,0.18)', marginVertical: 6 },
+  eloAtual: { backgroundColor: '#1E40AF', borderColor: '#1E40AF' },
+  eloTx: { fontSize: 12, fontWeight: '600', color: '#4B5563' },
+  eloTxAtual: { color: '#fff' },
 
-  // Minimizado: o mesmo card, uma linha. Herda `resumo` e só troca o arranjo
-  // interno e as margens que o ScrollView daria.
-  resumoMin: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    gap: 10, marginHorizontal: 14, marginTop: 14, marginBottom: 4,
-    paddingVertical: 12,
-  },
-  minDir: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-
-  pega: { alignItems: 'center', paddingTop: 4, paddingBottom: 2, marginTop: 2 },
-
-  linha: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 7, gap: 12,
-  },
-  linhaEsq: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
-  linhaRot: { fontSize: 13, color: 'rgba(255,255,255,0.78)', flexShrink: 1 },
-
-  // Derivada: recuo, cotovelo e peso menor. O crédito é um pedaço do pago
-  // logo acima, não um irmão dele na lista.
-  linhaDeriv: { paddingLeft: 14, paddingVertical: 4, marginTop: -2 },
-  linhaRotDeriv: { fontSize: 12, color: 'rgba(255,255,255,0.6)' },
-  linhaValDeriv: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.85)' },
-  linhaRotForte: { fontSize: 14, color: '#fff', fontWeight: '700' },
-  linhaVal: { fontSize: 15, fontWeight: '700', color: '#fff', flexShrink: 1 },
-  linhaValForte: { fontSize: 20, fontWeight: '800', flexShrink: 1 },
-  resumoLinha: { flexDirection: 'row', justifyContent: 'space-between' },
-  resumoItem: { flex: 1 },
-  resumoRot: { fontSize: 10, color: 'rgba(255,255,255,0.65)', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.3 },
-  resumoVal: { fontSize: 19, fontWeight: '800', color: '#fff', marginTop: 3 },
-  resumoValPeq: { fontSize: 14, fontWeight: '700', color: '#fff', marginTop: 3 },
-
-  selo: {
+  confOk: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 2, marginBottom: 12 },
+  confOkTx: { fontSize: 12, fontWeight: '600', color: '#047857', flexShrink: 1 },
+  seloErro: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1,
+    backgroundColor: '#FEF2F2', borderColor: '#FECACA',
   },
-  seloOk: { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' },
-  seloErro: { backgroundColor: '#FEF2F2', borderColor: '#FECACA' },
-  seloTx: { fontSize: 13, fontWeight: '700' },
+  seloTx: { fontSize: 13, fontWeight: '700', color: '#991B1B' },
   seloDetalhe: { fontSize: 11, color: '#991B1B', marginTop: 2 },
 
-  seletor: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11,
-    marginBottom: 12, borderWidth: 1, borderColor: '#E5E7EB',
-  },
-  seletorRot: { fontSize: 10, color: '#9CA3AF', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.3 },
-  seletorTx: { fontSize: 13, fontWeight: '700', color: '#111827', marginTop: 2 },
-
-  selOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 24 },
-  selCaixa: { backgroundColor: '#fff', borderRadius: 16, padding: 16 },
-  selTitulo: { fontSize: 12, fontWeight: '800', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 },
-  selLinha: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingVertical: 11, paddingHorizontal: 10, borderRadius: 10, marginTop: 6,
-    backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#F3F4F6',
-  },
-  selLinhaAtual: { backgroundColor: '#EEF2FF', borderColor: '#C7D2FE' },
-
-  // Opções do "+". `flexShrink: 1` no texto, que é quem CEDE largura: no RN o
-  // filho de linha nasce com `flexShrink: 0` — o inverso da web —, e o que
-  // excede a borda o Android corta em silêncio. Aqui são rótulos traduzidos,
-  // então o pior caso é uma palavra cortada; mesmo assim a linha cede, porque
-  // fonte do sistema em 1,3x estoura qualquer um deles.
-
-  eloPonto: { width: 8, height: 8, borderRadius: 4 },
-  eloTx: { fontSize: 13, fontWeight: '700', color: '#111827' },
-  eloSub: { fontSize: 11, color: '#6B7280', marginTop: 2 },
-
-  filtro: { flexDirection: 'row', gap: 8, marginBottom: 10 },
-  filtroBt: {
-    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8,
-    backgroundColor: '#fff', borderWidth: 1, borderColor: '#E5E7EB',
-  },
-  filtroBtOn: { backgroundColor: '#4338CA', borderColor: '#4338CA' },
-  filtroTx: { fontSize: 12, fontWeight: '600', color: '#6B7280' },
-  filtroTxOn: { color: '#fff' },
-  abas: { flexDirection: 'row', backgroundColor: '#E0E7FF', borderRadius: 10, padding: 3, marginBottom: 12 },
-  aba: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
-  abaAtiva: { backgroundColor: '#fff' },
-  abaTx: { fontSize: 13, color: '#4B5563', fontWeight: '600' },
-  abaTxAtiva: { color: '#1D4ED8' },
+  secaoTitulo: { fontSize: 13, fontWeight: '700', color: '#374151', marginBottom: 8 },
 
   vazio: { textAlign: 'center', color: '#9CA3AF', marginTop: 24, fontSize: 13 },
 
@@ -1001,24 +759,4 @@ const S = StyleSheet.create({
   btDetalheTx: { fontSize: 11, color: '#3B82F6', fontWeight: '600' },
   detalhe: { marginTop: 8 },
   obsTx: { fontSize: 11, color: '#6B7280', marginBottom: 6 },
-
-  parcelaBloco: { borderBottomWidth: 1, borderBottomColor: '#F9FAFB' },
-  clipeBt: {
-    width: 32, height: 32, borderRadius: 8, marginLeft: 8,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#F3F4F6',
-  },
-  clipeBtOn: { backgroundColor: '#4338CA' },
-  anexosBox: { paddingBottom: 10, paddingLeft: 32 },
-  parcelaLinha: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 10,
-    paddingVertical: 9,
-  },
-  parcelaNum: { fontSize: 12, fontWeight: '700', color: '#9CA3AF', width: 22, marginTop: 1 },
-  parcelaTx: { fontSize: 12, color: '#374151' },
-  parcelaStatus: { fontSize: 11, fontWeight: '700', marginTop: 1 },
-  parcelaObs: { fontSize: 10, color: '#9CA3AF', marginTop: 3 },
-  parcelaValor: { fontSize: 13, fontWeight: '700', color: '#111827' },
-  parcelaPago: { fontSize: 11, color: '#059669', marginTop: 1 },
-  parcelaCredito: { fontSize: 11, color: '#4F46E5', marginTop: 1 },
 });

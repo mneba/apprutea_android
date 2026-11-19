@@ -23,6 +23,10 @@ interface MenuPagamentoProps {
   totalParcelas: number;
   saldoEmprestimo: number;
   creditoDisponivel: number;
+  /** `rotas.trabalha_credito`. false: a palavra crédito some e o valor
+   *  mostrado é só o dinheiro a receber. O crédito continua sendo
+   *  aplicado igual — só não aparece. Ver hooks/useTrabalhaCredito. */
+  mostrarCredito?: boolean;
   /**
    * A conta da quitação lida das PARCELAS, nos termos de
    * `fn_quitar_emprestimo`. Quando vem, a folha mostra o bruto de verdade e o
@@ -112,6 +116,7 @@ export default function MenuPagamento({
   totalParcelas,
   saldoEmprestimo,
   creditoDisponivel,
+  mostrarCredito = true,
   quitacao = null,
   pagamentosParciais,
   onPagarValor,
@@ -193,7 +198,7 @@ export default function MenuPagamento({
         <View style={S.resumoLinha}>
           <Text style={S.resumoLbl}>{t.estePagamento || 'Este pagamento'}</Text>
           <Text style={[S.resumoVal, { fontWeight: '700' }]}>
-            {fmt(valorEspecie)}{valorCredito > 0 ? ` + ${fmt(valorCredito)} ${t.creditoLbl2 || 'credito'}` : ''}
+            {fmt(valorEspecie)}{valorCredito > 0 && mostrarCredito ? ` + ${fmt(valorCredito)} ${t.creditoLbl2 || 'credito'}` : ''}
           </Text>
         </View>
         <View style={S.divider} />
@@ -286,8 +291,8 @@ export default function MenuPagamento({
                       <Text style={[S.opcaoLbl, opcao === 'saldo' && S.opcaoLblSel]}>{t.pagarSaldo || 'Pagar saldo'}</Text>
                     </View>
                     <View style={S.opcaoDir}>
-                      <Text style={S.opcaoVal}>{fmt(valorSaldo)}</Text>
-                      {creditoSaldo > 0 && (
+                      <Text style={S.opcaoVal}>{fmt(mostrarCredito ? valorSaldo : valorSaldoLimitado)}</Text>
+                      {creditoSaldo > 0 && mostrarCredito && (
                         <Text style={S.opcaoComp}>
                           {fmt(valorSaldoLimitado)} {t.dinheiroLbl || 'dinheiro'} + {fmt(creditoSaldo)} {t.creditoLbl2 || 'crédito'}
                         </Text>
@@ -316,8 +321,8 @@ export default function MenuPagamento({
                     <Text style={[S.opcaoLbl, opcao === 'cheia' && S.opcaoLblSel]}>{t.pagar1Cheia || 'Pagar 1 parcela cheia'}</Text>
                   </View>
                   <View style={S.opcaoDir}>
-                    <Text style={S.opcaoVal}>{fmt(creditoCheio > 0 ? valorCheio : valorCheioLimitado)}</Text>
-                    {creditoCheio > 0 && (
+                    <Text style={S.opcaoVal}>{fmt(creditoCheio > 0 && mostrarCredito ? valorCheio : valorCheioLimitado)}</Text>
+                    {creditoCheio > 0 && mostrarCredito && (
                       <Text style={S.opcaoComp}>
                         {fmt(valorCheioLimitado)} {t.dinheiroLbl || 'dinheiro'} + {fmt(creditoCheio)} {t.creditoLbl2 || 'crédito'}
                       </Text>
@@ -374,7 +379,7 @@ export default function MenuPagamento({
               </View>
 
               {/* Usar crédito — radio com resumo + confirmar */}
-              {creditoDisponivel > 0 && (
+              {creditoDisponivel > 0 && mostrarCredito && (
                 <View style={[S.opcao, opcao === 'credito' && S.opcaoSel]}>
                   <TouchableOpacity style={S.opcaoHead} onPress={() => setOpcao('credito')} activeOpacity={0.7}>
                     <View style={S.opcaoEsq}>
@@ -444,7 +449,7 @@ export default function MenuPagamento({
                         fora da consulta. Quando o credito passa da divida o
                         liquido vira 0 e esta soma erra -- mas ai a funcao
                         recusa a quitacao, dizendo para resolver a sobra. */}
-                    {qCredito > 0 ? (
+                    {qCredito > 0 && mostrarCredito ? (
                       <>
                         <View style={S.resumoLinha}>
                           <Text style={S.resumoLbl}>{t.parcelasAbertoLbl || 'Parcelas em aberto'}</Text>

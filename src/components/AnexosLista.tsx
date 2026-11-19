@@ -75,6 +75,12 @@ interface AnexosListaProps {
   enviadoPorNome?: string | null;
   /** false esconde os botões de enviar/remover (visualização apenas). */
   podeEditar?: boolean;
+  /** Sem anexo e sem edição, não renderiza nada — nem título, nem "Nenhum
+   *  anexo enviado". Para quem empilha várias listas (a Ficha, uma por
+   *  pagamento de uma quitação) e não quer uma pilha de caixas vazias. */
+  ocultarVazio?: boolean;
+  /** Avisa quantos anexos a lista achou, depois de carregar. */
+  onContagem?: (n: number) => void;
 }
 
 const fmtTamanho = (b?: number | null) =>
@@ -94,6 +100,8 @@ export default function AnexosLista({
   enviadoPor = null,
   enviadoPorNome = null,
   podeEditar = true,
+  ocultarVazio = false,
+  onContagem,
 }: AnexosListaProps) {
   const t = TX[lang] || TX['pt-BR'];
 
@@ -212,6 +220,19 @@ export default function AnexosLista({
       setErro(mensagemErro(e, 'Falha ao remover.'));
     }
   };
+
+  // Depois de TODOS os hooks: retorno antecipado antes deles muda a contagem
+  // entre renders (React #310).
+  // Com erro NÃO avisa contagem: "falhou ao carregar" não pode virar "não
+  // tem anexo" para quem decide esconder a lista.
+  useEffect(() => {
+    if (!carregando && !erro) onContagem?.(itens.length);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [carregando, erro, itens.length]);
+
+  if (ocultarVazio && !podeEditar && !carregando && !erro && itens.length === 0) {
+    return null;
+  }
 
   return (
     <View>

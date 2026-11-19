@@ -36,6 +36,7 @@ import {
   type ConfigRecibo,
   type DadosRecibo,
 } from '../services/recibo';
+import { useTrabalhaCredito } from '../hooks/useTrabalhaCredito';
 import { mensagemErro } from '../utils/mensagemErro';
 import { moeda } from '../utils/formato';
 
@@ -110,6 +111,8 @@ interface Props {
 }
 
 export default function ReciboPagamento({ visible, dados, idioma, onClose }: Props) {
+  // Sem crédito à vista, o recibo diz só o dinheiro entregue.
+  const mostrarCredito = useTrabalhaCredito();
   const t = textos[idioma] || textos['pt-BR'];
 
   const cupomRef = useRef<View>(null);
@@ -244,7 +247,7 @@ export default function ReciboPagamento({ visible, dados, idioma, onClose }: Pro
                 {/* Crédito em linha própria: não é dinheiro que entrou agora, e
                     somá-lo ao pago faria o cliente ler que entregou mais do que
                     entregou. Ver `valor_saldo` em CLAUDE.md. */}
-                {dados.valorCredito > 0 && (
+                {dados.valorCredito > 0 && mostrarCredito && (
                   <Linha rotulo={t.credito} valor={fmt(dados.valorCredito)} />
                 )}
                 {modelo?.mostrar_saldo && (

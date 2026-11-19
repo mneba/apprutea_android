@@ -19,6 +19,13 @@ export interface ClienteRotaDia {
    * informacao nao aparece na tela principal do cobrador".
    */
   credito_disponivel?: number;
+  /**
+   * Empréstimo QUITADO que já gerou outro (renovação com `emprestimo_origem_id`
+   * apontando para ele, não cancelada). Na aba Pagos o botão Renovar fica
+   * desabilitado — renovar duas vezes a mesma origem é dívida em dobro.
+   * Pedido do Mauricio, 17/11/2026. Só é consultado para QUITADO.
+   */
+  ja_renovado?: boolean;
   numero_parcelas: number; status_emprestimo: string; rota_id: string;
   frequencia_pagamento: string; parcela_id: string; numero_parcela: number;
   valor_parcela: number; valor_pago_parcela: number; saldo_parcela: number;
@@ -183,6 +190,27 @@ export async function getClientesDia(
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  // JA RENOVADO — mesmo mecanismo do credito, so para os QUITADOS da lista
+  // ═══════════════════════════════════════════════════════════════════════
+  // O payload nao traz `emprestimo_origem_id` do sucessor. Renovacao
+  // CANCELADA nao conta (caso joyce, 16/11/2026: cancelou e desistiu — o
+  // Renovar tem de voltar a abrir). Falha aqui nao derruba o dia: o botao
+  // fica como estava, e a funcao de renovar e quem recusa de verdade.
+  const renovadosSet = new Set<string>();
+  const quitadoIds = [...new Set(rows
+    .filter(r => String(r.status_emprestimo || '').toUpperCase() === 'QUITADO')
+    .map(r => r.emprestimo_id).filter(Boolean))];
+  if (quitadoIds.length > 0) {
+    const { data: suc, error: errSuc } = await supabase
+      .from('emprestimos')
+      .select('emprestimo_origem_id')
+      .in('emprestimo_origem_id', quitadoIds)
+      .neq('status', 'CANCELADO');
+    if (errSuc) console.warn('⚠️ ja_renovado nao carregado:', errSuc.message);
+    (suc || []).forEach((e: any) => { if (e.emprestimo_origem_id) renovadosSet.add(e.emprestimo_origem_id); });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   // MONTAGEM 100% LOCAL (medido em ~0,1ms com N pequeno)
   // ═══════════════════════════════════════════════════════════════════════
   const raw: ClienteRotaDia[] = [];
@@ -212,6 +240,7 @@ export async function getClientesDia(
       emprestimo_id: r.emprestimo_id,
       saldo_emprestimo: r.saldo_emprestimo,
       credito_disponivel: creditoMap.get(r.emprestimo_id) || 0,
+      ja_renovado: renovadosSet.has(r.emprestimo_id),
       valor_principal: r.valor_principal,
       valor_total: r.valor_total ?? null,
       numero_parcelas: r.numero_parcelas,

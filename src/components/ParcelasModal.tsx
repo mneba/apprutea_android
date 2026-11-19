@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { ActivityIndicator, Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Text } from './texto';
 import { useAuth } from '../contexts/AuthContext';
-import { diasCobrancaEntre } from '../utils/diasCobranca';
+import { useTrabalhaCredito } from '../hooks/useTrabalhaCredito';
+import { parcelasPagasEquivalentes, fracaoBr } from '../utils/creditoEmTela';
 import AnexosLista from './AnexosLista';
-import { moeda, data, dataAno2Hora } from '../utils/formato';
+import { moeda, data, dataAno2Hora, diaMes, hora, numeroBr } from '../utils/formato';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -39,10 +40,27 @@ export interface PagamentoDetalhe {
   data_liquidacao?: string | null;   // vem de liquidacoes_diarias.data_liquidacao
   data_abertura?: string | null;     // vem de liquidacoes_diarias.data_abertura
   importado?: boolean;               // true = registro da importação SmartPay
+  // Para a tela de parcelas (layout C, 18/11/2026): "pago no dia aberto"
+  // compara liquidacao_id com o dia aberto, e operacao_id separa o
+  // recebimento de UMA parcela do de várias (quitação, sem estorno por parcela).
+  liquidacao_id?: string | null;
+  operacao_id?: string | null;
   // Detalhes do estorno (preenchidos quando estornado = true)
   motivo_estorno?: string;
   data_estorno?: string;
   estornado_por_nome?: string;
+}
+
+/** O que o resumo do topo precisa do empréstimo. */
+export interface EmprestimoResumo {
+  status: string;
+  tipo_emprestimo?: string | null;
+  valor_principal: number;
+  valor_total: number;
+  /** Já LÍQUIDO de crédito (o gatilho desconta) — não subtrair de novo. */
+  valor_saldo: number;
+  numero_parcelas: number;
+  frequencia_pagamento?: string | null;
 }
 
 interface ClienteModalInfo {
@@ -105,9 +123,16 @@ interface ParcelasModalProps {
    * contra o relógio do aparelho.
    */
   dataOperacional: string;
+  /** Abre o MENU de pagamento (não paga direto). */
   onPagar: (parcela: ParcelaModal) => void;
-  onPagarMultiplo?: (parcelas: ParcelaModal[], totalValor: number, creditoUsado: number) => void;
   onEstornar: (parcela: ParcelaModal) => void;
+  /** Resumo do topo; sem ele a tela mostra só a lista. */
+  emprestimo?: EmprestimoResumo | null;
+  /** A origem já tem renovação viva: o Renovar fica, desabilitado. */
+  jaRenovado?: boolean;
+  /** Só com o empréstimo QUITADO. */
+  onRenovar?: () => void;
+  onAbrirFicha?: () => void;
   // Opcional: mapa parcela_id → lista de pagamentos individuais
   // Quando fornecido, cada parcela vira toque que abre o popup de detalhes
   pagamentosDetalhados?: Map<string, PagamentoDetalhe[]>;
@@ -162,6 +187,7 @@ function DetalhesPopup({
   visible, onClose, parcela, pagamentos, clienteId, lang,
   podeAnexar = true, enviadoPor, enviadoPorNome, dataOperacional, t,
 }: DetalhesPopupProps) {
+  const mostrarCredito = useTrabalhaCredito();
   // Comprovantes abrem sob demanda, um pagamento por vez: a lista de anexos
   // consulta o banco ao montar, e renderizar todas de uma vez faria N buscas
   // só para abrir o popup.
@@ -255,11 +281,11 @@ function DetalhesPopup({
                         <Text style={[D.resumoLabel, { marginLeft: 4 }]}>{t.dinheiro}</Text>
                         <Text style={[D.resumoValue, { color: '#10B981', fontWeight: '700' }]}>{fmt(valorDinheiro)}</Text>
                       </View>
-                      <View style={D.resumoRow}>
+                      {mostrarCredito && <View style={D.resumoRow}>
                         <Ionicons name="card-outline" size={12} color="#2563EB" />
                         <Text style={[D.resumoLabel, { marginLeft: 4, color: '#2563EB' }]}>{t.creditoUsado}</Text>
                         <Text style={[D.resumoValue, { color: '#2563EB' }]}>{fmt(creditoUsadoFinal)}</Text>
-                      </View>
+                      </View>}
                     </>
                   )}
                   {/* Saldo restante (parcial/vencida com pagamento) */}
@@ -546,420 +572,387 @@ const D = StyleSheet.create({
 });
 
 // ─── Componente Principal ────────────────────────────────────────────────────
+//
+// Layout C (Mauricio, 17 e 18/11/2026; mockup "Parcelas" no claude.ai). Uma
+// lista só, sempre com o mesmo esqueleto:
+//
+//   resumo do empréstimo · faixa "hoje" · uma linha por parcela · rodapé
+//
+// Regras fixas, e cada uma tem motivo:
+//   1. O valor da linha é SEMPRE o da parcela. Dinheiro a mais ou a menos vai
+//      para a legenda — senão a coluna mistura duas grandezas e a soma visual
+//      deixa de fechar com o total.
+//   2. ↶ só em parcela paga NO DIA ABERTO, e só a última delas fica ativa: o
+//      estorno é linear (abrirEstorno recusa fora de ordem). Paga em dia
+//      fechado mostra "Pago em dd/mm", sem botão — o vendedor não alcança
+//      aquele dia.
+//   3. Um Pagar só, na primeira parcela em aberto, e ele abre o MENU de
+//      pagamento (é lá que vivem crédito, quitação e "pagar várias"). Linha
+//      com ↶ não tem Pagar, inclusive a parcial.
+//   4. Recebimento de várias parcelas (quitação) vira UMA faixa, sem ↶: o
+//      banco recusa estorno por parcela desse recebimento desde 16/11/2026
+//      (sql/2026-11-16_reset_reencadeia_e_estorno_recusa_multi.sql). A faixa
+//      diz o caminho: Resetar cliente.
+//   5. Crédito aparece só no resumo, como "Crédito disponível" — o mesmo
+//      rótulo do card. O Restante já vem LÍQUIDO de crédito
+//      (emprestimos.valor_saldo); a linha não é para ser subtraída.
+
+const TX = {
+  'pt-BR': {
+    emprestimo: 'Empréstimo', recebido: 'Recebido', restante: 'Restante',
+    pagas: (a: number | string, b: number) => `${a} de ${b} pagas`,
+    parciais: (n: number) => `${n} parcial${n === 1 ? '' : 's'}`,
+    creditoDisp: 'Crédito disponível',
+    hojeRecebido: 'Hoje recebido',
+    parcelasN: (n: number) => `${n} parcela${n === 1 ? '' : 's'}`,
+    parcial: 'parcial', maisCredito: ' + crédito',
+    quitadoHoje: 'QUITADO hoje', recebHoje: 'Recebido hoje',
+    multiAviso: 'Recebimento de várias parcelas não se estorna por parcela. Para desfazer, use Resetar cliente no Caixa.',
+    quitAviso: 'Para desfazer a quitação, use Resetar cliente no Caixa.',
+    pagoHoje: 'Pago hoje', pagoEm: 'Pago em', quitacao: 'quitação',
+    parcialLeg: 'Parcial', hoje: 'hoje', falta: 'falta',
+    gerouCredito: 'gerou crédito', usouCredito: 'usou crédito',
+    quitadoCredito: 'Quitado por crédito',
+    pago: 'Pago', naoPago: 'Não pago', cancelada: 'Cancelada', pagar: 'Pagar',
+    renovar: 'Renovar', renovado: 'Renovado',
+    verFicha: 'Ver ficha completa',
+    vazio: 'Nenhuma parcela encontrada',
+    freq: { DIARIO: 'diário', SEMANAL: 'semanal', QUINZENAL: 'quinzenal', MENSAL: 'mensal', FLEXIVEL: 'flexível' } as Record<string, string>,
+    unid: { DIARIO: ['dia', 'dias'], SEMANAL: ['semana', 'semanas'], QUINZENAL: ['quinzena', 'quinzenas'], MENSAL: ['mês', 'meses'] } as Record<string, [string, string]>,
+    tipo: { NOVO: 'Empréstimo novo', RENOVACAO: 'Renovação', ADICIONAL: 'Adicional', RENEGOCIACAO: 'Renegociação' } as Record<string, string>,
+    status: { QUITADO: 'Quitado', RENEGOCIADO: 'Renegociado', CANCELADO: 'Cancelado', VENCIDO: 'Vencido' } as Record<string, string>,
+  },
+  es: {
+    emprestimo: 'Préstamo', recebido: 'Recibido', restante: 'Restante',
+    pagas: (a: number | string, b: number) => `${a} de ${b} pagadas`,
+    parciais: (n: number) => `${n} parcial${n === 1 ? '' : 'es'}`,
+    creditoDisp: 'Crédito disponible',
+    hojeRecebido: 'Recibido hoy',
+    parcelasN: (n: number) => `${n} cuota${n === 1 ? '' : 's'}`,
+    parcial: 'parcial', maisCredito: ' + crédito',
+    quitadoHoje: 'LIQUIDADO hoy', recebHoje: 'Recibido hoy',
+    multiAviso: 'Un cobro de varias cuotas no se reversa por cuota. Para deshacerlo, use Resetar cliente en Caja.',
+    quitAviso: 'Para deshacer la liquidación, use Resetar cliente en Caja.',
+    pagoHoje: 'Pagado hoy', pagoEm: 'Pagado el', quitacao: 'liquidación',
+    parcialLeg: 'Parcial', hoje: 'hoy', falta: 'falta',
+    gerouCredito: 'generó crédito', usouCredito: 'usó crédito',
+    quitadoCredito: 'Liquidado por crédito',
+    pago: 'Pagado', naoPago: 'No pagado', cancelada: 'Cancelada', pagar: 'Pagar',
+    renovar: 'Renovar', renovado: 'Renovado',
+    verFicha: 'Ver ficha completa',
+    vazio: 'Ninguna cuota encontrada',
+    freq: { DIARIO: 'diario', SEMANAL: 'semanal', QUINZENAL: 'quincenal', MENSAL: 'mensual', FLEXIVEL: 'flexible' } as Record<string, string>,
+    unid: { DIARIO: ['día', 'días'], SEMANAL: ['semana', 'semanas'], QUINZENAL: ['quincena', 'quincenas'], MENSAL: ['mes', 'meses'] } as Record<string, [string, string]>,
+    tipo: { NOVO: 'Préstamo nuevo', RENOVACAO: 'Renovación', ADICIONAL: 'Adicional', RENEGOCIACAO: 'Renegociación' } as Record<string, string>,
+    status: { QUITADO: 'Liquidado', RENEGOCIADO: 'Renegociado', CANCELADO: 'Cancelado', VENCIDO: 'Vencido' } as Record<string, string>,
+  },
+};
+
+const num = (v: unknown) => Number(v || 0);
+const dinheiroDe = (pp: PagamentoDetalhe) => num(pp.valor_pago_total) - num(pp.valor_credito_usado);
 
 export default function ParcelasModal({
   visible, onClose, clienteModal, parcelasModal, loadingParcelas,
-  creditoDisponivel, liqId, isViz, isClientePago = false, lang = 'pt-BR',
-  trabalhaDomingo = true,
-  feriados,
-  dataOperacional,
-  onPagar, onPagarMultiplo, onEstornar, pagamentosDetalhados, t,
+  creditoDisponivel, liqId, isViz, lang = 'pt-BR',
+  dataOperacional, emprestimo, jaRenovado = false,
+  onPagar, onEstornar, onRenovar, onAbrirFicha, pagamentosDetalhados, t,
 }: ParcelasModalProps) {
   const { vendedor } = useAuth();
+  const mostrarCredito = useTrabalhaCredito();
   const [parcelaDetalhes, setParcelaDetalhes] = useState<ParcelaModal | null>(null);
-  const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const tx = TX[lang] || TX['pt-BR'];
 
-  // Reset seleção ao fechar/abrir modal
-  useEffect(() => {
-    if (!visible) {
-      setSelectionMode(false);
-      setSelectedIds(new Set());
-    }
-  }, [visible]);
+  const empStatus = String(emprestimo?.status || clienteModal?.emprestimo_status || '').toUpperCase();
+  const encerrado = ['QUITADO', 'RENEGOCIADO', 'CANCELADO'].includes(empStatus);
+  // Botão só com dia aberto e fora do modo visualização.
+  const podeAgir = !!liqId && !isViz;
 
-  // Parcelas selecionáveis (pendentes, não canceladas, com parcela_id)
-  const isSelectable = (p: ParcelaModal) => {
-    if (!p.parcela_id) return false;
-    if (p.status === 'PAGO' || p.status === 'CANCELADO') return false;
-    if (['RENEGOCIADO', 'QUITADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '')) return false;
-    if (!liqId || isViz || isClientePago) return false;
-    return true;
-  };
+  const vivas = parcelasModal.filter(p => p.status !== 'CANCELADO');
+  const pagsVivos = (id: string) => (pagamentosDetalhados?.get(id) || []).filter(pp => !pp.estornado);
+  const pagsHoje = (id: string) => (liqId ? pagsVivos(id).filter(pp => pp.liquidacao_id === liqId) : []);
 
-  // Toggle seleção
-  const toggleSelection = (p: ParcelaModal) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(p.parcela_id)) next.delete(p.parcela_id);
-      else next.add(p.parcela_id);
-      // Se desmarcou tudo, sai do modo seleção
-      if (next.size === 0) setSelectionMode(false);
-      return next;
-    });
-  };
+  // Operação → parcelas que ela cobre (só pagamentos vivos). Uma operação com
+  // mais de uma parcela é recebimento múltiplo: não tem ↶.
+  const parcelasPorOp = new Map<string, Set<string>>();
+  parcelasModal.forEach(p => pagsVivos(p.parcela_id).forEach(pp => {
+    if (!pp.operacao_id) return;
+    const s = parcelasPorOp.get(pp.operacao_id) || new Set<string>();
+    s.add(p.parcela_id);
+    parcelasPorOp.set(pp.operacao_id, s);
+  }));
+  const ehMultiHoje = (p: ParcelaModal) =>
+    pagsHoje(p.parcela_id).some(pp => !!pp.operacao_id && (parcelasPorOp.get(pp.operacao_id)?.size || 0) > 1);
 
-  // Long press: ativa modo seleção + seleciona a parcela
-  const handleLongPress = (p: ParcelaModal) => {
-    if (!isSelectable(p)) return;
-    setSelectionMode(true);
-    setSelectedIds(new Set([p.parcela_id]));
-  };
+  // ── Faixa "hoje" ──
+  const parcelasHoje = parcelasModal.filter(p => pagsHoje(p.parcela_id).length > 0);
+  const todosHoje = parcelasHoje.flatMap(p => pagsHoje(p.parcela_id));
+  const valorHoje = todosHoje.reduce((s, pp) => s + dinheiroDe(pp), 0);
+  const geradoHoje = todosHoje.some(pp => num(pp.valor_credito_gerado) > 0);
+  const ultimoHoje = todosHoje.reduce<string | null>((m, pp) => (!m || pp.created_at > m ? pp.created_at : m), null);
+  const temMultiHoje = parcelasHoje.some(ehMultiHoje);
+  const quitadoHoje = empStatus === 'QUITADO' && parcelasHoje.length > 0;
+  const rotuloHoje = parcelasHoje.length === 1 && parcelasHoje[0].status !== 'PAGO'
+    ? tx.parcial
+    : tx.parcelasN(parcelasHoje.length) + (geradoHoje && mostrarCredito ? tx.maisCredito : '');
 
-  // Cancelar seleção
-  const cancelarSelecao = () => {
-    setSelectionMode(false);
-    setSelectedIds(new Set());
-  };
+  // ↶: parcela paga no dia aberto, fora de recebimento múltiplo, empréstimo
+  // ainda aberto. Só a de maior número fica ativa.
+  const estornaveis = podeAgir && !encerrado
+    ? parcelasHoje.filter(p => !ehMultiHoje(p))
+    : [];
+  const ultimaEstornavel = estornaveis.reduce((m, p) => Math.max(m, p.numero_parcela), 0);
 
-  // Parcelas selecionadas ordenadas por numero_parcela
-  const selectedParcelas = parcelasModal
-    .filter(p => selectedIds.has(p.parcela_id))
-    .sort((a, b) => a.numero_parcela - b.numero_parcela);
+  // Pagar: a primeira em aberto, se ela não tiver ↶.
+  const ordenadas = [...vivas].sort((a, b) => a.numero_parcela - b.numero_parcela);
+  const primeiraAberta = ordenadas.find(p => p.status !== 'PAGO');
+  const idPagar = podeAgir && !encerrado && primeiraAberta && pagsHoje(primeiraAberta.parcela_id).length === 0
+    ? primeiraAberta.parcela_id : null;
 
-  // Calcular total: valor_parcela inteira OU saldo (se parcial)
-  const calcValorParcela = (p: ParcelaModal): number => {
-    const valorPago = p.valor_pago || 0;
-    if (valorPago > 0 && p.status !== 'PAGO') {
-      // Parcela com pagamento parcial → cobra só o restante
-      return p.valor_saldo ?? (p.valor_parcela - valorPago);
-    }
-    return p.valor_parcela;
-  };
+  // ── Resumo ──
+  const qtdTotal = vivas.length;
+  const qtdPagas = vivas.filter(p => p.status === 'PAGO').length;
+  const qtdParciais = vivas.filter(p => p.status !== 'PAGO' && num(p.valor_pago) > 0).length;
+  const valorTotal = num(emprestimo?.valor_total);
+  const restante = Math.max(0, num(emprestimo?.valor_saldo));
+  // Recebido sai do SALDO, não da soma de pagamentos: é a regra da Ficha
+  // (importação sem pagamento registrado daria 0 recebido num empréstimo meio
+  // quitado), e faz Recebido + Restante fechar no total por construção.
+  const recebido = Math.max(0, valorTotal - restante);
+  const progresso = valorTotal > 0 ? Math.min(1, recebido / valorTotal) : (qtdTotal > 0 ? qtdPagas / qtdTotal : 0);
+  const primeiraVenc = ordenadas[0]?.data_vencimento;
+  const ultimaVenc = ordenadas[ordenadas.length - 1]?.data_vencimento;
+  const freq = String(emprestimo?.frequencia_pagamento || '').toUpperCase();
+  const unid = tx.unid[freq];
+  const duracao = unid && qtdTotal > 0 ? ` · ${qtdTotal} ${qtdTotal === 1 ? unid[0] : unid[1]}` : '';
+  const valorParcelaTipica = ordenadas[0]?.valor_parcela || 0;
+  // Sem crédito à vista, a contagem é em EQUIVALENTE: o pago a mais vira
+  // fração ("1,5 de 24 pagas"). Ver utils/creditoEmTela.
+  const pagasEquiv = parcelasPagasEquivalentes(valorTotal, restante, valorParcelaTipica, qtdTotal);
+  const subtitulo = [
+    tx.tipo[String(emprestimo?.tipo_emprestimo || '').toUpperCase()],
+    tx.status[empStatus],
+  ].filter(Boolean).join(' · ');
 
-  // Verificar se a última parcela do empréstimo está selecionada
-  const ultimaParcelaEmprestimo = parcelasModal
-    .filter(p => p.status !== 'PAGO' && p.status !== 'CANCELADO')
-    .sort((a, b) => b.numero_parcela - a.numero_parcela)[0];
+  const mostrarRenovar = empStatus === 'QUITADO' && !!onRenovar;
+  const renovarOff = jaRenovado || !podeAgir;
 
-  const ultimaSelecionada = ultimaParcelaEmprestimo && selectedIds.has(ultimaParcelaEmprestimo.parcela_id);
-
-  // Calcular totais
-  const subtotal = selectedParcelas.reduce((sum, p) => sum + calcValorParcela(p), 0);
-  const creditoAplicado = ultimaSelecionada && creditoDisponivel > 0
-    ? Math.min(creditoDisponivel, calcValorParcela(ultimaParcelaEmprestimo))
-    : 0;
-  const totalFinal = Math.max(0, subtotal - creditoAplicado);
-
-  // Confirmar pagamento múltiplo
-  const confirmarMultiplo = () => {
-    if (selectedParcelas.length === 0 || !onPagarMultiplo) return;
-    onPagarMultiplo(selectedParcelas, totalFinal, creditoAplicado);
-    cancelarSelecao();
-  };
-
-  const abrirDetalhes = (p: ParcelaModal) => {
-    if (!pagamentosDetalhados) return;
-    setParcelaDetalhes(p);
-  };
-
-  const fecharDetalhes = () => setParcelaDetalhes(null);
-
-  const renderParcelaItem = (p: ParcelaModal) => {
-    const isPago = p.status === 'PAGO';
-    const isParcial = p.status === 'PARCIAL';
-    // ⭐ VENCIDA vem da DATA OPERACIONAL, não do status persistido.
-    //
-    // `emprestimo_parcelas.status` é gravado pelo trigger atualizar_saldo_parcela
-    // comparando com CURRENT_DATE. Quem opera uma liquidação retroativa via
-    // parcelas marcadas VENCIDO que naquele dia nem tinham vencido: cliente de
-    // 22/08 com parcelas de 24 a 29/08 mostrava "5 vencidas" operando 25/08.
-    //
-    // `<` e não `<=`: parcela que vence no próprio dia ainda está no prazo.
-    const isVencida = !isPago && !isParcial && !!p.data_vencimento
+  const renderLinha = (p: ParcelaModal, idx: number) => {
+    const cancelada = p.status === 'CANCELADO';
+    const pago = p.status === 'PAGO';
+    const vPago = num(p.valor_pago);
+    const parcial = !pago && !cancelada && vPago > 0;
+    // Vencida pela DATA OPERACIONAL, nunca pelo status persistido (o gatilho
+    // grava contra CURRENT_DATE). `<`: a que vence no próprio dia está no prazo.
+    const vencida = !pago && !parcial && !cancelada && !!p.data_vencimento
       && String(p.data_vencimento).substring(0, 10) < dataOperacional;
-    const isCancelado = p.status === 'CANCELADO';
-    const isAutoQuitacao = (p.observacoes || '').includes('[AUTO-QUITAÇÃO]');
+    const hojePags = pagsHoje(p.parcela_id);
+    const pagaHoje = hojePags.length > 0;
+    const multi = ehMultiHoje(p);
+    const autoQuit = (p.observacoes || '').includes('[AUTO-QUITAÇÃO]');
+    const vivos = pagsVivos(p.parcela_id);
 
-    // ehUltimaPaga: parcela de MAIOR numero_parcela entre as pagas.
-    const maxParcelaPaga = parcelasModal
-      .filter(x => (x.valor_pago || 0) > 0 && x.status !== 'CANCELADO')
-      .reduce((max, x) => Math.max(max, x.numero_parcela), 0);
-    const ehUltimaPaga = isPago && p.numero_parcela === maxParcelaPaga;
-
-    // ⭐ Quitação antecipada (opção B): marca a parcela que EFETIVAMENTE quitou
-    // o empréstimo ANTES do prazo — não qualquer parcela que gerou crédito.
-    // Sinal correto: o empréstimo está QUITADO, esta parcela recebeu pagamento
-    // real (não é auto-quitada), e EXISTEM parcelas auto-quitadas de número
-    // MAIOR (as seguintes foram fechadas por este pagamento = antecipação).
-    // A condição antiga (credito_gerado>0 && QUITADO) marcava errado toda
-    // parcela que gerou crédito (ex.: Juancho parcelas 1 e 2).
-    const temAutoQuitDepois = parcelasModal.some(
-      x => x.numero_parcela > p.numero_parcela && (x.observacoes || '').includes('[AUTO-QUITAÇÃO]')
-    );
-    const isQuitacaoOrigem =
-      isPago &&
-      !isAutoQuitacao &&
-      clienteModal?.emprestimo_status === 'QUITADO' &&
-      temAutoQuitDepois;
-
-    // Atraso de parcela PAGA: compara a DATA DA LIQUIDAÇÃO (data de negócio do
-    // dia de trabalho onde foi paga) com o vencimento — NÃO a data_pagamento
-    // (que é quando o registro foi criado no sistema, podendo ser no dia
-    // seguinte/madrugada). Ex.: liquidação 04/08, vencimento 04/08, registro
-    // 05/08 → EM DIA, não "1 dia de atraso". Fallback para data_pagamento se a
-    // liquidação não tiver data (segurança).
-    const dataRefAtraso = p.data_liquidacao || p.data_pagamento;
-    const diasAtraso = isPago
-      ? diasCobrancaEntre(p.data_vencimento, dataRefAtraso, { trabalhaDomingo, feriados })
-      : 0;
-    const pagoComAtraso = isPago && diasAtraso > 0;
-    const pagoAdiantado = isPago && diasAtraso < 0;
-
-    // Cores por status
-    const iconColor = isPago
-      ? (pagoComAtraso ? '#F59E0B' : '#10B981')
-      : isParcial ? '#F59E0B'
-      : isCancelado ? '#9CA3AF'
-      : isVencida ? '#EF4444'
-      : '#6B7280';
-
-    const iconBg = isPago
-      ? (pagoComAtraso ? '#FEF3C7' : '#D1FAE5')
-      : isParcial ? '#FEF3C7'
-      : isCancelado ? '#F3F4F6'
-      : isVencida ? '#FEE2E2'
-      : '#F3F4F6';
-
-    const statusColor = isPago
-      ? (pagoComAtraso ? '#D97706' : '#10B981')
-      : isParcial ? '#D97706'
-      : isCancelado ? '#9CA3AF'
-      : isVencida ? '#EF4444'
-      : '#F97316';
-
-    const statusBg = isPago
-      ? (pagoComAtraso ? '#FEF3C7' : '#D1FAE5')
-      : isParcial ? '#FEF3C7'
-      : isCancelado ? '#F3F4F6'
-      : isVencida ? '#FEE2E2'
-      : '#FFEDD5';
-
-    const statusText = isPago ? t.pagoStatus
-      : isParcial ? t.parcialStatus
-      : isCancelado ? 'CANCELADO'
-      : isVencida ? t.vencidaStatus
-      : t.pendente;
-
-    const statusIcon: keyof typeof Ionicons.glyphMap = isPago
-      ? 'checkmark-circle'
-      : isParcial || (!isPago && (p.valor_pago || 0) > 0) ? 'pie-chart'
-      : isCancelado ? 'close-circle'
-      : 'time-outline';
-
-    const valorPago = p.valor_pago || 0;
-    const creditoUsado = p.credito_usado || 0;
-    const valorDinheiro = valorPago - creditoUsado;
-    const valorSaldo = p.valor_saldo ?? (p.valor_parcela - valorPago);
-    const temPagamentoParcial = !isPago && valorPago > 0;
-
-    // Parcela é toque quando temos pagamentosDetalhados e há algo a mostrar
-    const temDetalhes = !!pagamentosDetalhados && (isPago || isParcial || temPagamentoParcial || (isVencida && valorPago > 0));
-    const isSelected = selectionMode && selectedIds.has(p.parcela_id);
-    const canSelect = isSelectable(p);
-
-    // Handler de toque: abre detalhes (seleção múltipla foi movida para a tela dedicada)
-    const handlePress = () => {
-      if (temDetalhes) {
-        abrirDetalhes(p);
+    // Legenda: tudo o que não é o valor da parcela.
+    const legenda: string[] = [];
+    if (pagaHoje) {
+      const h = hora(hojePags[hojePags.length - 1].created_at);
+      const dHoje = hojePags.reduce((s, pp) => s + dinheiroDe(pp), 0);
+      if (parcial) {
+        legenda.push(`${tx.parcialLeg} · ${tx.hoje}${h ? ' ' + h : ''} · ${numeroBr(dHoje)} · ${tx.falta} ${numeroBr(num(p.valor_saldo))}`);
+      } else if (multi) {
+        legenda.push(`${tx.pagoHoje} · ${tx.quitacao}`);
+      } else {
+        const difere = Math.abs(dHoje - num(p.valor_parcela)) > 0.009;
+        legenda.push(`${tx.pagoHoje}${h ? ' ' + h : ''}${difere ? ' · ' + numeroBr(dHoje) : ''}`);
       }
-    };
+    } else if (pago || parcial) {
+      // Dia em que foi paga = dia da LIQUIDAÇÃO do último pagamento vivo, não
+      // o relógio do registro (régua do tempo).
+      const ultimo = vivos[vivos.length - 1];
+      const dia = ultimo?.data_liquidacao || p.data_liquidacao || p.data_pagamento;
+      // Sem crédito à vista, quitada pelo adiantamento é só "paga em".
+      if (autoQuit && mostrarCredito) legenda.push(tx.quitadoCredito);
+      else if (parcial) legenda.push(`${tx.parcialLeg} · ${numeroBr(vPago)} · ${tx.falta} ${numeroBr(num(p.valor_saldo))}`);
+      else if (dia) legenda.push(`${tx.pagoEm} ${diaMes(dia)}`);
+    }
+    const gerado = vivos.reduce((s, pp) => s + num(pp.valor_credito_gerado), 0);
+    const usado = vivos.reduce((s, pp) => s + num(pp.valor_credito_usado), 0);
+    const credLeg: string[] = [];
+    if (gerado > 0 && !autoQuit && mostrarCredito) credLeg.push(`${tx.gerouCredito} ${numeroBr(gerado)}`);
+    if (usado > 0 && !autoQuit && mostrarCredito) credLeg.push(`${tx.usouCredito} ${numeroBr(usado)}`);
+
+    const circ = cancelada ? R.cNeu : pago ? R.cOk : parcial ? R.cWarn : vencida ? R.cBad : R.cNeu;
+    const circTx = cancelada ? R.cNeuTx : pago ? R.cOkTx : parcial ? R.cWarnTx : vencida ? R.cBadTx : R.cNeuTx;
+
+    const temEstorno = estornaveis.some(x => x.parcela_id === p.parcela_id);
+    const estornoAtivo = temEstorno && p.numero_parcela === ultimaEstornavel;
+    const temPagar = idPagar === p.parcela_id;
+    const temDetalhes = !!pagamentosDetalhados && (pago || parcial || vivos.length > 0);
+
+    let direita: React.ReactNode;
+    if (temEstorno) {
+      direita = (
+        <TouchableOpacity
+          style={[R.btn, R.btnRed, !estornoAtivo && R.btnOff]}
+          disabled={!estornoAtivo}
+          onPress={() => onEstornar(p)}
+          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+        >
+          <Ionicons name="arrow-undo" size={15} color="#DC2626" />
+        </TouchableOpacity>
+      );
+    } else if (temPagar) {
+      direita = (
+        <TouchableOpacity style={[R.btn, R.btnGreen]} onPress={() => onPagar(p)}>
+          <Text style={R.btnGreenTx}>$ {tx.pagar}</Text>
+        </TouchableOpacity>
+      );
+    } else {
+      const [pillBg, pillCor, pillTx] = cancelada ? ['#E5E7EB', '#6B7280', tx.cancelada]
+        : pago ? ['#D1FAE5', '#059669', tx.pago]
+        : parcial ? ['#FEF3C7', '#D97706', tx.parcialLeg]
+        : ['#E5E7EB', '#6B7280', tx.naoPago];
+      direita = (
+        <View style={[R.pill, { backgroundColor: pillBg }]}>
+          <Text style={[R.pillTx, { color: pillCor }]}>{pillTx}</Text>
+        </View>
+      );
+    }
 
     return (
       <TouchableOpacity
         key={p.parcela_id}
-        style={[
-          S.mParcela,
-          { borderLeftColor: iconColor },
-          isSelected && S.mParcelaSelected,
-        ]}
-        activeOpacity={0.7}
-        onPress={handlePress}
+        style={[R.linha, idx > 0 && R.linhaBorda, cancelada && { opacity: 0.55 }]}
+        activeOpacity={temDetalhes ? 0.6 : 1}
+        onPress={() => { if (temDetalhes) setParcelaDetalhes(p); }}
       >
-        <View style={S.mParcelaRow}>
-          {/* Ícone de status / checkbox de seleção */}
-          <View style={[S.mParcelaIcon, { backgroundColor: isSelected ? '#DBEAFE' : iconBg }]}>
-            {selectionMode && canSelect ? (
-              <Ionicons 
-                name={isSelected ? 'checkbox' : 'square-outline'} 
-                size={18} 
-                color={isSelected ? '#2563EB' : '#9CA3AF'} 
-              />
-            ) : (
-              <Ionicons name={statusIcon} size={16} color={iconColor} />
-            )}
-          </View>
-
-          {/* Info central */}
-          <View style={S.mParcelaInfo}>
-            {/* Linha 1: Número + Status badge */}
-            <View style={S.headerRow}>
-              <Text style={S.mParcelaNum}>{t.parcela} {p.numero_parcela}</Text>
-              <View style={[S.mParcelaStatus, { backgroundColor: statusBg }]}>
-                <Text style={[S.mParcelaStatusTx, { color: statusColor }]}>{statusText}</Text>
-              </View>
-              {/* Indicador de detalhes disponíveis */}
-              {temDetalhes && (
-                <Ionicons name="information-circle-outline" size={14} color="#9CA3AF" style={{ marginLeft: 2 }} />
-              )}
-            </View>
-
-            {/* Linha 2: Datas compactas */}
-            <View style={S.datesBlock}>
-              <View style={S.dateRow}>
-                <Ionicons name="calendar-outline" size={11} color="#9CA3AF" />
-                <Text style={S.dateText}>{t.venc} {fmtData(p.data_vencimento)}</Text>
-              </View>
-              {p.data_pagamento && (
-                <View style={S.dateRow}>
-                  <Ionicons name="checkmark-done-outline" size={11} color={pagoComAtraso ? '#D97706' : '#6B7280'} />
-                  <Text style={[S.dateText, pagoComAtraso && { color: '#D97706' }]}>
-                    {t.em} {fmtData(p.data_pagamento)}
-                  </Text>
-                  {pagoComAtraso && (
-                    <View style={S.badgeAtraso}>
-                      <Ionicons name="alert-circle" size={9} color="#DC2626" />
-                      <Text style={S.badgeAtrasoTx}>
-                        {' '}{diasAtraso} {diasAtraso === 1 ? t.diaAtraso : t.diasAtraso}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              )}
-              {p.data_liquidacao && (
-                <View style={S.dateRow}>
-                  <Ionicons name="document-text-outline" size={11} color="#6366F1" />
-                  <Text style={[S.dateText, { color: '#6366F1' }]}>{t.liq} {fmtData(p.data_liquidacao)}</Text>
-                </View>
-              )}
-            </View>
-
-            {/* Badges especiais */}
-            {isQuitacaoOrigem && (
-              <View style={S.badgeSpecial}>
-                <Ionicons name="flash" size={10} color="#D97706" />
-                <Text style={S.badgeSpecialTxAmber}> {t.quitacaoAntecipada}</Text>
-              </View>
-            )}
-            {isAutoQuitacao && (
-              <View style={[S.badgeSpecial, { backgroundColor: '#DBEAFE', borderColor: '#BFDBFE' }]}>
-                <Ionicons name="swap-horizontal" size={10} color="#2563EB" />
-                <Text style={[S.badgeSpecialTxAmber, { color: '#2563EB' }]}> {t.quitadoPorCredito}</Text>
-              </View>
-            )}
-
-            {/* PAGO: "Pago" = DINHEIRO REAL recebido (não o valor liquidado da
-                parcela). Assim, somar os "Pago" de todas as parcelas bate com
-                o dinheiro que o vendedor efetivamente recebeu. O crédito
-                (usado ou gerado) é demonstrado à parte, sem entrar na soma do
-                dinheiro. Ex.: parcela paga com $61 dinheiro + $11 crédito
-                mostra "Pago: $61" + "Crédito usado: $11" (não "$72"). */}
-            {isPago && (
-              <View style={S.valoresBlock}>
-                <Text style={S.mParcelaPago}>{t.pago} {fmt(valorDinheiro)}</Text>
-                {creditoUsado > 0 && (
-                  <View style={S.breakdownRow}>
-                    <Ionicons name="card-outline" size={11} color="#2563EB" />
-                    <Text style={S.breakdownTextCredito}> {t.creditoUsado}: {fmt(creditoUsado)}</Text>
-                  </View>
-                )}
-                {(p.credito_gerado || 0) > 0 && !isAutoQuitacao && (
-                  <Text style={S.mParcelaCredito}>{lang === 'es' ? 'Generó crédito:' : 'Gerou crédito:'} {fmt(p.credito_gerado || 0)}</Text>
-                )}
-                {(p.saldo_excedente || 0) > 0 && (p.credito_gerado || 0) === 0 && !isAutoQuitacao && (
-                  <Text style={S.mParcelaCredito}>{lang === 'es' ? 'Generó crédito:' : 'Gerou crédito:'} {fmt(p.saldo_excedente || 0)}</Text>
-                )}
-              </View>
-            )}
-
-            {/* PARCIAL / VENCIDA com pagamento parcial: "Pago" = dinheiro real */}
-            {temPagamentoParcial && (
-              <View style={S.valoresBlock}>
-                <Text style={S.mParcelaPago}>{t.pago} {fmt(valorDinheiro)}</Text>
-                {creditoUsado > 0 && (
-                  <View style={S.breakdownRow}>
-                    <Ionicons name="card-outline" size={11} color="#2563EB" />
-                    <Text style={S.breakdownTextCredito}> {t.creditoUsado}: {fmt(creditoUsado)}</Text>
-                  </View>
-                )}
-                <Text style={S.mParcelaRestante}>{t.restante} {fmt(valorSaldo)}</Text>
-              </View>
-            )}
-
-            {/* SEM PAGAMENTO: só valor */}
-            {!isPago && !temPagamentoParcial && (
-              <Text style={S.mParcelaValor}>{fmt(p.valor_parcela)}</Text>
-            )}
-          </View>
-
-          {/* Lado direito: botões (só estorno; pagamento é feito pelo menu de pagamento) */}
-          <View style={S.mParcelaBtns}>
-            {!selectionMode && (isPago || valorPago > 0) && p.parcela_id && liqId && !isViz && p.liquidacao_id === liqId && !['QUITADO', 'RENEGOCIADO', 'CANCELADO'].includes(clienteModal?.emprestimo_status || '') && (
-              <TouchableOpacity style={S.mBtnEstornar} onPress={() => onEstornar(p)}>
-                <Ionicons name="arrow-undo-outline" size={14} color="#EF4444" />
-                <Text style={S.mBtnEstornarTx}>{t.estornar}</Text>
-              </TouchableOpacity>
-            )}
-          </View>
+        <View style={[R.circ, circ]}>
+          <Text style={[R.circTx, circTx]}>{p.numero_parcela}</Text>
         </View>
-        {/* Aviso de quitação — LINHA PRÓPRIA, largura total do card (fora das
-            colunas, senão espreme o valor "Pago" e quebra o layout).
-            Só na parcela que quitou (última paga) com status QUITADO.
-            Com destaque: fundo âmbar, borda e ícone visíveis. */}
-        {!selectionMode && (isPago || valorPago > 0) && p.parcela_id && liqId && !isViz && p.liquidacao_id === liqId && clienteModal?.emprestimo_status === 'QUITADO' && ehUltimaPaga && (
-          <View style={S.mQuitadoAviso}>
-            <Ionicons name="checkmark-done-circle" size={18} color="#B45309" />
-            <Text style={S.mQuitadoAvisoTx}>
-              {lang === 'es'
-                ? 'Préstamo liquidado por esta cuota. Para revertir, vaya al botón Caja y resetee la operación.'
-                : 'Empréstimo quitado por esta parcela. Para reverter, vá ao botão Caixa e resete a operação.'}
-            </Text>
-          </View>
-        )}
+        <View style={R.meio}>
+          <Text style={R.venc}>{diaMes(p.data_vencimento)}</Text>
+          {legenda.map((l, i) => <Text key={i} style={R.leg}>{l}</Text>)}
+          {credLeg.map((l, i) => <Text key={'c' + i} style={R.legCred}>{l}</Text>)}
+        </View>
+        <Text style={[R.valor, cancelada && { textDecorationLine: 'line-through' }]}>{numeroBr(p.valor_parcela)}</Text>
+        {direita}
       </TouchableOpacity>
     );
   };
 
   return (
     <>
-      <Modal visible={visible} animationType="slide" transparent={true} onRequestClose={onClose}>
-        <View style={S.modalOverlay}>
-          <View style={S.modalContainer}>
-            {/* Header */}
-            <View style={S.modalHeader}>
-              <Text style={S.modalTitle} numberOfLines={1}>{clienteModal?.nome || ''}</Text>
-              <TouchableOpacity onPress={onClose} style={S.modalClose}>
-                <Ionicons name="close" size={18} color="#6B7280" />
+      <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+        <View style={R.overlay}>
+          <View style={R.caixa}>
+            {/* Cabeçalho */}
+            <View style={R.cab}>
+              <View style={R.cabTextos}>
+                <Text style={R.cabNome} numberOfLines={1}>{clienteModal?.nome || ''}</Text>
+                {!!subtitulo && <Text style={R.cabSub}>{subtitulo}</Text>}
+              </View>
+              <TouchableOpacity onPress={onClose} style={R.cabFechar} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Ionicons name="close" size={18} color="#fff" />
               </TouchableOpacity>
             </View>
 
-            {/* Banner crédito */}
-            {creditoDisponivel > 0 && (
-              <View style={S.creditoBanner}>
-                <Ionicons name="card-outline" size={16} color="#1D4ED8" />
-                <Text style={S.creditoText}>{t.creditoDisponivel} {fmt(creditoDisponivel)}</Text>
-              </View>
-            )}
-
-            {/* Hint de toque (quando detalhes disponíveis) */}
-            {/* Hint: detalhes de parcela paga (só quando não tem parcelas selecionáveis) */}
-            {pagamentosDetalhados && !parcelasModal.some(p => isSelectable(p)) && (
-              <View style={S.hintBar}>
-                <Ionicons name="information-circle-outline" size={13} color="#6B7280" />
-                <Text style={S.hintText}>
-                  {lang === 'es' ? 'Toque en una cuota pagada para ver detalles' : 'Toque em uma parcela paga para ver detalhes'}
-                </Text>
-              </View>
-            )}
-
-            {/* Lista de parcelas */}
-            <ScrollView style={S.modalScroll} showsVerticalScrollIndicator={false}>
+            <ScrollView style={R.corpo} contentContainerStyle={R.corpoConteudo} showsVerticalScrollIndicator={false}>
               {loadingParcelas ? (
-                <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 40 }} />
+                <ActivityIndicator size="large" color="#2563EB" style={{ marginVertical: 40 }} />
               ) : parcelasModal.length === 0 ? (
-                <Text style={S.modalEmpty}>{t.nenhumaParcelaEncontrada}</Text>
+                <Text style={R.vazio}>{tx.vazio}</Text>
               ) : (
-                parcelasModal.map(p => renderParcelaItem(p))
-              )}
-              <View style={{ height: 10 }} />
-            </ScrollView>
+                <>
+                  {/* Resumo */}
+                  {emprestimo && (
+                    <View style={R.topo}>
+                      <View style={R.topoLinha}>
+                        <View style={R.topoEsq}>
+                          <Text style={R.topoRot}>{tx.emprestimo}</Text>
+                          <Text style={R.topoGrande}>{numeroBr(emprestimo.valor_principal)}</Text>
+                          <Text style={R.topoRot}>
+                            {qtdTotal} × {numeroBr(valorParcelaTipica)}{tx.freq[freq] ? ` · ${tx.freq[freq]}` : ''}
+                          </Text>
+                        </View>
+                        <View style={R.topoDir}>
+                          <View style={R.kv}>
+                            <Text style={R.topoRot}>{tx.recebido}</Text>
+                            <Text style={R.topoValor}>{numeroBr(recebido)}</Text>
+                          </View>
+                          <View style={R.kv}>
+                            <Text style={R.topoRot}>{tx.restante}</Text>
+                            <Text style={R.topoValor}>{numeroBr(restante)}</Text>
+                          </View>
+                        </View>
+                      </View>
+                      <View style={R.barra}>
+                        <View style={[R.barraFill, { width: `${Math.round(progresso * 100)}%` }]} />
+                      </View>
+                      <View style={R.topoRodape}>
+                        <Text style={R.topoRodapeTx}>
+                          {!mostrarCredito && pagasEquiv != null
+                            ? tx.pagas(fracaoBr(pagasEquiv), qtdTotal)
+                            : `${tx.pagas(qtdPagas, qtdTotal)}${qtdParciais > 0 ? ` · ${tx.parciais(qtdParciais)}` : ''}`}
+                        </Text>
+                        {!!primeiraVenc && (
+                          <Text style={R.topoRodapeTx}>
+                            {diaMes(primeiraVenc)} → {diaMes(ultimaVenc)}{duracao}
+                          </Text>
+                        )}
+                      </View>
+                      {creditoDisponivel > 0.009 && mostrarCredito && (
+                        <View style={R.topoCredito}>
+                          <Text style={R.topoCreditoRot}>{tx.creditoDisp}</Text>
+                          <Text style={R.topoCreditoVal}>{numeroBr(creditoDisponivel)}</Text>
+                        </View>
+                      )}
+                    </View>
+                  )}
 
-            {/* Botão Fechar */}
-            <View style={S.mBtnFecharWrap}>
-              <TouchableOpacity style={S.mBtnFechar} onPress={onClose}>
-                <Text style={S.mBtnFecharTx}>{t.fechar}</Text>
-              </TouchableOpacity>
-            </View>
+                  {/* Faixa do dia */}
+                  {parcelasHoje.length > 0 && (temMultiHoje || quitadoHoje) ? (
+                    <View style={R.faixaQuit}>
+                      <View style={R.kv}>
+                        <Text style={R.faixaRot}>
+                          {quitadoHoje ? `✓ ${tx.quitadoHoje}` : tx.recebHoje}{ultimoHoje ? ' ' + hora(ultimoHoje) : ''}
+                        </Text>
+                        <Text style={R.faixaVal}>{numeroBr(valorHoje)} · {tx.parcelasN(parcelasHoje.length)}</Text>
+                      </View>
+                      <Text style={R.faixaAviso}>{temMultiHoje ? tx.multiAviso : tx.quitAviso}</Text>
+                    </View>
+                  ) : parcelasHoje.length > 0 ? (
+                    <View style={R.faixaHoje}>
+                      <Text style={R.faixaHojeRot}>{tx.hojeRecebido}</Text>
+                      <Text style={R.faixaVal}>{numeroBr(valorHoje)} · {rotuloHoje}</Text>
+                    </View>
+                  ) : null}
+
+                  {/* Lista */}
+                  <View style={R.lista}>
+                    {[...parcelasModal]
+                      .sort((a, b) => a.numero_parcela - b.numero_parcela)
+                      .map((p, i) => renderLinha(p, i))}
+                  </View>
+
+                  {mostrarRenovar && (
+                    <TouchableOpacity
+                      style={[R.btnLargo, renovarOff && R.btnOff]}
+                      disabled={renovarOff}
+                      onPress={() => onRenovar && onRenovar()}
+                    >
+                      <Text style={R.btnLargoTx}>{jaRenovado ? `✓ ${tx.renovado}` : `↻ ${tx.renovar}`}</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {!!onAbrirFicha && (
+                    <TouchableOpacity style={R.linkFicha} onPress={onAbrirFicha}>
+                      <Ionicons name="document-text-outline" size={14} color="#4338CA" />
+                      <Text style={R.linkFichaTx}>{tx.verFicha}</Text>
+                      <Ionicons name="chevron-forward" size={13} color="#818CF8" />
+                    </TouchableOpacity>
+                  )}
+                </>
+              )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -967,7 +960,7 @@ export default function ParcelasModal({
       {/* Popup de detalhes — fora do modal principal para sobrepor corretamente */}
       <DetalhesPopup
         visible={!!parcelaDetalhes}
-        onClose={fecharDetalhes}
+        onClose={() => setParcelaDetalhes(null)}
         parcela={parcelaDetalhes}
         pagamentos={
           parcelaDetalhes && pagamentosDetalhados
@@ -987,86 +980,75 @@ export default function ParcelasModal({
 }
 
 // ─── Styles ─────────────────────────────────────────────────────────────────
+// Rótulos cedem largura (flexShrink: 1); valores ficam rígidos — dinheiro não
+// quebra no meio. Ver "No mobile, linha que não cede largura CORTA o número".
 
-const S = StyleSheet.create({
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
-  modalContainer: { width: '92%', maxHeight: '85%', backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden' },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#E5E7EB' },
-  modalTitle: { fontSize: 16, fontWeight: '700', color: '#1F2937', flex: 1, marginRight: 12 },
-  modalClose: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
-  modalScroll: { padding: 16 },
-  modalEmpty: { textAlign: 'center', color: '#9CA3AF', marginTop: 40 },
+const R = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  caixa: { width: '94%', maxHeight: '90%', backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden' },
 
-  // Banner crédito
-  creditoBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#DBEAFE', padding: 12, marginHorizontal: 16, marginTop: 12, borderRadius: 10, borderWidth: 1, borderColor: '#93C5FD' },
-  creditoText: { fontSize: 13, fontWeight: '600', color: '#1D4ED8', flexShrink: 1 },
+  cab: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#1F2937', paddingHorizontal: 14, paddingVertical: 12 },
+  cabTextos: { flex: 1, flexShrink: 1 },
+  cabNome: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  cabSub: { fontSize: 11, color: 'rgba(255,255,255,0.75)', marginTop: 1 },
+  cabFechar: { width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center' },
 
-  // Hint
-  hintBar: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#F9FAFB', borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
-  hintText: { fontSize: 11, color: '#9CA3AF' },
+  corpo: { flexGrow: 0 },
+  corpoConteudo: { padding: 12, gap: 10 },
+  vazio: { textAlign: 'center', color: '#9CA3AF', marginVertical: 40 },
 
-  // Card parcela
-  mParcela: { backgroundColor: '#FAFAFA', borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#E5E7EB', borderLeftWidth: 4 },
-  mParcelaRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  mParcelaIcon: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginRight: 10, marginTop: 2 },
-  mParcelaInfo: { flex: 1 },
+  // Resumo
+  topo: { backgroundColor: '#1E40AF', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, gap: 8 },
+  topoLinha: { flexDirection: 'row', gap: 12 },
+  topoEsq: { flex: 1, flexShrink: 1 },
+  topoDir: { flex: 1, flexShrink: 1, justifyContent: 'center', gap: 2, borderLeftWidth: 1, borderLeftColor: 'rgba(255,255,255,0.25)', paddingLeft: 10 },
+  topoRot: { fontSize: 11, color: 'rgba(255,255,255,0.75)', flexShrink: 1 },
+  topoGrande: { fontSize: 20, fontWeight: '700', color: '#fff', fontVariant: ['tabular-nums'] },
+  topoValor: { fontSize: 13, fontWeight: '700', color: '#fff', fontVariant: ['tabular-nums'] },
+  kv: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  barra: { height: 6, backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 99, overflow: 'hidden' },
+  barraFill: { height: '100%', backgroundColor: '#34D399' },
+  topoRodape: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', columnGap: 8, rowGap: 2 },
+  topoRodapeTx: { fontSize: 11, color: 'rgba(255,255,255,0.85)', flexShrink: 1 },
+  topoCredito: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.2)', paddingTop: 6 },
+  topoCreditoRot: { fontSize: 12, color: '#DDD6FE', flexShrink: 1 },
+  topoCreditoVal: { fontSize: 12, fontWeight: '700', color: '#DDD6FE', fontVariant: ['tabular-nums'] },
 
-  // Header da parcela
-  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  mParcelaNum: { fontSize: 14, fontWeight: '700', color: '#1F2937' },
-  mParcelaStatus: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 },
-  mParcelaStatusTx: { fontSize: 9, fontWeight: '700' },
+  // Faixas
+  faixaHoje: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8, backgroundColor: '#D1FAE5', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
+  faixaHojeRot: { fontSize: 12, color: '#059669', flexShrink: 1 },
+  faixaQuit: { backgroundColor: '#D1FAE5', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, gap: 4 },
+  faixaRot: { fontSize: 12, fontWeight: '700', color: '#059669', flexShrink: 1 },
+  faixaVal: { fontSize: 12, fontWeight: '700', color: '#059669', fontVariant: ['tabular-nums'] },
+  faixaAviso: { fontSize: 11, color: '#374151' },
 
-  // Datas
-  datesBlock: { marginTop: 4, gap: 2 },
-  dateRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  dateText: { fontSize: 11, color: '#6B7280', flexShrink: 1 },
+  // Lista
+  lista: { borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 10, paddingHorizontal: 10 },
+  linha: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
+  linhaBorda: { borderTopWidth: 1, borderTopColor: '#E5E7EB' },
+  circ: { width: 26, height: 26, borderRadius: 13, justifyContent: 'center', alignItems: 'center' },
+  circTx: { fontSize: 11, fontWeight: '700' },
+  cOk: { backgroundColor: '#D1FAE5' }, cOkTx: { color: '#059669' },
+  cWarn: { backgroundColor: '#FEF3C7' }, cWarnTx: { color: '#D97706' },
+  cBad: { backgroundColor: '#FEE2E2' }, cBadTx: { color: '#DC2626' },
+  cNeu: { backgroundColor: '#E5E7EB' }, cNeuTx: { color: '#6B7280' },
+  meio: { flex: 1, flexShrink: 1, minWidth: 0 },
+  venc: { fontSize: 13, color: '#111827' },
+  leg: { fontSize: 11, color: '#6B7280', flexShrink: 1 },
+  legCred: { fontSize: 11, color: '#7C3AED', flexShrink: 1 },
+  valor: { fontSize: 13, color: '#111827', fontVariant: ['tabular-nums'] },
 
-  // Badges atraso/pontualidade
-  badgeAtraso: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEE2E2', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#FECACA', marginLeft: 4 },
-  badgeAtrasoTx: { fontSize: 9, fontWeight: '700', color: '#DC2626' },
+  pill: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999 },
+  pillTx: { fontSize: 10, fontWeight: '700' },
+  btn: { borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+  btnRed: { borderColor: '#DC2626' },
+  btnGreen: { backgroundColor: '#059669', borderColor: '#059669' },
+  btnGreenTx: { fontSize: 12, fontWeight: '700', color: '#fff' },
+  btnOff: { opacity: 0.45 },
 
-  // Badge especial (quitação/auto-quitação)
-  badgeSpecial: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF3C7', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, marginTop: 4, alignSelf: 'flex-start', borderWidth: 1, borderColor: '#FDE68A' },
-  badgeSpecialTxAmber: { fontSize: 11, fontWeight: '600', color: '#D97706' },
+  btnLargo: { backgroundColor: '#059669', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  btnLargoTx: { fontSize: 14, fontWeight: '700', color: '#fff' },
 
-  // Valores
-  valoresBlock: { marginTop: 4 },
-  mParcelaPago: { fontSize: 13, fontWeight: '700', color: '#10B981' },
-  mParcelaOriginal: { fontSize: 10, color: '#9CA3AF', marginTop: 1 },
-  mParcelaValor: { fontSize: 15, fontWeight: '700', color: '#1F2937', marginTop: 4 },
-  mParcelaRestante: { fontSize: 11, fontWeight: '600', color: '#D97706', marginTop: 2 },
-  mParcelaCredito: { fontSize: 10, color: '#2563EB', marginTop: 1 },
-
-  // Breakdown dinheiro/crédito
-  breakdownRow: { flexDirection: 'row', alignItems: 'center', marginTop: 1 },
-  breakdownText: { fontSize: 11, color: '#6B7280' },
-  breakdownTextCredito: { fontSize: 11, color: '#2563EB', fontWeight: '500', flexShrink: 1 },
-
-  // Botões
-  mParcelaBtns: { marginLeft: 8, justifyContent: 'center', gap: 6 },
-  mBtnPagar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#10B981', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, gap: 5 },
-  mBtnPagarDisabled: { backgroundColor: '#E5E7EB', opacity: 0.5 },
-  mBtnPagarTx: { color: '#fff', fontSize: 12, fontWeight: '600' },
-  mBtnEstornar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#EF4444', gap: 5 },
-  mBtnEstornarTx: { color: '#EF4444', fontSize: 12, fontWeight: '600' },
-  mQuitadoAviso: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF3C7', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, gap: 8, borderWidth: 1, borderColor: '#F59E0B', marginTop: 8, marginHorizontal: 2 },
-  mQuitadoAvisoTx: { flex: 1, color: '#92400E', fontSize: 12, fontWeight: '600', lineHeight: 16 },
-
-  // Fechar
-  mBtnFecharWrap: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 20, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
-  mBtnFechar: { backgroundColor: '#3B82F6', paddingVertical: 14, borderRadius: 10, alignItems: 'center' },
-  mBtnFecharTx: { fontSize: 15, fontWeight: '700', color: '#fff' },
-
-  // Seleção múltipla
-  mParcelaSelected: { backgroundColor: '#EFF6FF', borderColor: '#3B82F6', borderWidth: 2 },
-  selBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#F0FDF4', borderTopWidth: 1, borderTopColor: '#BBF7D0' },
-  selInfo: { flex: 1 },
-  selCount: { fontSize: 13, fontWeight: '600', color: '#374151' },
-  selCredito: { fontSize: 11, color: '#2563EB', marginTop: 2 },
-  selTotal: { fontSize: 16, fontWeight: '700', color: '#059669', marginTop: 2 },
-  selBtns: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  selBtnCancel: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center' },
-  selBtnPagar: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#10B981', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10, gap: 6 },
-  selBtnPagarTx: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  linkFicha: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8 },
+  linkFichaTx: { fontSize: 13, fontWeight: '600', color: '#4338CA', flexShrink: 1 },
 });

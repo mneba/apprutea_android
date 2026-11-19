@@ -15,13 +15,14 @@ import FiltrosDrawer from '../components/FiltrosDrawer';
 import LegendaCoresModal from '../components/LegendaCoresModal';
 import { ModalCriarNota, ModalNotasLista, buscarNotasCountPorClientes } from '../components/NotasComponent';
 import PagamentoModal from '../components/PagamentoModal';
+import { useTrabalhaCredito } from '../hooks/useTrabalhaCredito';
 import MenuPagamento from '../components/MenuPagamento';
 import ReciboPagamento, { type DadosPagamentoRecibo } from '../components/ReciboPagamento';
 import { registrarAcao } from '../services/auditoriaApp';
 import ConfirmModal, { LinhaConfirm } from '../components/ConfirmModal';
 import PagarMultiplasModal from '../components/PagarMultiplasModal';
 import ValorLivreModal from '../components/ValorLivreModal';
-import ParcelasModal, { PagamentoDetalhe } from '../components/ParcelasModal';
+import ParcelasModal, { PagamentoDetalhe, EmprestimoResumo } from '../components/ParcelasModal';
 import ProximosDiasModal from '../components/ProximosDiasModal';
 import ReordenarModal from '../components/ReordenarModal';
 import { useAuth } from '../contexts/AuthContext';
@@ -86,6 +87,8 @@ interface ClienteRotaDia {
 interface EmprestimoData {
   emprestimo_id: string; saldo_emprestimo: number; valor_principal: number; valor_total?: number;
   numero_parcelas: number; status_emprestimo: string; frequencia_pagamento: string;
+  /** Quitado que já gerou renovação (não cancelada). Vem do repo; o card desabilita Renovar. */
+  ja_renovado?: boolean;
   parcela_id: string; numero_parcela: number; valor_parcela: number;
   valor_pago_parcela: number; saldo_parcela: number; status_parcela: string;
   data_vencimento: string; ordem_visita_dia: number | null;
@@ -463,6 +466,7 @@ const showAlert = (title: string, msg: string) => {
 
 export default function ClientesScreen({ navigation, route }: any) {
   const { vendedor } = useAuth();
+  const trabalhaCredito = useTrabalhaCredito();
   const liqCtx = useLiquidacaoContext();
   const rotaId = route?.params?.rotaId || vendedor?.rota_id;
   // Config da rota: se trabalha aos domingos (afeta cálculo de dias de atraso)
@@ -717,6 +721,10 @@ export default function ClientesScreen({ navigation, route }: any) {
     valor_solicitado: number; valor_limite: number; emprestimo_id: string | null;
   }>>(new Map());
   const [creditoDisponivel, setCreditoDisponivel] = useState(0);
+  // Tela de parcelas (layout C, 18/11/2026): resumo do topo e o Renovar.
+  const [emprestimoResumoModal, setEmprestimoResumoModal] = useState<EmprestimoResumo | null>(null);
+  const [jaRenovadoModal, setJaRenovadoModal] = useState(false);
+  const [telefoneModal, setTelefoneModal] = useState<string | null>(null);
   const [clienteModal, setClienteModal] = useState<{ id: string; nome: string; emprestimo_id: string; emprestimo_status?: string; saldo_emprestimo?: number } | null>(null);
   
   const [parcelaPagamento, setParcelaPagamento] = useState<ParcelaModal | null>(null);
@@ -1191,19 +1199,45 @@ export default function ClientesScreen({ navigation, route }: any) {
   }, [tab, loadLiq, loadTodosClientes]);
 
   const abrirParcelas = useCallback(async (clienteId: string, clienteNome: string, emprestimoId: string, empStatus?: string) => {
-    // Buscar status do empréstimo se não informado
-    let statusFinal = empStatus;
-    if (!statusFinal) {
-      const { data: empData } = await supabase.from('emprestimos').select('status').eq('id', emprestimoId).single();
-      statusFinal = empData?.status;
-    }
-    setClienteModal({ id: clienteId, nome: clienteNome, emprestimo_id: emprestimoId, emprestimo_status: statusFinal });
+    setClienteModal({ id: clienteId, nome: clienteNome, emprestimo_id: emprestimoId, emprestimo_status: empStatus });
     setModalParcelasVisible(true);
     setLoadingParcelas(true);
     setParcelasModal([]);
     setPagamentosDetalhados(new Map());
     setCreditoDisponivel(0);
+    setEmprestimoResumoModal(null);
+    setJaRenovadoModal(false);
+    setTelefoneModal(null);
     try {
+      // Resumo do topo, "já renovado" e telefone (para o Renovar) numa onda só,
+      // em paralelo. Renovação CANCELADA não conta — mesma regra do card
+      // (clientesLiquidacaoRepo, caso joyce 16/11/2026). Falha aqui não
+      // derruba a lista: o topo some e o Renovar fica como estava.
+      const [empRes, sucRes, cliRes] = await Promise.all([
+        supabase.from('emprestimos')
+          .select('status, tipo_emprestimo, valor_principal, valor_total, valor_saldo, numero_parcelas, frequencia_pagamento')
+          .eq('id', emprestimoId).single(),
+        supabase.from('emprestimos').select('id')
+          .eq('emprestimo_origem_id', emprestimoId).neq('status', 'CANCELADO').limit(1),
+        supabase.from('clientes').select('telefone_celular').eq('id', clienteId).maybeSingle(),
+      ]);
+      const emp: any = empRes.data;
+      if (emp) {
+        setEmprestimoResumoModal({
+          status: emp.status,
+          tipo_emprestimo: emp.tipo_emprestimo,
+          valor_principal: Number(emp.valor_principal || 0),
+          valor_total: Number(emp.valor_total || 0),
+          valor_saldo: Number(emp.valor_saldo || 0),
+          numero_parcelas: Number(emp.numero_parcelas || 0),
+          frequencia_pagamento: emp.frequencia_pagamento,
+        });
+        setClienteModal({ id: clienteId, nome: clienteNome, emprestimo_id: emprestimoId,
+          emprestimo_status: emp.status, saldo_emprestimo: Number(emp.valor_saldo || 0) });
+      }
+      setJaRenovadoModal((sucRes.data || []).length > 0);
+      setTelefoneModal((cliRes.data as any)?.telefone_celular || null);
+
       const { data: parcelas, error: errP } = await supabase.from('emprestimo_parcelas').select('id, emprestimo_id, numero_parcela, valor_parcela, valor_pago, valor_saldo, valor_multa, data_vencimento, data_pagamento, status, saldo_excedente, liquidacao_id, observacoes, ordem_visita_dia').eq('emprestimo_id', emprestimoId).order('numero_parcela', { ascending: true });
       if (errP) throw errP;
       if (!parcelas || parcelas.length === 0) { setParcelasModal([]); setLoadingParcelas(false); return; }
@@ -1212,7 +1246,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       // Busca TODOS os pagamentos (incluindo estornados) para pMap + popup de detalhes
       const { data: pagamentos } = await supabase
         .from('pagamentos_parcelas')
-        .select('id, parcela_id, valor_pago_atual, valor_credito_usado, valor_credito_gerado, liquidacao_id, forma_pagamento, estornado, created_at, motivo_estorno, estornado_por, data_estorno')
+        .select('id, parcela_id, operacao_id, valor_pago_atual, valor_credito_usado, valor_credito_gerado, liquidacao_id, forma_pagamento, estornado, created_at, motivo_estorno, estornado_por, data_estorno')
         .in('parcela_id', ids)
         .order('created_at', { ascending: true });
       
@@ -1276,6 +1310,8 @@ export default function ClientesScreen({ navigation, route }: any) {
           created_at: p.created_at,
           estornado: p.estornado || false,
           data_liquidacao: dataLiqPag,
+          liquidacao_id: p.liquidacao_id || null,
+          operacao_id: p.operacao_id || null,
           // Detalhes do estorno (só relevantes quando estornado = true)
           motivo_estorno: p.motivo_estorno || undefined,
           data_estorno: p.data_estorno || undefined,
@@ -1852,10 +1888,12 @@ export default function ClientesScreen({ navigation, route }: any) {
     // em que a função recusa de qualquer forma.
     const bruto = quitacaoInfo ? quitacaoInfo.bruto : dinheiro + credito;
     const es = lang === 'es';
-    const detalhes: LinhaConfirm[] = [
-      { rotulo: t.parcelasAbertoLbl, valor: fmt(bruto) },
-    ];
-    if (credito > 0) {
+    // Rota sem crédito à vista: só o dinheiro a receber. A conta é a mesma;
+    // o que some é a decomposição.
+    const detalhes: LinhaConfirm[] = trabalhaCredito
+      ? [{ rotulo: t.parcelasAbertoLbl, valor: fmt(bruto) }]
+      : [];
+    if (credito > 0 && trabalhaCredito) {
       detalhes.push({
         rotulo: t.creditoClienteLbl,
         valor: `− ${fmt(credito)}`,
@@ -1898,7 +1936,7 @@ export default function ClientesScreen({ navigation, route }: any) {
         quitarEmprestimoRpc(dinheiro);
       },
     });
-  }, [parcelaPagamento, clienteModal, dadosPagamento, quitacaoInfo, t, lang, quitarEmprestimoRpc]);
+  }, [parcelaPagamento, clienteModal, dadosPagamento, quitacaoInfo, t, lang, quitarEmprestimoRpc, trabalhaCredito]);
 
   // Chama a RPC de crédito em cascata
   // Função para ir para próxima parcela pendente
@@ -2565,7 +2603,7 @@ export default function ClientesScreen({ navigation, route }: any) {
       } else {
         // Novo empréstimo para este cliente
         const pi = pagMap.get(r.parcela_id);
-        g.emprestimos.push({ emprestimo_id: r.emprestimo_id, saldo_emprestimo: r.saldo_emprestimo, valor_principal: r.valor_principal, valor_total: (r as any).valor_total, numero_parcelas: r.numero_parcelas, status_emprestimo: r.status_emprestimo, frequencia_pagamento: r.frequencia_pagamento, parcela_id: r.parcela_id, numero_parcela: r.numero_parcela, valor_parcela: r.valor_parcela, valor_pago_parcela: r.valor_pago_parcela, saldo_parcela: r.saldo_parcela, status_parcela: r.status_parcela, data_vencimento: r.data_vencimento, dia_referencia: (r as any).dia_referencia, ordem_visita_dia: r.ordem_visita_dia, tem_parcelas_vencidas: r.tem_parcelas_vencidas, total_parcelas_vencidas: r.total_parcelas_vencidas, valor_total_vencido: r.valor_total_vencido, status_dia: r.status_dia, is_parcela_atrasada: r.is_parcela_atrasada, pagamento_info: pi ? { valorPago: pi.valor_pago_atual, creditoGerado: pi.valor_credito_gerado, valorParcela: pi.valor_parcela, dataPagamento: pi.data_pagamento || null } : undefined, data_emprestimo: (r as any).data_emprestimo || null });
+        g.emprestimos.push({ emprestimo_id: r.emprestimo_id, saldo_emprestimo: r.saldo_emprestimo, valor_principal: r.valor_principal, valor_total: (r as any).valor_total, numero_parcelas: r.numero_parcelas, status_emprestimo: r.status_emprestimo, ja_renovado: (r as any).ja_renovado === true, frequencia_pagamento: r.frequencia_pagamento, parcela_id: r.parcela_id, numero_parcela: r.numero_parcela, valor_parcela: r.valor_parcela, valor_pago_parcela: r.valor_pago_parcela, saldo_parcela: r.saldo_parcela, status_parcela: r.status_parcela, data_vencimento: r.data_vencimento, dia_referencia: (r as any).dia_referencia, ordem_visita_dia: r.ordem_visita_dia, tem_parcelas_vencidas: r.tem_parcelas_vencidas, total_parcelas_vencidas: r.total_parcelas_vencidas, valor_total_vencido: r.valor_total_vencido, status_dia: r.status_dia, is_parcela_atrasada: r.is_parcela_atrasada, pagamento_info: pi ? { valorPago: pi.valor_pago_atual, creditoGerado: pi.valor_credito_gerado, valorParcela: pi.valor_parcela, dataPagamento: pi.data_pagamento || null } : undefined, data_emprestimo: (r as any).data_emprestimo || null });
       }
     });
     m.forEach(g => { g.qtd_emprestimos = g.emprestimos.length; g.tem_multiplos_vencimentos = g.emprestimos.length > 1; });
@@ -2841,6 +2879,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     return (
       <ClienteCardLiquidacao
         key={it.key}
+        mostrarCredito={trabalhaCredito}
         cliente={clienteDoCard}
         emprestimo={e}
         expanded={expanded === it.key}
@@ -2862,6 +2901,16 @@ export default function ClientesScreen({ navigation, route }: any) {
         onPagar={abrirPagamento}
         onPagarProxima={abrirPagamentoProxima}
         permiteNovoPagamento={filtro === 'pagas'}
+        onRenovar={(cli) => {
+          // Mesmo fluxo do onNovoEmprestimo do card de Todos: `NovoCliente`
+          // com `clienteExistente`, e `useBuscaDocumento` decide renovação ×
+          // adicional pelo que o cliente tem em aberto. ⚠ Sem `documento`
+          // aqui — ver o comentário na chamada do card de Todos (14/11/2026).
+          const nav = navigation.getParent() || navigation;
+          nav.navigate('NovoCliente', { dataLiq,
+            clienteExistente: { id: cli.id, nome: cli.nome, telefone_celular: cli.telefone_celular || '' },
+          });
+        }}
         onAbrirParcelas={abrirParcelas}
         onAbrirNotas={abrirNotasCliente}
         onAbrirDetalhes={abrirDetalhesCliente}
@@ -3109,6 +3158,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     return (
       <ClienteCardTodos
         key={c.id}
+        mostrarCredito={trabalhaCredito}
         cliente={c}
         emprestimo={emp}
         empIdx={ei}
@@ -3674,9 +3724,29 @@ return (
         liqId={liqId}
         isViz={isViz}
         isClientePago={clienteModal ? clientesPagosNaLiq.has(clienteModal.id) : false}
-        onPagar={abrirPagamento}
-        onPagarMultiplo={handlePagarMultiplo}
+        // O Pagar desta tela abre o MESMO menu de pagamento do card. Fecha a
+        // lista antes: no Android, modal aberto por cima de outro renderiza
+        // ATRÁS dele (mesma nota do estorno).
+        onPagar={(p) => {
+          setModalParcelasVisible(false);
+          abrirPagamento(p, clienteModal || undefined);
+        }}
         onEstornar={abrirEstorno}
+        emprestimo={emprestimoResumoModal}
+        jaRenovado={jaRenovadoModal}
+        onRenovar={clienteModal ? () => {
+          // Mesmo destino do Renovar do card (aba Pagos).
+          setModalParcelasVisible(false);
+          const nav = navigation.getParent() || navigation;
+          nav.navigate('NovoCliente', { dataLiq,
+            clienteExistente: { id: clienteModal.id, nome: clienteModal.nome, telefone_celular: telefoneModal || '' },
+          });
+        } : undefined}
+        onAbrirFicha={clienteModal ? () => {
+          setModalParcelasVisible(false);
+          const nav = navigation.getParent() || navigation;
+          nav.navigate('FichaEmprestimo', { emprestimoId: clienteModal.emprestimo_id });
+        } : undefined}
         pagamentosDetalhados={pagamentosDetalhados}
         lang={lang}
         trabalhaDomingo={trabalhaDomingo}
@@ -3703,6 +3773,7 @@ return (
         totalParcelas={dadosPagamento?.total_parcelas || parcelasModal.length || 0}
         saldoEmprestimo={Number(clienteModal?.saldo_emprestimo || 0)}
         creditoDisponivel={Number(dadosPagamento?.credito_disponivel || 0)}
+        mostrarCredito={trabalhaCredito}
         quitacao={quitacaoInfo}
         pagamentosParciais={pagamentosParciaisPag}
         onPagarValor={acaoPagarValor}
@@ -3735,6 +3806,7 @@ return (
         parcelas={multiplasParcelas}
         parcelaAtualId={parcelaPagamento?.parcela_id || ''}
         creditoDisponivel={Number(dadosPagamento?.credito_disponivel || 0)}
+        mostrarCredito={trabalhaCredito}
         saldoEmprestimo={Number(clienteModal?.saldo_emprestimo || 0)}
         totalPagoEmprestimo={Number(emprestimoInfoPag?.total_pago || 0)}
         valorTotalEmprestimo={Number(emprestimoInfoPag?.valor_total || 0)}

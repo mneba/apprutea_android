@@ -23,6 +23,10 @@ interface PagarMultiplasModalProps {
   parcelas: ParcelaMultipla[];
   parcelaAtualId: string;
   creditoDisponivel: number;
+  /** `rotas.trabalha_credito`. false: a palavra crédito some e o valor
+   *  mostrado é só o dinheiro a receber. O crédito continua sendo
+   *  aplicado igual — só não aparece. Ver hooks/useTrabalhaCredito. */
+  mostrarCredito?: boolean;
   saldoEmprestimo: number;
   totalPagoEmprestimo: number;
   valorTotalEmprestimo: number;
@@ -84,6 +88,7 @@ export default function PagarMultiplasModal({
   parcelas,
   parcelaAtualId,
   creditoDisponivel,
+  mostrarCredito = true,
   saldoEmprestimo,
   totalPagoEmprestimo,
   valorTotalEmprestimo,
@@ -195,7 +200,7 @@ export default function PagarMultiplasModal({
         {!confirmando ? (
           <>
             <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingTop: 8 }}>
-              {creditoDisponivel > 0 && (
+              {creditoDisponivel > 0 && mostrarCredito && (
                 <View style={S.creditoBox}>
                   <Text style={S.creditoBoxLbl}>{t.creditoDisponivelLbl || 'Crédito disponível'}</Text>
                   <Text style={S.creditoBoxVal}>{fmt(creditoDisponivel)}</Text>
@@ -241,23 +246,27 @@ export default function PagarMultiplasModal({
                       S.linha,
                       !sel && !isCredito && S.linhaOff,
                       sel && !isCredito && S.linhaSel,
-                      isCredito && S.linhaCredito,
+                      // Sem crédito à vista, a coberta por ele é PAGA: é o
+                      // fim do empréstimo que o adiantamento já pagou.
+                      isCredito && (mostrarCredito ? S.linhaCredito : S.linhaPaga),
                     ]}
                     onPress={() => selecionarAte(i)}
                     activeOpacity={0.7}
                   >
                     <View style={S.linhaEsq}>
-                      {isCredito ? (
+                      {isCredito ? (mostrarCredito ? (
                         <View style={S.creditoIcone}>
                           <Text style={S.checkboxIcon}>✓</Text>
                         </View>
                       ) : (
+                        <Text style={S.checkPaga}>✓</Text>
+                      )) : (
                         <View style={[S.checkbox, sel && S.checkboxOn]}>
                           {sel && <Text style={S.checkboxIcon}>✓</Text>}
                         </View>
                       )}
                       <View style={{ flex: 1 }}>
-                        <Text style={[S.linhaLbl, isCredito && { color: '#4F46E5' }]}>
+                        <Text style={[S.linhaLbl, isCredito && mostrarCredito && { color: '#4F46E5' }]}>
                           {t.parcela} {p.numero_parcela}
                           {Number(p.valor_pago || 0) > 0 && (
                             <Text style={S.pagoParcial}> ({t.pagoLbl || 'pago'} {fmt(Number(p.valor_pago))})</Text>
@@ -266,13 +275,15 @@ export default function PagarMultiplasModal({
                         {!!fmtVenc(p.data_vencimento) && (
                           <Text style={S.linhaVenc}>{t.vencLbl || 'Venc.'} {fmtVenc(p.data_vencimento)}</Text>
                         )}
-                        {isFronteira && credNota > 0 && (
+                        {isFronteira && credNota > 0 && mostrarCredito && (
                           <Text style={S.notaCredito}>− {fmt(credNota)} {t.creditoLinhaLbl || 'crédito'}</Text>
                         )}
                       </View>
                     </View>
                     {isCredito ? (
-                      <Text style={S.creditoTag}>{t.creditoLbl || 'crédito'}</Text>
+                      mostrarCredito
+                        ? <Text style={S.creditoTag}>{t.creditoLbl || 'crédito'}</Text>
+                        : <Text style={S.pagaTx}>{t.pagaLbl || 'Paga'}</Text>
                     ) : (
                       <Text style={S.linhaValor}>{fmt(valorExibido)}</Text>
                     )}
@@ -287,7 +298,7 @@ export default function PagarMultiplasModal({
                 <Text style={S.rodapeLbl}>{t.parcelasEspecie || 'Parcelas selecionadas'}</Text>
                 <Text style={S.rodapeVal}>{qtdSelecionada}</Text>
               </View>
-              {creditoUsado > 0 && (
+              {creditoUsado > 0 && mostrarCredito && (
                 <View style={S.rodapeRow}>
                   <Text style={[S.rodapeLbl, { color: '#4F46E5' }]}>{t.creditoLbl || 'Crédito aplicado'}</Text>
                   <Text style={[S.rodapeVal, { color: '#4F46E5' }]}>− {fmt(creditoUsado)}</Text>
@@ -326,15 +337,19 @@ export default function PagarMultiplasModal({
                       <Text style={S.confLinhaVenc}>  ·  {fmtVenc(x.parcela.data_vencimento)}</Text>
                     )}
                   </Text>
-                  <Text style={S.confLinhaVal}>{fmt(x.saldo)}</Text>
+                  <Text style={S.confLinhaVal}>
+                    {mostrarCredito
+                      ? fmt(x.saldo)
+                      : (x.zona === 'credito' ? (t.pagaLbl || 'Paga') : fmt(x.exibido))}
+                  </Text>
                 </View>
               ))}
               <View style={S.confDivider} />
               <View style={S.confLinha}>
                 <Text style={S.confSubTotLbl}>{t.totalParcelasLbl || 'Total das parcelas'}</Text>
-                <Text style={S.confSubTotVal}>{fmt(somaSaldos)}</Text>
+                <Text style={S.confSubTotVal}>{fmt(mostrarCredito ? somaSaldos : totalEspecie)}</Text>
               </View>
-              {creditoUsado > 0 && (
+              {creditoUsado > 0 && mostrarCredito && (
                 <View style={S.confLinha}>
                   <Text style={[S.confLinhaLbl, { color: '#4F46E5' }]}>− {t.creditoLbl || 'Crédito aplicado'}</Text>
                   <Text style={[S.confLinhaVal, { color: '#4F46E5' }]}>{fmt(creditoUsado)}</Text>
