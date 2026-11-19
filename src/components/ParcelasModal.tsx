@@ -4,7 +4,7 @@ import { ActivityIndicator, Modal, ScrollView, StyleSheet, TouchableOpacity, Vie
 import { Text } from './texto';
 import { useAuth } from '../contexts/AuthContext';
 import { useTrabalhaCredito } from '../hooks/useTrabalhaCredito';
-import { parcelasPagasEquivalentes, fracaoBr } from '../utils/creditoEmTela';
+import { parcelasPagasEquivalentes, fracaoBr, preenchimentoParcelas } from '../utils/creditoEmTela';
 import AnexosLista from './AnexosLista';
 import { moeda, data, dataAno2Hora, diaMes, hora, numeroBr } from '../utils/formato';
 
@@ -125,7 +125,9 @@ interface ParcelasModalProps {
   dataOperacional: string;
   /** Abre o MENU de pagamento (não paga direto). */
   onPagar: (parcela: ParcelaModal) => void;
-  onEstornar: (parcela: ParcelaModal) => void;
+  /** `operacaoId`: o recebimento exato a desfazer (a faixa "Recebido hoje"
+   *  manda o mais recente). Sem ele, vale a escolha do modal de estorno. */
+  onEstornar: (parcela: ParcelaModal, operacaoId?: string) => void;
   /** Resumo do topo; sem ele a tela mostra só a lista. */
   emprestimo?: EmprestimoResumo | null;
   /** A origem já tem renovação viva: o Renovar fica, desabilitado. */
@@ -296,7 +298,7 @@ function DetalhesPopup({
                     </View>
                   )}
                   {/* Crédito gerado */}
-                  {(creditoGerado > 0 || saldoExcedente > 0) && !isAutoQuitacao && (
+                  {(creditoGerado > 0 || saldoExcedente > 0) && !isAutoQuitacao && mostrarCredito && (
                     <View style={[D.resumoRow, { marginTop: 2 }]}>
                       <Ionicons name="flash-outline" size={12} color="#7C3AED" />
                       <Text style={[D.resumoLabel, { marginLeft: 4, color: '#7C3AED' }]}>Crédito gerado</Text>
@@ -305,7 +307,7 @@ function DetalhesPopup({
                       </Text>
                     </View>
                   )}
-                  {isAutoQuitacao && (
+                  {isAutoQuitacao && mostrarCredito && (
                     <View style={D.autoQuitBadge}>
                       <Ionicons name="swap-horizontal" size={11} color="#2563EB" />
                       <Text style={D.autoQuitText}> Quitado por crédito</Text>
@@ -355,7 +357,7 @@ function DetalhesPopup({
                                 />
                                 <Text style={D.formaText}>
                                   {pp.forma_pagamento === 'DINHEIRO' ? t.dinheiro
-                                    : pp.forma_pagamento === 'CREDITO' ? 'Pago com crédito'
+                                    : pp.forma_pagamento === 'CREDITO' ? (mostrarCredito ? 'Pago com crédito' : (lang === 'es' ? 'Anticipo' : 'Adiantamento'))
                                     : 'Transferência'}
                                 </Text>
                               </View>
@@ -381,7 +383,7 @@ function DetalhesPopup({
                           )}
 
                           {/* Crédito usado neste pagamento */}
-                          {(parseFloat(String(pp.valor_credito_usado || 0))) > 0 && (
+                          {(parseFloat(String(pp.valor_credito_usado || 0))) > 0 && mostrarCredito && (
                             <View style={D.pagInfoRow}>
                               <Ionicons name="card-outline" size={11} color="#2563EB" />
                               <Text style={[D.pagInfoText, { color: '#2563EB' }]}>
@@ -390,7 +392,7 @@ function DetalhesPopup({
                             </View>
                           )}
                           {/* Crédito gerado neste pagamento */}
-                          {creditoPP > 0 && (
+                          {creditoPP > 0 && mostrarCredito && (
                             <View style={D.pagInfoRow}>
                               <Ionicons name="flash-outline" size={11} color="#7C3AED" />
                               <Text style={[D.pagInfoText, { color: '#7C3AED' }]}>
@@ -603,7 +605,9 @@ const TX = {
     pagas: (a: number | string, b: number) => `${a} de ${b} pagas`,
     parciais: (n: number) => `${n} parcial${n === 1 ? '' : 's'}`,
     creditoDisp: 'Crédito disponível',
-    hojeRecebido: 'Hoje recebido',
+    hojeRecebido: 'Recebido hoje',
+    estornar: 'Estornar',
+    estornadoAs: (h: string) => `estornado ${h}`,
     parcelasN: (n: number) => `${n} parcela${n === 1 ? '' : 's'}`,
     parcial: 'parcial', maisCredito: ' + crédito',
     quitadoHoje: 'QUITADO hoje', recebHoje: 'Recebido hoje',
@@ -628,6 +632,8 @@ const TX = {
     parciais: (n: number) => `${n} parcial${n === 1 ? '' : 'es'}`,
     creditoDisp: 'Crédito disponible',
     hojeRecebido: 'Recibido hoy',
+    estornar: 'Reversar',
+    estornadoAs: (h: string) => `reversado ${h}`,
     parcelasN: (n: number) => `${n} cuota${n === 1 ? '' : 's'}`,
     parcial: 'parcial', maisCredito: ' + crédito',
     quitadoHoje: 'LIQUIDADO hoy', recebHoje: 'Recibido hoy',
@@ -680,27 +686,68 @@ export default function ParcelasModal({
     s.add(p.parcela_id);
     parcelasPorOp.set(pp.operacao_id, s);
   }));
-  const ehMultiHoje = (p: ParcelaModal) =>
-    pagsHoje(p.parcela_id).some(pp => !!pp.operacao_id && (parcelasPorOp.get(pp.operacao_id)?.size || 0) > 1);
-
   // ── Faixa "hoje" ──
   const parcelasHoje = parcelasModal.filter(p => pagsHoje(p.parcela_id).length > 0);
   const todosHoje = parcelasHoje.flatMap(p => pagsHoje(p.parcela_id));
   const valorHoje = todosHoje.reduce((s, pp) => s + dinheiroDe(pp), 0);
-  const geradoHoje = todosHoje.some(pp => num(pp.valor_credito_gerado) > 0);
-  const ultimoHoje = todosHoje.reduce<string | null>((m, pp) => (!m || pp.created_at > m ? pp.created_at : m), null);
-  const temMultiHoje = parcelasHoje.some(ehMultiHoje);
   const quitadoHoje = empStatus === 'QUITADO' && parcelasHoje.length > 0;
-  const rotuloHoje = parcelasHoje.length === 1 && parcelasHoje[0].status !== 'PAGO'
-    ? tx.parcial
-    : tx.parcelasN(parcelasHoje.length) + (geradoHoje && mostrarCredito ? tx.maisCredito : '');
 
-  // ↶: parcela paga no dia aberto, fora de recebimento múltiplo, empréstimo
-  // ainda aberto. Só a de maior número fica ativa.
-  const estornaveis = podeAgir && !encerrado
-    ? parcelasHoje.filter(p => !ehMultiHoje(p))
-    : [];
-  const ultimaEstornavel = estornaveis.reduce((m, p) => Math.max(m, p.numero_parcela), 0);
+  // ── O estorno é por RECEBIMENTO, não por parcela (Mauricio, 19/11/2026) ──
+  // A faixa lista os recebimentos de hoje, do mais novo ao mais antigo, e só
+  // o MAIS NOVO tem Estornar. Desfeito ele, o seguinte vira o mais novo: deu
+  // 150 e depois 100, estorna o 100 e depois o 150. A ordem é o que mantém o
+  // crédito certo — o estorno de quem USOU crédito o devolve às parcelas
+  // anteriores antes de quem o GEROU ser desfeito.
+  //
+  // Recebimento de várias parcelas (quitação) não se estorna por parcela
+  // desde 16/11/2026: no lugar do botão, o aviso de Resetar cliente.
+  const opsHoje = (() => {
+    const m = new Map<string, { operacao_id: string; parcela: ParcelaModal; valor: number; hora: string }>();
+    for (const p of parcelasHoje) {
+      for (const pp of pagsHoje(p.parcela_id)) {
+        if (!pp.operacao_id) continue;
+        const a = m.get(pp.operacao_id);
+        if (a) {
+          a.valor += dinheiroDe(pp);
+          if (pp.created_at > a.hora) a.hora = pp.created_at;
+          if (p.numero_parcela > a.parcela.numero_parcela) a.parcela = p;
+        } else {
+          m.set(pp.operacao_id, { operacao_id: pp.operacao_id, parcela: p, valor: dinheiroDe(pp), hora: pp.created_at });
+        }
+      }
+    }
+    return [...m.values()].sort((a, b) => (a.hora < b.hora ? 1 : a.hora > b.hora ? -1 : 0));
+  })();
+  const opMulti = (op: string) => (parcelasPorOp.get(op)?.size || 0) > 1;
+  // Pagamento sem operacao_id não teria como ser mirado.
+  const semOperacaoHoje = todosHoje.some(pp => !pp.operacao_id);
+  const ultimoOp = opsHoje[0];
+  const ultimoEhMulti = !!ultimoOp && opMulti(ultimoOp.operacao_id);
+  const podeEstornarUltimo = podeAgir && !encerrado && !!ultimoOp && !ultimoEhMulti && !semOperacaoHoje;
+
+  // Os recebimentos de hoje que JÁ foram estornados continuam na faixa,
+  // riscados (Mauricio, 19/11/2026): sumir da tela deixava o vendedor sem
+  // saber o que aconteceu. Não entram no total — o dinheiro voltou.
+  const estornadosHoje = (() => {
+    if (!liqId) return [];
+    const m = new Map<string, { operacao_id: string; valor: number; hora: string; horaEstorno: string }>();
+    for (const p of parcelasModal) {
+      for (const pp of pagamentosDetalhados?.get(p.parcela_id) || []) {
+        if (!pp.estornado || pp.liquidacao_id !== liqId) continue;
+        const chave = pp.operacao_id || pp.id || pp.created_at;
+        const a = m.get(chave);
+        const he = pp.data_estorno || '';
+        if (a) {
+          a.valor += dinheiroDe(pp);
+          if (pp.created_at > a.hora) a.hora = pp.created_at;
+          if (he > a.horaEstorno) a.horaEstorno = he;
+        } else {
+          m.set(chave, { operacao_id: chave, valor: dinheiroDe(pp), hora: pp.created_at, horaEstorno: he });
+        }
+      }
+    }
+    return [...m.values()].sort((a, b) => (a.hora < b.hora ? 1 : a.hora > b.hora ? -1 : 0));
+  })();
 
   // Pagar: a primeira em aberto, se ela não tiver ↶.
   const ordenadas = [...vivas].sort((a, b) => a.numero_parcela - b.numero_parcela);
@@ -728,6 +775,17 @@ export default function ParcelasModal({
   // Sem crédito à vista, a contagem é em EQUIVALENTE: o pago a mais vira
   // fração ("1,5 de 24 pagas"). Ver utils/creditoEmTela.
   const pagasEquiv = parcelasPagasEquivalentes(valorTotal, restante, valorParcelaTipica, qtdTotal);
+  // Fundo de cada linha: verde até onde o dinheiro entregue chega, vermelho
+  // o que falta, em ordem. Pagou 1,5 parcela → a 1 toda verde, a 2 meio a
+  // meio. Vale com crédito à vista ou não. Sem total, sem fundo.
+  const fundoPorParcela = new Map<string, number>();
+  if (valorTotal > 0) {
+    const fr = preenchimentoParcelas(
+      ordenadas.map(p => num(p.valor_parcela)),
+      restante <= 0.009 ? Infinity : recebido,
+    );
+    ordenadas.forEach((p, i) => fundoPorParcela.set(p.parcela_id, fr[i]));
+  }
   const subtitulo = [
     tx.tipo[String(emprestimo?.tipo_emprestimo || '').toUpperCase()],
     tx.status[empStatus],
@@ -747,7 +805,8 @@ export default function ParcelasModal({
       && String(p.data_vencimento).substring(0, 10) < dataOperacional;
     const hojePags = pagsHoje(p.parcela_id);
     const pagaHoje = hojePags.length > 0;
-    const multi = ehMultiHoje(p);
+    const multi = hojePags.some(pp => !!pp.operacao_id && opMulti(pp.operacao_id));
+    const fundo = cancelada ? undefined : fundoPorParcela.get(p.parcela_id);
     const autoQuit = (p.observacoes || '').includes('[AUTO-QUITAÇÃO]');
     const vivos = pagsVivos(p.parcela_id);
 
@@ -783,24 +842,11 @@ export default function ParcelasModal({
     const circ = cancelada ? R.cNeu : pago ? R.cOk : parcial ? R.cWarn : vencida ? R.cBad : R.cNeu;
     const circTx = cancelada ? R.cNeuTx : pago ? R.cOkTx : parcial ? R.cWarnTx : vencida ? R.cBadTx : R.cNeuTx;
 
-    const temEstorno = estornaveis.some(x => x.parcela_id === p.parcela_id);
-    const estornoAtivo = temEstorno && p.numero_parcela === ultimaEstornavel;
     const temPagar = idPagar === p.parcela_id;
     const temDetalhes = !!pagamentosDetalhados && (pago || parcial || vivos.length > 0);
 
     let direita: React.ReactNode;
-    if (temEstorno) {
-      direita = (
-        <TouchableOpacity
-          style={[R.btn, R.btnRed, !estornoAtivo && R.btnOff]}
-          disabled={!estornoAtivo}
-          onPress={() => onEstornar(p)}
-          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-        >
-          <Ionicons name="arrow-undo" size={15} color="#DC2626" />
-        </TouchableOpacity>
-      );
-    } else if (temPagar) {
+    if (temPagar) {
       direita = (
         <TouchableOpacity style={[R.btn, R.btnGreen]} onPress={() => onPagar(p)}>
           <Text style={R.btnGreenTx}>$ {tx.pagar}</Text>
@@ -825,6 +871,12 @@ export default function ParcelasModal({
         activeOpacity={temDetalhes ? 0.6 : 1}
         onPress={() => { if (temDetalhes) setParcelaDetalhes(p); }}
       >
+        {fundo != null && (
+          <View pointerEvents="none" style={R.fundo}>
+            {fundo > 0 && <View style={[R.fundoPago, { flex: fundo }]} />}
+            {fundo < 1 && <View style={[R.fundoFalta, { flex: 1 - fundo }]} />}
+          </View>
+        )}
         <View style={[R.circ, circ]}>
           <Text style={[R.circTx, circTx]}>{p.numero_parcela}</Text>
         </View>
@@ -909,22 +961,47 @@ export default function ParcelasModal({
                   )}
 
                   {/* Faixa do dia */}
-                  {parcelasHoje.length > 0 && (temMultiHoje || quitadoHoje) ? (
-                    <View style={R.faixaQuit}>
-                      <View style={R.kv}>
-                        <Text style={R.faixaRot}>
-                          {quitadoHoje ? `✓ ${tx.quitadoHoje}` : tx.recebHoje}{ultimoHoje ? ' ' + hora(ultimoHoje) : ''}
-                        </Text>
-                        <Text style={R.faixaVal}>{numeroBr(valorHoje)} · {tx.parcelasN(parcelasHoje.length)}</Text>
-                      </View>
-                      <Text style={R.faixaAviso}>{temMultiHoje ? tx.multiAviso : tx.quitAviso}</Text>
-                    </View>
-                  ) : parcelasHoje.length > 0 ? (
+                  {(parcelasHoje.length > 0 || estornadosHoje.length > 0) && (
                     <View style={R.faixaHoje}>
-                      <Text style={R.faixaHojeRot}>{tx.hojeRecebido}</Text>
-                      <Text style={R.faixaVal}>{numeroBr(valorHoje)} · {rotuloHoje}</Text>
+                      <View style={R.faixaHojeTopo}>
+                        <Text style={R.faixaHojeRot}>
+                          {quitadoHoje ? `✓ ${tx.quitadoHoje}` : tx.hojeRecebido}
+                        </Text>
+                        <Text style={R.faixaHojeVal}>{numeroBr(valorHoje)}</Text>
+                      </View>
+                      {opsHoje.map((op, i) => (
+                        <View key={op.operacao_id} style={R.recLinha}>
+                          <Text style={R.recHora}>{hora(op.hora)}</Text>
+                          <Text style={R.recValor}>{numeroBr(op.valor)}</Text>
+                          {i === 0 && podeEstornarUltimo ? (
+                            <TouchableOpacity
+                              style={R.recEstornar}
+                              onPress={() => onEstornar(op.parcela, op.operacao_id)}
+                              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                            >
+                              <Ionicons name="arrow-undo" size={14} color="#DC2626" />
+                              <Text style={R.recEstornarTx}>{tx.estornar}</Text>
+                            </TouchableOpacity>
+                          ) : podeEstornarUltimo ? (
+                            // Mantém os valores alinhados com a linha que tem botão.
+                            <View style={R.recEspaco} />
+                          ) : null}
+                        </View>
+                      ))}
+                      {estornadosHoje.map(op => (
+                        <View key={'e' + op.operacao_id} style={R.recLinha}>
+                          <Text style={[R.recHora, R.recEstornadoTx]}>
+                            {hora(op.hora)}{op.horaEstorno ? ' · ' + tx.estornadoAs(hora(op.horaEstorno)) : ''}
+                          </Text>
+                          <Text style={[R.recValor, R.recEstornadoValor]}>{numeroBr(op.valor)}</Text>
+                          {podeEstornarUltimo ? <View style={R.recEspaco} /> : null}
+                        </View>
+                      ))}
+                      {podeAgir && (ultimoEhMulti || quitadoHoje) && (
+                        <Text style={R.faixaAviso}>{ultimoEhMulti ? tx.multiAviso : tx.quitAviso}</Text>
+                      )}
                     </View>
-                  ) : null}
+                  )}
 
                   {/* Lista */}
                   <View style={R.lista}>
@@ -1015,16 +1092,31 @@ const R = StyleSheet.create({
   topoCreditoVal: { fontSize: 12, fontWeight: '700', color: '#DDD6FE', fontVariant: ['tabular-nums'] },
 
   // Faixas
-  faixaHoje: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8, backgroundColor: '#D1FAE5', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
-  faixaHojeRot: { fontSize: 12, color: '#059669', flexShrink: 1 },
+  faixaHoje: { backgroundColor: '#D1FAE5', borderRadius: 12, borderWidth: 1, borderColor: '#A7F3D0', paddingHorizontal: 12, paddingVertical: 10, gap: 6 },
+  faixaHojeTopo: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 },
+  faixaHojeRot: { fontSize: 13, fontWeight: '700', color: '#047857', flexShrink: 1 },
+  faixaHojeVal: { fontSize: 20, fontWeight: '800', color: '#047857', fontVariant: ['tabular-nums'] },
+  recLinha: { flexDirection: 'row', alignItems: 'center', gap: 10, borderTopWidth: 1, borderTopColor: '#A7F3D0', paddingTop: 6 },
+  recHora: { fontSize: 13, color: '#065F46', flexShrink: 1, flex: 1 },
+  recValor: { fontSize: 14, fontWeight: '700', color: '#065F46', fontVariant: ['tabular-nums'] },
+  recEstornar: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#fff', borderWidth: 1, borderColor: '#FCA5A5', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  recEstornarTx: { fontSize: 13, fontWeight: '700', color: '#DC2626' },
+  recEspaco: { width: 92 },
+  recEstornadoTx: { color: '#9CA3AF' },
+  recEstornadoValor: { color: '#9CA3AF', textDecorationLine: 'line-through', fontWeight: '500' },
   faixaQuit: { backgroundColor: '#D1FAE5', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, gap: 4 },
   faixaRot: { fontSize: 12, fontWeight: '700', color: '#059669', flexShrink: 1 },
   faixaVal: { fontSize: 12, fontWeight: '700', color: '#059669', fontVariant: ['tabular-nums'] },
   faixaAviso: { fontSize: 11, color: '#374151' },
 
   // Lista
-  lista: { borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 10, paddingHorizontal: 10 },
-  linha: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
+  // O padding saiu da lista para a linha: o fundo pintado tem de ir de borda
+  // a borda, e `overflow` recorta os cantos arredondados.
+  lista: { borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 10, overflow: 'hidden' },
+  linha: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, paddingHorizontal: 10 },
+  fundo: { ...StyleSheet.absoluteFillObject, flexDirection: 'row' },
+  fundoPago: { backgroundColor: '#ECFDF5' },
+  fundoFalta: { backgroundColor: '#FEF2F2' },
   linhaBorda: { borderTopWidth: 1, borderTopColor: '#E5E7EB' },
   circ: { width: 26, height: 26, borderRadius: 13, justifyContent: 'center', alignItems: 'center' },
   circTx: { fontSize: 11, fontWeight: '700' },

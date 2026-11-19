@@ -2234,7 +2234,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     }
   }, [processando, liqId, clienteModal, coords, vendedor, lang, t, recarregarAguardando]);
 
-  const abrirEstorno = useCallback(async (parcela: ParcelaModal) => {
+  const abrirEstorno = useCallback(async (parcela: ParcelaModal, operacaoAlvo?: string) => {
     console.log('[ESTORNO] abrirEstorno chamada, parcela:', parcela.parcela_id, 'numero:', parcela.numero_parcela);
     console.log('[ESTORNO] configVendedor:', configVendedor);
     
@@ -2317,6 +2317,12 @@ export default function ClientesScreen({ navigation, route }: any) {
         }
       }
       recebimentos = Array.from(porOperacao.values());
+      // A faixa "Recebido hoje" já diz QUAL recebimento (o mais novo do dia):
+      // a lista fica só com ele, e não há o que escolher. Não achando (dado
+      // mudou entre as duas leituras), segue a lista inteira.
+      if (operacaoAlvo && porOperacao.has(operacaoAlvo)) {
+        recebimentos = [porOperacao.get(operacaoAlvo)!];
+      }
     } catch (e) {
       console.error('[ESTORNO] Erro ao buscar recebimentos:', e);
       // Degradação, não regressão: sem a lista o estorno vale a parcela

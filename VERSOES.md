@@ -221,3 +221,17 @@ campo mostra nao mapeia para nada.
 - **1.3.80** - 2026-11-18 22:12 - `src/screens/FichaEmprestimoScreen.tsx`
 - **1.3.81** - 2026-11-18 22:12 - `src/components/LiquidacaoDetalhes.tsx`
 - **1.3.82** - 2026-11-18 22:13 - `src/components/ReciboPagamento.tsx`
+- **1.3.83** - 2026-11-18 23:05 - `src/components/ParcelasModal.tsx`
+- **1.3.84** - 2026-11-18 23:06 - `src/components/ClienteCardLiquidacao.tsx`
+- **1.3.85** - 2026-11-18 23:06 - `src/components/ParcelasModal.tsx`
+- **1.3.86** - 2026-11-18 23:06 - `src/components/EstornoModal.tsx`
+- **1.3.87** - 2026-11-18 23:16 - `src/components/ParcelasModal.tsx`
+- **1.3.88** - 2026-11-19 08:21 - `src/components/ParcelasModal.tsx`
+- **1.3.89** - 2026-11-19 08:21 - `src/components/EstornoModal.tsx`
+- **1.3.90** - 2026-11-19 08:21 - `src/screens/ClientesScreen.tsx`
+- **1.3.91** - 2026-11-19 08:50 - `src/components/ParcelasModal.tsx`
+- **1.3.92** - 2026-11-19 08:50 - `src/screens/ClientesScreen.tsx`
+- **1.3.93** - 2026-11-19 08:50 - `src/components/EstornoModal.tsx`
+- **1.3.94** - 2026-11-19 08:51 - `src/components/ParcelasModal.tsx`
+- **1.3.95** - 2026-11-19 11:35 - `src/components/ParcelasModal.tsx`
+- **1.3.96** - 2026-11-19 11:36 - `src/components/ParcelasModal.tsx`

@@ -51,3 +51,25 @@ export function fracaoBr(n: number): string {
   const r = Math.round(n * 10) / 10;
   return Number.isInteger(r) ? String(r) : r.toFixed(1).replace('.', ',');
 }
+
+/**
+ * Quanto de cada parcela o dinheiro já entregue cobre, EM ORDEM: 1 = cheia,
+ * 0,5 = metade, 0 = nada. É o desenho do "1,5 de 24": pagou 150 em parcelas
+ * de 100 → [1, 0.5, 0, 0, ...].
+ *
+ * `pago` é `valor_total − valor_saldo` (o saldo já é líquido de crédito). Com
+ * saldo zerado, passe `Infinity`: `valor_total` difere da soma das parcelas
+ * por centavos em alguns empréstimos, e a última não pode sair "quase cheia".
+ *
+ * É visual de propósito: a parcela 2 aparece meio paga mesmo que, no banco, o
+ * excedente esteja guardado na 1 — e é isso que se quer mostrar.
+ */
+export function preenchimentoParcelas(valores: number[], pago: number): number[] {
+  let resto = Math.max(pago || 0, 0);
+  return valores.map(v => {
+    if (!(v > 0)) return 0;
+    const f = Math.min(Math.max(resto / v, 0), 1);
+    resto -= v;
+    return f > 0.995 ? 1 : f;
+  });
+}

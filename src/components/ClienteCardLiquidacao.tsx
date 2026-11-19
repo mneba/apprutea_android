@@ -453,7 +453,7 @@ function ClienteCardLiquidacao(props: ClienteCardLiquidacaoProps) {
                     da parcela, não é saldo a favor do cliente. Com o rótulo antigo
                     o cobrador lia como se o cliente ainda tivesse esse crédito
                     guardado — e o saldo disponível dele podia ser zero. */}
-                {resumoPago.creditoUsado > 0 ? (
+                {resumoPago.creditoUsado > 0 && mostrarCredito ? (
                   <Text style={S.pCreditoLbl}>
                     {fmt(resumoPago.creditoUsado)} {lang === 'es' ? 'pagados con crédito' : 'pagos com crédito'}
                   </Text>
@@ -726,7 +726,7 @@ function CardMultiplo({
               <>
                 <Text style={[S.pValBig, { color: '#059669' }]}>{fmt(rp.dinheiroReal)}</Text>
                 <Text style={S.pRecebidoLbl}>{lang === 'es' ? 'recibido' : 'recebido'}</Text>
-                {rp.creditoUsado > 0 ? (
+                {rp.creditoUsado > 0 && mostrarCredito ? (
                   <Text style={S.pCreditoLbl}>
                     {fmt(rp.creditoUsado)} {lang === 'es' ? 'pagados con crédito' : 'pagos com crédito'}
                   </Text>

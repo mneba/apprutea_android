@@ -2,6 +2,7 @@ import React from 'react';
 import { ActivityIndicator, Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Text, TextInput } from './texto';
 import { Language } from '../contexts/LiquidacaoContext';
+import { useTrabalhaCredito } from '../hooks/useTrabalhaCredito';
 import { data as fmtData, moeda } from '../utils/formato';
 
 const fmt = (v: number) => moeda(v);
@@ -118,6 +119,8 @@ export default function EstornoModal({
   lang,
   t,
 }: EstornoModalProps) {
+  // Rota sem crédito à vista: a linha do crédito devolvido some; fica o dinheiro.
+  const mostrarCredito = useTrabalhaCredito();
   const varios = recebimentos.length > 1;
   const escolhido = varios ? recebimentos.find((r) => r.operacao_id === operacaoEscolhida) : null;
   const faltaEscolher = varios && !escolhido;
@@ -155,11 +158,11 @@ export default function EstornoModal({
                           : ((parcela.valor_pago || 0) - (parcela.credito_usado || 0))
                       )}
                     </Text>
-                    <Text style={S.estInfoDetalhe}>
+                    {mostrarCredito && <Text style={S.estInfoDetalhe}>
                       {lang === 'es' ? 'Crédito usado (será devuelto)' : 'Crédito usado (será devolvido)'}: {fmt(
                         varios ? escolhido!.credito_usado : (parcela.credito_usado || 0)
                       )}
-                    </Text>
+                    </Text>}
                   </View>
                 )}
               </View>
