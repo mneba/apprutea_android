@@ -1,7 +1,7 @@
 import NetInfo from '@react-native-community/netinfo';
 import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Dimensions, Modal, RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Dimensions, Modal, Platform, RefreshControl, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Text, TextInput } from '../components/texto';
 import { ModalExtrato, ModalFinanceiro, ModalMicroseguro, ModalPagamentos } from '../components/LiquidacaoDetalhes';
 import { ModalNotasLista } from '../components/NotasComponent';
@@ -10,6 +10,25 @@ import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
 import { buscarConflitos, ConflitoAbertura, diaCurto, encerrarConflitos } from '../services/solicitacoesAbertura';
 import { LiquidacaoDiaria } from '../types';
+
+// Linha de fn_solicitacoes_do_fechamento.
+type PendenciaFechamento = {
+  id: string; tipo_solicitacao: string; status: string; cliente_nome: string | null;
+  valor: number | string | null; data_solicitada: string | null; created_at: string; bloqueia: boolean;
+};
+const TIPO_SOLICITACAO_ROTULO: Record<string, { pt: string; es: string }> = {
+  VENDA_EXCEDE_LIMITE:       { pt: 'Venda acima do limite',     es: 'Venta sobre el límite' },
+  RENOVACAO_EXCEDE_LIMITE:   { pt: 'Renovação acima do limite', es: 'Renovación sobre el límite' },
+  RENOVACAO_EXCEDE_ANTERIOR: { pt: 'Renovação acima do último', es: 'Renovación sobre el anterior' },
+  DESPESA_EXCEDE_LIMITE:     { pt: 'Despesa acima do limite',   es: 'Gasto sobre el límite' },
+  RECEITA_EXCEDE_LIMITE:     { pt: 'Receita acima do limite',   es: 'Ingreso sobre el límite' },
+  ESTORNO_PAGAMENTO:         { pt: 'Estorno de pagamento',      es: 'Reverso de pago' },
+  CANCELAR_EMPRESTIMO:       { pt: 'Cancelar empréstimo',       es: 'Cancelar préstamo' },
+  QUITAR_COM_DESCONTO:       { pt: 'Quitar com desconto',       es: 'Liquidar con descuento' },
+  CLIENTE_OUTRA_ROTA:        { pt: 'Cliente de outra rota',     es: 'Cliente de otra ruta' },
+  RENEGOCIACAO:              { pt: 'Renegociação',              es: 'Renegociación' },
+  EMPRESTIMO_ADICIONAL:      { pt: 'Empréstimo adicional',      es: 'Préstamo adicional' },
+};
 import { mensagemErro } from '../utils/mensagemErro';
 import { moedaJunta, data as dataBr, dataExtenso, chaveData } from '../utils/formato';
 
@@ -194,10 +213,17 @@ export default function LiquidacaoScreen({ navigation }: any) {
   const [liquidacao, setLiquidacao] = useState<LiquidacaoDiaria | null>(null);
   const [todasLiquidacoes, setTodasLiquidacoes] = useState<LiquidacaoDiaria[]>([]);
   const [loading, setLoading] = useState(true);
+  // A primeira carga falhou e nenhuma deu certo ainda. Sem isto, a falha caía
+  // no ramo "Nenhuma liquidação aberta" — e o dia podia estar aberto.
+  const [falhaCarga, setFalhaCarga] = useState(false);
+  const carregouLiqRef = useRef(false);
   const [refreshing, setRefreshing] = useState(false);
   const language: Language = idioma || 'pt-BR';
   const [fechando, setFechando] = useState(false);
-  const [fechandoEtapa, setFechandoEtapa] = useState<'confirmar' | 'processando' | 'gerando'>('confirmar');
+  const [fechandoEtapa, setFechandoEtapa] = useState<'confirmar' | 'pendencias' | 'processando' | 'gerando'>('confirmar');
+  // Solicitações da rota que o fechamento mostra (fn_solicitacoes_do_fechamento):
+  // `bloqueia` = PENDENTE, trava o fechamento; o resto é aprovada e não usada, só avisa.
+  const [pendenciasFechamento, setPendenciasFechamento] = useState<PendenciaFechamento[]>([]);
   const [vendasReal, setVendasReal] = useState(0);
   const [qtdVendasReal, setQtdVendasReal] = useState(0);
   const [modalIniciarVisible, setModalIniciarVisible] = useState(false);
@@ -451,6 +477,8 @@ export default function LiquidacaoScreen({ navigation }: any) {
         .order('data_abertura', { ascending: false });
 
       if (!error && data) {
+        carregouLiqRef.current = true;
+        setFalhaCarga(false);
         setTodasLiquidacoes(data);
         // ⭐ FIX: se está em MODO VISUALIZAÇÃO (fonte da verdade = Context, que
         // sobrevive à remontagem da tela), NÃO sobrescrever com a liquidação
@@ -500,7 +528,11 @@ export default function LiquidacaoScreen({ navigation }: any) {
           setMostrarCalendario(true);
         }
       } else {
-        setLiquidacao(null);
+        // ⚠ Falha NÃO é "não há liquidação". Antes zerava aqui, e ao voltar de
+        // outro app — primeira consulta antes de a sessão renovar — a tela
+        // piscava "Nenhuma liquidação aberta" (Julio, 09/11/2026). Fica o que
+        // estava; se nunca houve carga boa, a tela pede para tentar de novo.
+        if (!carregouLiqRef.current) setFalhaCarga(true);
       }
 
       // Buscar saldo da conta da rota (será usado como caixa inicial automático)
@@ -517,6 +549,7 @@ export default function LiquidacaoScreen({ navigation }: any) {
       }
     } catch (error) {
       console.error('Erro ao carregar liquidações:', error);
+      if (!carregouLiqRef.current) setFalhaCarga(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -1223,7 +1256,68 @@ const confirmarConflitoAbertura = (
     }
   };
 
+  // ══ SOLICITAÇÕES ABERTAS NA ROTA, ANTES DE FECHAR ═══════════════════════
+  // Pedido do campo (25/09/2026), decisão do Mauricio (19/11/2026): pendente
+  // trava o fechamento; aprovada e ainda não usada só avisa, todo dia, até
+  // ser usada ou cancelada. Cancelar APAGA (com dupla confirmação) — marcar
+  // como rejeitada diria que o vendedor rejeitou, e não foi o caso. A régua é
+  // do banco (fn_solicitacoes_do_fechamento), a mesma do web.
   const handleEncerrarDia = async () => {
+    if (!liquidacao || !vendedor) return;
+    const rotaId = (liquidacao as any).rota_id || vendedor.rota_id;
+    setFechando(true);
+    setFechandoEtapa('processando');
+    try {
+      const { data, error } = await supabase.rpc('fn_solicitacoes_do_fechamento', { p_rota_id: rotaId });
+      if (error) throw error;
+      const lista = (Array.isArray(data) ? data : []) as PendenciaFechamento[];
+      if (lista.length > 0) {
+        setPendenciasFechamento(lista);
+        setFechando(false);
+        setFechandoEtapa('pendencias');
+        return;
+      }
+    } catch (e) {
+      // Sem a lista não se fecha: fechar por cima de pendência é o defeito
+      // que esta tela existe para impedir.
+      setFechando(false);
+      setFechandoEtapa('confirmar');
+      showAlert('Erro', mensagemErro(e, 'Não foi possível verificar as solicitações da rota'));
+      return;
+    }
+    await executarEncerramento();
+  };
+
+  const cancelarPendenciasEFechar = () => {
+    const titulo = 'Cancelar todas';
+    const msg = language === 'es'
+      ? 'Las solicitudes serán ELIMINADAS: no quedará registro de ellas y tendrán que hacerse de nuevo. ¿Continuar?'
+      : 'As solicitações serão APAGADAS: não ficará registro delas e terão de ser refeitas. Continuar?';
+    const confirmar = async () => {
+      setFechando(true);
+      setFechandoEtapa('processando');
+      try {
+        const rotaId = (liquidacao as any)?.rota_id || vendedor?.rota_id;
+        const { data, error } = await supabase.rpc('fn_cancelar_solicitacoes_do_fechamento', { p_rota_id: rotaId, p_ids: null });
+        if (error) throw error;
+        const r = Array.isArray(data) ? data[0] : data;
+        if (!r?.sucesso) throw new Error(r?.mensagem || 'Erro ao cancelar solicitações');
+      } catch (e) {
+        setFechando(false);
+        setFechandoEtapa('confirmar');
+        showAlert('Erro', mensagemErro(e, 'Não foi possível cancelar as solicitações'));
+        return;
+      }
+      await executarEncerramento();
+    };
+    if (Platform.OS === 'web') { if (window.confirm(titulo + '\n\n' + msg)) confirmar(); return; }
+    Alert.alert(titulo, msg, [
+      { text: language === 'es' ? 'Volver' : 'Voltar', style: 'cancel' },
+      { text: language === 'es' ? 'Eliminar y cerrar' : 'Apagar e encerrar', style: 'destructive', onPress: confirmar },
+    ]);
+  };
+
+  const executarEncerramento = async () => {
     if (!liquidacao || !vendedor) return;
 
     setFechando(true);
@@ -2029,6 +2123,17 @@ const confirmarConflitoAbertura = (
             </TouchableOpacity>
           </>
         ) : (
+          falhaCarga ? (
+            <View style={styles.semLiquidacao}>
+              <Text style={styles.semLiquidacaoIcon}>📶</Text>
+              <Text style={styles.semLiquidacaoText}>
+                {language === 'es' ? 'No fue posible verificar el día' : 'Não foi possível verificar o dia'}
+              </Text>
+              <TouchableOpacity style={styles.iniciarButton} onPress={() => { setLoading(true); carregarLiquidacoes(); }}>
+                <Text style={styles.iniciarText}>{language === 'es' ? 'Intentar de nuevo' : 'Tentar de novo'}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
           <View style={styles.semLiquidacao}>
             <Text style={styles.semLiquidacaoIcon}>📅</Text>
             <Text style={styles.semLiquidacaoText}>{t.nenhumaLiquidacao}</Text>
@@ -2036,6 +2141,7 @@ const confirmarConflitoAbertura = (
               <Text style={styles.iniciarText}>{t.iniciarDia}</Text>
             </TouchableOpacity>
           </View>
+          )
         )}
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -2081,7 +2187,47 @@ const confirmarConflitoAbertura = (
       <Modal visible={modalFecharVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            {fechandoEtapa === 'confirmar' ? (
+            {fechandoEtapa === 'pendencias' ? (
+              <>
+                <Text style={styles.modalTitle}>{language === 'es' ? 'Solicitudes abiertas' : 'Solicitações abertas'}</Text>
+                <Text style={styles.modalDescricao}>
+                  {pendenciasFechamento.some(p => p.bloqueia)
+                    ? (language === 'es'
+                        ? 'Hay solicitudes PENDIENTES en esta ruta. El día solo se cierra después de que el supervisor las resuelva, o cancelándolas todas.'
+                        : 'Há solicitações PENDENTES nesta rota. O dia só fecha depois que o supervisor as resolver, ou cancelando todas.')
+                    : (language === 'es'
+                        ? 'Hay autorizaciones aprobadas aún no utilizadas. Puede cerrar el día y seguirán valiendo, o cancelarlas todas.'
+                        : 'Há autorizações aprovadas ainda não usadas. Você pode encerrar o dia e elas continuam valendo, ou cancelar todas.')}
+                </Text>
+                <ScrollView style={{ maxHeight: 260, marginBottom: 16 }}>
+                  {pendenciasFechamento.map(p => (
+                    <View key={p.id} style={styles.pendenciaRow}>
+                      <View style={{ flex: 1, flexShrink: 1 }}>
+                        <Text style={styles.pendenciaTipo}>{TIPO_SOLICITACAO_ROTULO[p.tipo_solicitacao]?.[language === 'es' ? 'es' : 'pt'] || p.tipo_solicitacao}</Text>
+                        {!!p.cliente_nome && <Text style={styles.pendenciaCliente}>{p.cliente_nome}</Text>}
+                        <Text style={styles.pendenciaData}>{p.data_solicitada ? dataBr(p.data_solicitada) : ''}{p.valor != null ? '  ·  ' + moedaJunta(Number(p.valor)) : ''}</Text>
+                      </View>
+                      <Text style={[styles.pendenciaBadge, p.bloqueia ? styles.pendenciaBadgePend : styles.pendenciaBadgeAprov]}>
+                        {p.bloqueia ? (language === 'es' ? 'Pendiente' : 'Pendente') : (language === 'es' ? 'Aprobada' : 'Aprovada')}
+                      </Text>
+                    </View>
+                  ))}
+                </ScrollView>
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity style={styles.modalButtonCancel} onPress={() => { setModalFecharVisible(false); setFechandoEtapa('confirmar'); }}>
+                    <Text style={styles.modalButtonCancelText}>{language === 'es' ? 'Volver' : 'Voltar'}</Text>
+                  </TouchableOpacity>
+                  {!pendenciasFechamento.some(p => p.bloqueia) && (
+                    <TouchableOpacity style={[styles.modalButtonConfirm, styles.modalButtonAmber]} onPress={executarEncerramento}>
+                      <Text style={styles.modalButtonConfirmText}>{language === 'es' ? 'Cerrar y mantener' : 'Encerrar e manter'}</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity style={[styles.modalButtonConfirm, styles.modalButtonRed]} onPress={cancelarPendenciasEFechar}>
+                    <Text style={styles.modalButtonConfirmText}>Cancelar todas</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : fechandoEtapa === 'confirmar' ? (
               <>
                 <Text style={styles.modalTitle}>{t.encerrarDia}</Text>
                 <Text style={styles.modalDescricao}>{t.confirmarEncerramento}</Text>
@@ -2618,6 +2764,14 @@ const styles = StyleSheet.create({
   modalButtonCancelText: { color: '#6B7280', fontWeight: '500' },
   modalButtonConfirm: { flex: 1, paddingVertical: 14, borderRadius: 8, backgroundColor: '#10B981', alignItems: 'center' },
   modalButtonAmber: { backgroundColor: '#D97706' },
+  modalButtonRed: { backgroundColor: '#DC2626' },
+  pendenciaRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  pendenciaTipo: { fontSize: 13, fontWeight: '600', color: '#1F2937' },
+  pendenciaCliente: { fontSize: 12, color: '#4B5563' },
+  pendenciaData: { fontSize: 11, color: '#9CA3AF' },
+  pendenciaBadge: { fontSize: 10, fontWeight: '600', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, flexShrink: 0 },
+  pendenciaBadgePend: { color: '#B45309', backgroundColor: '#FEF3C7' },
+  pendenciaBadgeAprov: { color: '#047857', backgroundColor: '#D1FAE5' },
   modalButtonConfirmText: { color: '#fff', fontWeight: '600' },
   // Caixa Inicial Automático (somente leitura)
   caixaInicialInfo: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#EFF6FF', padding: 12, borderRadius: 8, marginBottom: 16, borderWidth: 1, borderColor: '#BFDBFE' },

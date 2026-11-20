@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Platform } from 'react-native';
 import type { Lang } from '../constants/novaVendaConstants';
 import { supabase } from '../services/supabase';
@@ -64,6 +64,8 @@ interface UseBuscaDocumentoParams {
   lang: Lang;
   navigation: any;
   formSetters: FormSetters;
+  /** Dia da liquidação que se opera. É a régua do atraso (ver `temParcelaVencida`). */
+  dataOperacional?: string;
 }
 
 export function useBuscaDocumento({
@@ -76,8 +78,39 @@ export function useBuscaDocumento({
   lang,
   navigation,
   formSetters,
+  dataOperacional,
 }: UseBuscaDocumentoParams) {
   const s = formSetters;
+
+  // Ref, e não dependência: os efeitos que buscam o cliente têm listas de
+  // dependência próprias, e o dia só precisa estar certo na hora da consulta.
+  const dataOperacionalRef = useRef(dataOperacional);
+  dataOperacionalRef.current = dataOperacional;
+
+  // O empréstimo está em atraso? Decide renegociação × adicional.
+  //
+  // ⚠ Pela LIQUIDAÇÃO, nunca por `emprestimos.status` nem pelo relógio do
+  // aparelho. O 'VENCIDO' do status nasce do gatilho que compara com
+  // CURRENT_DATE (UTC): num dia retroativo, ou depois das 21h, ele marca a
+  // parcela no PRÓPRIO dia do vencimento (Julio, 11/11/2026). `<`: a parcela
+  // que vence no dia operacional está no prazo. Sem liquidação, o dia da rota.
+  const temParcelaVencida = async (emprestimoId: string): Promise<boolean> => {
+    let dia = dataOperacionalRef.current;
+    if (!dia && vendedor?.rota_id) {
+      const { data: hojeRota } = await supabase.rpc('fn_data_hoje_rota', { p_rota_id: vendedor.rota_id });
+      if (typeof hojeRota === 'string') dia = hojeRota.substring(0, 10);
+    }
+    if (!dia) return false;
+    const { data: parcAtrasadas } = await supabase
+      .from('emprestimo_parcelas')
+      .select('id')
+      .eq('emprestimo_id', emprestimoId)
+      .lt('data_vencimento', dia)
+      .neq('status', 'PAGO')
+      .neq('status', 'CANCELADO')
+      .limit(1);
+    return !!(parcAtrasadas && parcAtrasadas.length > 0);
+  };
 
   // -----------------------------------------------------------
   // ESTADOS
@@ -253,21 +286,7 @@ ${msg}`);
       const temEmprestimoAtivo = !!emp;
 
       // Verificar atraso
-      let temAtraso = emp?.status === 'VENCIDO';
-      if (!temAtraso && emp) {
-        const hojeDate = new Date();
-        hojeDate.setHours(0, 0, 0, 0);
-        const hoje = hojeDate.toISOString().split('T')[0];
-        const { data: parcAtrasadas } = await supabase
-          .from('emprestimo_parcelas')
-          .select('id')
-          .eq('emprestimo_id', emp.id)
-          .lt('data_vencimento', hoje)
-          .neq('status', 'PAGO')
-          .neq('status', 'CANCELADO')
-          .limit(1);
-        temAtraso = !!(parcAtrasadas && parcAtrasadas.length > 0);
-      }
+      const temAtraso = emp ? await temParcelaVencida(emp.id) : false;
 
       const permiteAdicional = cli.permite_emprestimo_adicional === true || cli.permite_emprestimo_adicional === 'true';
       const permiteReneg = cli.permite_renegociacao === true || cli.permite_renegociacao === 'true';
@@ -588,21 +607,7 @@ ${msg}`); navigation.goBack(); }
         const temHistoricoQuitado = !!(empsQuitados && empsQuitados.length > 0);
 
         const temEmprestimoAtivo = !!emp;
-        let temAtraso = emp?.status === 'VENCIDO';
-        if (!temAtraso && emp) {
-          const hojeDate = new Date();
-          hojeDate.setHours(0, 0, 0, 0);
-          const hoje = hojeDate.toISOString().split('T')[0];
-          const { data: parcAtrasadas } = await supabase
-            .from('emprestimo_parcelas')
-            .select('id')
-            .eq('emprestimo_id', emp.id)
-            .lt('data_vencimento', hoje)
-            .neq('status', 'PAGO')
-            .neq('status', 'CANCELADO')
-            .limit(1);
-          temAtraso = !!(parcAtrasadas && parcAtrasadas.length > 0);
-        }
+        const temAtraso = emp ? await temParcelaVencida(emp.id) : false;
 
         const permiteAdicional = cli.permite_emprestimo_adicional === true || (cli.permite_emprestimo_adicional as any) === 'true';
         const permiteReneg = cli.permite_renegociacao === true || (cli.permite_renegociacao as any) === 'true';

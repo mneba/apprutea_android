@@ -211,7 +211,7 @@ interface ExtratoProps {
   isLiquidacaoAberta?: boolean;
 }
 
-export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, caixaFinal, rotaNome, vendedorNomeExterno, lang = 'pt-BR', isLiquidacaoAberta = false }: ExtratoProps) {
+export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial: caixaInicialProp, caixaFinal: caixaFinalProp, rotaNome, vendedorNomeExterno, lang = 'pt-BR', isLiquidacaoAberta = false }: ExtratoProps) {
   // Sem crédito à vista, as frases de crédito saem do extrato; o DINHEIRO de
   // cada linha já é líquido dele, então os totais não mudam.
   const mostrarCredito = useTrabalhaCredito();
@@ -240,6 +240,13 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
   // Blocos do extrato (mockup B): fechados ao abrir, cada um abre ao toque.
   const [blocosAbertos, setBlocosAbertos] = useState<Set<string>>(new Set());
   const [buscaCob, setBuscaCob] = useState('');
+  // Carga tudo-ou-nada (ver `carregarExtrato`). O caixa sai do BANCO, na
+  // leitura do dia; as props ficam só como valor até a primeira carga.
+  const reqExtratoRef = useRef(0);
+  const [erroCarga, setErroCarga] = useState<string | null>(null);
+  const [caixaDb, setCaixaDb] = useState<{ ini: number; fim: number } | null>(null);
+  const caixaInicial = caixaDb ? caixaDb.ini : caixaInicialProp;
+  const caixaFinal = caixaDb ? caixaDb.fim : caixaFinalProp;
   const extratoViewRef = useRef<View>(null);
   // Selo de fechamento. `quando` é `data_fechamento`; `por` é o nome de quem
   // fechou, resolvido por `fn_nome_usuario` — que procura em `vendedores` e
@@ -265,179 +272,190 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
     if (visible && liquidacaoId) carregarExtrato();
   }, [visible, liquidacaoId]);
 
+  // ══════════════════════════════════════════════════════════════════
+  // A CARGA É TUDO OU NADA (19/11/2026)
+  // ══════════════════════════════════════════════════════════════════
+  //
+  // Relato do Julio em 17/11/2026: ao fechar o dia o extrato às vezes ficava
+  // rodando sem fim, às vezes saía ZERADO, e num caso os ~6.500 emprestados
+  // do dia apareceram como "Diferença não explicada". O banco estava certo
+  // (medido: os dias com ~6.500 emprestados têm caixa e empréstimo íntegros).
+  // O defeito era AQUI:
+  //
+  //  · cada consulta que falhava era engolida e a lista ficava vazia. Sem os
+  //    empréstimos, o caixa final (que vem de outra fonte) não fecha, e a
+  //    conta joga a sobra na diferença — exatamente o caso dos 6.500;
+  //  · o filtro `created_at >= data_abertura` caía em AGORA quando a leitura
+  //    do dia falhava, e aí nenhum empréstimo entrava. Saiu: medido, zero
+  //    empréstimos na base nasceram antes da abertura do próprio dia;
+  //  · o caixa vinha por prop. Ao fechar dia REABERTO,
+  //    `fn_fechar_liquidacao_reaberta` devolve só (sucesso, mensagem), e o
+  //    caixa final chegava 0. Agora sai do banco, na mesma leitura do dia;
+  //  · cinco consultas em fila, sem prazo. Agora em paralelo, com 20 s.
+  //
+  // Regra: ou TODAS as fontes da conta chegam, ou o extrato não aparece —
+  // aparece a tela de erro com "Tentar de novo". A "diferença não explicada"
+  // só pode ser calculada sobre o dia inteiro. O mesmo vale no web
+  // (ModalExtratoLiquidacao.tsx).
+  const PRAZO_EXTRATO_MS = 20000;
   const carregarExtrato = async () => {
+    const meu = ++reqExtratoRef.current;
     setLoading(true);
+    setErroCarga(null);
+    const es = lang === 'es';
+    const falhou = (etapa: string, err: any): never => {
+      throw new Error(`${etapa}: ${err?.message || (es ? 'sin respuesta' : 'sem resposta')}`);
+    };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const prazo = new Promise<never>((_, rej) => {
+      timer = setTimeout(() => rej(new Error('PRAZO')), PRAZO_EXTRATO_MS);
+    });
     try {
-      // Busca dados da liquidação (vendedor + data + microseguro)
-      const { data: liqData } = await supabase
-        .from('liquidacoes_diarias')
-        .select('data_liquidacao, data_abertura, status, data_fechamento, fechado_por, data_reabertura, microseguro_inicial, microseguro_final, clientes_pagos, clientes_nao_pagos, clientes_novos, clientes_renovados, clientes_renegociados')
-        .eq('id', liquidacaoId)
-        .single();
+      const carga = (async () => {
+        const liqRes = await supabase
+          .from('liquidacoes_diarias')
+          .select('data_liquidacao, data_abertura, status, data_fechamento, fechado_por, data_reabertura, caixa_inicial, caixa_final, microseguro_inicial, microseguro_final, clientes_pagos, clientes_nao_pagos, clientes_novos, clientes_renovados, clientes_renegociados')
+          .eq('id', liquidacaoId)
+          .single();
+        if (liqRes.error || !liqRes.data) falhou(es ? 'liquidación' : 'liquidação', liqRes.error);
+        const liq: any = liqRes.data;
 
-      // Só busca a auditoria se o dia foi reaberto. Num dia normal, que é a
-      // esmagadora maioria, nem a chamada acontece.
-      if ((liqData as any)?.data_reabertura) {
-        const { data: audit } = await supabase.rpc('fn_auditoria_liquidacao', {
-          p_liquidacao_id: liquidacaoId,
-        });
-        setAuditoria((audit || []) as any[]);
-      } else {
-        setAuditoria([]);
-      }
+        const [finRes, pagRes, empRes, audRes]: any[] = await Promise.all([
+          supabase
+            .from('financeiro')
+            .select('id, tipo, categoria, descricao, valor, data_lancamento, created_at, forma_pagamento, cliente_nome, status')
+            .eq('liquidacao_id', liquidacaoId)
+            // ANULADO vem junto SÓ para aparecer riscado na lista de saídas.
+            // Toda soma abaixo o descarta explicitamente.
+            .in('status', ['PAGO', 'ANULADO'])
+            .order('created_at', { ascending: true }),
+          supabase
+            .from('pagamentos_parcelas')
+            .select(`
+              id, numero_parcela, valor_pago_total, valor_pago_atual, valor_parcela, valor_credito_gerado, valor_credito_usado,
+              forma_pagamento, created_at, cliente_id, parcela_id, emprestimo_id,
+              operacao_id, tipo_operacao, observacoes,
+              clientes!pagamentos_parcelas_cliente_id_fkey(nome, consecutivo)
+            `)
+            .eq('liquidacao_id', liquidacaoId)
+            .eq('estornado', false)
+            .order('created_at', { ascending: true }),
+          supabase
+            .from('emprestimos')
+            .select(`
+              id, valor_principal, valor_total, valor_parcela, numero_parcelas,
+              taxa_juros, frequencia_pagamento, data_primeiro_vencimento,
+              tipo_emprestimo, created_at,
+              cliente:cliente_id(nome, codigo_cliente)
+            `)
+            .eq('liquidacao_id', liquidacaoId)
+            .neq('status', 'CANCELADO')
+            .order('created_at', { ascending: true }),
+          // Só busca a auditoria se o dia foi reaberto.
+          liq.data_reabertura
+            ? supabase.rpc('fn_auditoria_liquidacao', { p_liquidacao_id: liquidacaoId })
+            : Promise.resolve({ data: [], error: null }),
+        ]);
+        if (finRes.error) falhou(es ? 'movimientos' : 'lançamentos', finRes.error);
+        if (empRes.error) falhou(es ? 'préstamos' : 'empréstimos', empRes.error);
+        if (audRes.error) falhou(es ? 'reapertura' : 'reabertura', audRes.error);
 
-      if (liqData) {
-        const dataStr = liqData.data_liquidacao?.substring(0, 10) || liqData.data_abertura?.substring(0, 10) || '';
-        if (dataStr) {
-          const [y, m, d] = dataStr.split('-');
-          setDataLiquidacao(`${d}/${m}/${y}`);
-        }
-        if (vendedorNomeExterno) setVendedorNome(vendedorNomeExterno);
-
-        // Só há selo se a liquidação foi de fato fechada. Uma reaberta perde o
-        // selo de propósito: o extrato deixou de representar um dia encerrado,
-        // que é justamente o que o selo afirma.
-        const fechadaEm = (liqData as any).data_fechamento as string | null;
-        const statusLiq = String((liqData as any).status || '').toUpperCase();
-        if (fechadaEm && statusLiq === 'FECHADO') {
-          setFechamento({ quando: fechadaEm, por: null });
-          const quem = (liqData as any).fechado_por;
-          if (quem) {
-            // O nome é um extra: se a busca falhar, o selo aparece mesmo assim
-            // com a data e a hora, que é o essencial do pedido.
-            supabase.rpc('fn_nome_usuario', { p_user_id: quem }).then(
-              ({ data: nome, error: errNome }) => {
-                if (!errNome && typeof nome === 'string' && nome.trim()) {
-                  setFechamento({ quando: fechadaEm, por: nome.trim() });
-                }
-              },
-              () => {},
-            );
+        let pags: any[] = pagRes.data || [];
+        if (pagRes.error) {
+          // Reserva: sem o join, e os nomes numa segunda leitura. Se ela
+          // também falhar, a carga inteira falha — não sai extrato sem as
+          // cobranças.
+          console.log('❌ Erro query pagamentos_parcelas:', pagRes.error.message);
+          const semRes = await supabase
+            .from('pagamentos_parcelas')
+            .select('id, numero_parcela, valor_pago_total, valor_pago_atual, valor_parcela, valor_credito_gerado, valor_credito_usado, forma_pagamento, created_at, cliente_id, parcela_id, emprestimo_id, operacao_id, tipo_operacao, observacoes')
+            .eq('liquidacao_id', liquidacaoId)
+            .eq('estornado', false)
+            .order('created_at', { ascending: true });
+          if (semRes.error) falhou(es ? 'cobros' : 'cobranças', semRes.error);
+          const ids = [...new Set((semRes.data || []).map((p: any) => p.cliente_id).filter(Boolean))];
+          let nomeMap = new Map<string, string>();
+          if (ids.length > 0) {
+            const cliRes = await supabase.from('clientes').select('id, nome').in('id', ids);
+            if (cliRes.error) falhou('clientes', cliRes.error);
+            nomeMap = new Map((cliRes.data || []).map((c: any) => [c.id, c.nome]));
           }
-        } else {
-          setFechamento(null);
+          pags = (semRes.data || []).map((p: any) => ({ ...p, clientes: { nome: nomeMap.get(p.cliente_id) || '' } }));
         }
-        setCaixaMicroInicial(liqData.microseguro_inicial || 0);
-        setCaixaMicroFinal(liqData.microseguro_final || 0);
-        setResumoOp({
-          pagos: (liqData as any).clientes_pagos || 0,
-          naoPagos: (liqData as any).clientes_nao_pagos || 0,
-          novos: (liqData as any).clientes_novos || 0,
-          renovados: (liqData as any).clientes_renovados || 0,
-          renegociados: (liqData as any).clientes_renegociados || 0,
-        });
+        return { liq, fin: (finRes.data || []) as any[], pags, emps: (empRes.data || []) as any[], aud: (audRes.data || []) as any[] };
+      })();
+
+      const r = await Promise.race([carga, prazo]);
+      if (meu !== reqExtratoRef.current) return;   // outra carga mais nova assumiu
+      const { liq, fin, pags, emps, aud } = r;
+
+      // Daqui para baixo nada falha: o estado é aplicado de uma vez.
+      setCaixaDb({ ini: Number(liq.caixa_inicial || 0), fim: Number(liq.caixa_final || 0) });
+      setAuditoria(aud);
+      const dataStr = liq.data_liquidacao?.substring(0, 10) || liq.data_abertura?.substring(0, 10) || '';
+      if (dataStr) {
+        const [y, m, d] = dataStr.split('-');
+        setDataLiquidacao(`${d}/${m}/${y}`);
       }
+      if (vendedorNomeExterno) setVendedorNome(vendedorNomeExterno);
 
-      // Busca movimentações financeiras
-      const { data, error } = await supabase
-        .from('financeiro')
-        .select('id, tipo, categoria, descricao, valor, data_lancamento, created_at, forma_pagamento, cliente_nome, status')
-        .eq('liquidacao_id', liquidacaoId)
-        // ANULADO vem junto SÓ para aparecer riscado na lista de saídas, como
-        // no extrato do web. Toda soma abaixo o descarta explicitamente — ver
-        // `totalSaidasDespesas`, `totalEntradas`, `registrosEntradas` e o
-        // `retiroMicro` logo adiante.
-        .in('status', ['PAGO', 'ANULADO'])
-        .order('created_at', { ascending: true });
-
-      if (!error) {
-        setRegistros(data || []);
-        const retiroMicro = (data || [])
-          .filter((r: any) => r.tipo === 'PAGAR' && r.status !== 'ANULADO' && ['RETIRO_MICROSEGURO', 'SAIDA_MICROSEGURO'].includes(r.categoria))
-          .reduce((s: number, r: any) => s + parseFloat(r.valor), 0);
-        setTotalRetiroMicro(retiroMicro);
-      }
-
-      // Busca pagamentos de parcelas (cobranças)
-      const { data: pags, error: errPag } = await supabase
-        .from('pagamentos_parcelas')
-        .select(`
-          id, numero_parcela, valor_pago_total, valor_pago_atual, valor_parcela, valor_credito_gerado, valor_credito_usado,
-          forma_pagamento, created_at, cliente_id, parcela_id, emprestimo_id,
-          operacao_id, tipo_operacao,
-          clientes!pagamentos_parcelas_cliente_id_fkey(nome, consecutivo)
-        `)
-        .eq('liquidacao_id', liquidacaoId)
-        .eq('estornado', false)
-        .order('created_at', { ascending: true });
-
-      if (errPag) {
-        console.log('❌ Erro query pagamentos_parcelas:', errPag.message, errPag.details, errPag.hint);
-        // Fallback: busca sem join se foreign key falhar
-        const { data: pagsSem, error: errSem } = await supabase
-          .from('pagamentos_parcelas')
-          .select('id, numero_parcela, valor_pago_total, valor_pago_atual, valor_parcela, valor_credito_gerado, valor_credito_usado, forma_pagamento, created_at, cliente_id, operacao_id, tipo_operacao')
-          .eq('liquidacao_id', liquidacaoId)
-          .eq('estornado', false)
-          .order('created_at', { ascending: true });
-        console.log('🔄 Fallback pagamentos:', pagsSem?.length, errSem?.message);
-        // Busca nomes dos clientes separadamente
-        const ids = [...new Set((pagsSem || []).map((p: any) => p.cliente_id).filter(Boolean))];
-        if (ids.length > 0) {
-          const { data: clisData } = await supabase
-            .from('clientes')
-            .select('id, nome')
-            .in('id', ids);
-          const nomeMap = new Map((clisData || []).map((c: any) => [c.id, c.nome]));
-          setPagamentos((pagsSem || []).map((p: any) => ({ ...p, clientes: { nome: nomeMap.get(p.cliente_id) || '' } })));
-        } else {
-          setPagamentos(pagsSem || []);
+      // Só há selo se a liquidação foi de fato fechada. Uma reaberta perde o
+      // selo de propósito: o extrato deixou de representar um dia encerrado.
+      const fechadaEm = liq.data_fechamento as string | null;
+      const statusLiq = String(liq.status || '').toUpperCase();
+      if (fechadaEm && statusLiq === 'FECHADO') {
+        setFechamento({ quando: fechadaEm, por: null });
+        const quem = liq.fechado_por;
+        if (quem) {
+          // O nome é um extra: se a busca falhar, o selo aparece mesmo assim
+          // com a data e a hora, que é o essencial (Julio, 23/09/2026).
+          supabase.rpc('fn_nome_usuario', { p_user_id: quem }).then(
+            ({ data: nome, error: errNome }) => {
+              if (meu === reqExtratoRef.current && !errNome && typeof nome === 'string' && nome.trim()) {
+                setFechamento({ quando: fechadaEm, por: nome.trim() });
+              }
+            },
+            () => {},
+          );
         }
       } else {
-        console.log('✅ Pagamentos carregados:', pags?.length);
-        /**
-         * SEM DEDUPLICAÇÃO, e isto é regra de negócio.
-         *
-         * Cada linha é um RECEBIMENTO, e a mesma parcela PODE receber dois no
-         * mesmo dia: pagamento parcial de manhã e o resto à tarde é cobrança
-         * normal, não erro de registro.
-         *
-         * Havia aqui um dedup por `parcela_id` que guardava só o de maior
-         * `valor_pago_total` e descartava o outro. Ele nunca apareceu como
-         * erro porque o dinheiro descartado não sumia da tela: saía de
-         * "Cobrança do dia" e reaparecia logo abaixo como "Diferença não
-         * explicada" — a linha que existe justamente para denunciar dinheiro
-         * movido fora do dia. Ela estava denunciando o próprio cálculo.
-         *
-         * Relatado pelo Julio em 26/10/2026 na 4.1 nayivis vnz: 20,00 de
-         * diferença que ele não conseguia achar no Financeiro. Estavam lá, os
-         * DOIS pagamentos da parcela 15/24 — era o extrato que mostrava um.
-         *
-         * MEDIDO no mesmo dia, e é o que decide remover em vez de ajustar:
-         *   · 14 casos, 316,64, em 9 rotas, desde 10/09/2026;
-         *   · nos 14, os dois pagamentos têm `operacao_id` DIFERENTE, ou seja
-         *     são dois atos do vendedor;
-         *   · linha de fato repetida — mesmo `operacao_id` na mesma parcela —
-         *     são ZERO em 19.698 pagamentos.
-         * O dedup defendia de algo que nunca aconteceu e destruía o que
-         * acontece.
-         */
-        const ordenados = [...(pags || [])]
-          .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-        setPagamentos(ordenados);
+        setFechamento(null);
       }
+      setCaixaMicroInicial(liq.microseguro_inicial || 0);
+      setCaixaMicroFinal(liq.microseguro_final || 0);
+      setResumoOp({
+        pagos: liq.clientes_pagos || 0,
+        naoPagos: liq.clientes_nao_pagos || 0,
+        novos: liq.clientes_novos || 0,
+        renovados: liq.clientes_renovados || 0,
+        renegociados: liq.clientes_renegociados || 0,
+      });
 
-      // Busca empréstimos do dia — separando vendas de renegociações
-      const { data: empsData } = await supabase
-        .from('emprestimos')
-        .select(`
-          id, valor_principal, valor_total, valor_parcela, numero_parcelas,
-          taxa_juros, frequencia_pagamento, data_primeiro_vencimento,
-          tipo_emprestimo, created_at,
-          cliente:cliente_id(nome, codigo_cliente)
-        `)
-        .eq('liquidacao_id', liquidacaoId)
-        .gte('created_at', liqData?.data_abertura || new Date().toISOString())
-        .neq('status', 'CANCELADO')
-        .order('created_at', { ascending: true });
+      setRegistros(fin);
+      setTotalRetiroMicro(fin
+        .filter((x: any) => x.tipo === 'PAGAR' && x.status !== 'ANULADO' && ['RETIRO_MICROSEGURO', 'SAIDA_MICROSEGURO'].includes(x.categoria))
+        .reduce((s: number, x: any) => s + parseFloat(x.valor), 0));
 
-      const emps = empsData || [];
+      /**
+       * SEM DEDUPLICAÇÃO, e isto é regra de negócio: cada linha é um
+       * RECEBIMENTO, e a mesma parcela PODE receber dois no mesmo dia. O dedup
+       * por `parcela_id` que havia aqui jogava o segundo na "Diferença não
+       * explicada" (Julio, 26/10/2026, 4.1 nayivis vnz). Medido: 14 casos com
+       * `operacao_id` diferente; linha de fato repetida, ZERO em 19.698.
+       */
+      setPagamentos([...pags].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()));
+
       setVendasDia(emps.filter((e: any) => e.tipo_emprestimo !== 'RENEGOCIACAO'));
       setRenegociacoesDia(emps.filter((e: any) => e.tipo_emprestimo === 'RENEGOCIACAO'));
-    } catch (e) {
+    } catch (e: any) {
+      if (meu !== reqExtratoRef.current) return;
       console.error('Erro extrato:', e);
+      setErroCarga(e?.message === 'PRAZO'
+        ? (es ? 'La conexión no respondió a tiempo.' : 'A internet não respondeu a tempo.')
+        : String(e?.message || e));
     } finally {
-      setLoading(false);
+      if (timer) clearTimeout(timer);
+      if (meu === reqExtratoRef.current) setLoading(false);
     }
   };
 
@@ -547,7 +565,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
    * ⚠ E O DIA COMUM NÃO MUDA DE APARÊNCIA: 17.354 das 18.591 operações têm
    * uma parcela só e seguem renderizadas exatamente como hoje.
    */
-  const recebimentos = (() => {
+  const recebimentosPorOp = (() => {
     const porOp = new Map<string, any[]>();
     for (const p of pagamentosDinheiro) {
       // Sem `operacao_id` a linha vira o seu próprio recebimento: é o
@@ -589,8 +607,53 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
         // Uma parcela só já É um recebimento: nada a agrupar, e a linha de
         // hoje diz mais (mostra o valor da parcela).
         detalhar: temCredito || linhas.length === 1,
+        temCredito,
       };
     });
+  })();
+
+  // ══ UMA LINHA POR EMPRÉSTIMO NO DIA ═══════════════════════════════════
+  //
+  // Relato do Julio em 07 e 09/11/2026: o cliente paga 4 parcelas de 10 e o
+  // extrato mostra 4 linhas de 10. O agrupamento por `operacao_id` acima não
+  // basta, porque o banco guarda várias operações para o que o vendedor vê
+  // como um pagamento só: o "Pagar várias" chama `fn_registrar_pagamento`
+  // uma vez por parcela (marca `[LOTE i/N]`), e o cliente que paga em dois
+  // toques gera dois recebimentos.
+  //
+  // Decisão do Mauricio em 19/11/2026: TODOS os recebimentos do mesmo
+  // empréstimo no dia viram UMA linha, com o total e as parcelas embaixo, e
+  // a hora do último. Na leitura, sem mexer no banco — o estorno segue um
+  // recebimento por vez, do mais novo ao mais antigo.
+  //
+  // ⚠ COM CRÉDITO NÃO JUNTA, a pedido do Julio: o detalhamento do crédito
+  // usado ou gerado continua linha a linha. MAS só quando a rota mostra
+  // crédito (`mostrarCredito`); com o crédito desligado a tela já não tem
+  // nota de crédito para preservar, e junta igual (Mauricio, 19/11/2026).
+  //
+  // ⚠ O TOTAL NÃO MUDA: o dinheiro da linha é a soma dos recebimentos que ela
+  // substitui. Mudou num destes dois arquivos (app LiquidacaoDetalhes, web
+  // ModalExtratoLiquidacao), muda no outro.
+  const recebimentos = (() => {
+    const out: typeof recebimentosPorOp = [];
+    const porEmprestimo = new Map<string, (typeof recebimentosPorOp)[number]>();
+    for (const rec of recebimentosPorOp) {
+      const eid = rec.linhas[0]?.emprestimo_id;
+      const separa = !eid || (rec.temCredito && mostrarCredito);
+      const g = separa ? undefined : porEmprestimo.get(eid);
+      if (g) {
+        g.linhas = [...g.linhas, ...rec.linhas];
+        g.dinheiro += rec.dinheiro;
+        g.parcelas = [...g.parcelas, ...rec.parcelas].sort((a: number, b: number) => a - b);
+        g.quitacao = g.quitacao || rec.quitacao;
+        g.detalhar = false;
+        continue;
+      }
+      const copia = { ...rec, linhas: [...rec.linhas] };
+      out.push(copia);
+      if (!separa) porEmprestimo.set(eid, copia);
+    }
+    return out;
   })();
 
   /**
@@ -1033,7 +1096,25 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
           keyboardShouldPersistTaps="handled"
         >
           {loading ? (
-            <ActivityIndicator size="large" color="#1F2937" style={{ marginVertical: 40 }} />
+            <View style={ex.cargaCaixa}>
+              <ActivityIndicator size="large" color="#1F2937" />
+              <Text style={ex.cargaTexto}>{lang === 'es' ? 'Cargando el extracto…' : 'Carregando o extrato…'}</Text>
+            </View>
+          ) : erroCarga ? (
+            // Nunca um extrato parcial: sem TODAS as fontes, a conta não fecha
+            // e a sobra cairia na "diferença não explicada".
+            <View style={ex.cargaCaixa}>
+              <Ionicons name="cloud-offline-outline" size={40} color="#B91C1C" />
+              <Text style={ex.erroTitulo}>{lang === 'es' ? 'No fue posible cargar el extracto completo' : 'Não foi possível carregar o extrato completo'}</Text>
+              <Text style={ex.cargaTexto}>{lang === 'es'
+                ? 'El día y los valores están guardados; solo el extracto no cargó.'
+                : 'O dia e os valores estão salvos; só o extrato não carregou.'}</Text>
+              <Text style={ex.erroDetalhe}>{erroCarga}</Text>
+              <TouchableOpacity style={ex.erroBotao} onPress={carregarExtrato} activeOpacity={0.8}>
+                <Ionicons name="refresh" size={18} color="#fff" />
+                <Text style={ex.erroBotaoTx}>{lang === 'es' ? 'Intentar de nuevo' : 'Tentar de novo'}</Text>
+              </TouchableOpacity>
+            </View>
           ) : (
             <>
               {/* ═══ A CONTA — o que o vendedor precisa, sem rolar ═══ */}
@@ -1293,13 +1374,13 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial, cai
 
         {/* Botões Compartilhar + Reset */}
         <View style={[cupom.shareBar, { backgroundColor: '#F3F4F6' }]}>
-          <TouchableOpacity style={cupom.shareBtn} onPress={compartilharExtrato} disabled={compartilhando}>
+          {!loading && !erroCarga && <TouchableOpacity style={cupom.shareBtn} onPress={compartilharExtrato} disabled={compartilhando}>
             {compartilhando ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
               <Text style={cupom.shareTxt}>📤 {t.compartilhar}</Text>
             )}
-          </TouchableOpacity>
+          </TouchableOpacity>}
           {isLiquidacaoAberta && (
             <TouchableOpacity
               style={[cupom.shareBtn, { backgroundColor: '#DC2626', marginTop: 8 }]}
@@ -1636,6 +1717,12 @@ function BlocoExtrato({
 }
 
 const ex = StyleSheet.create({
+  cargaCaixa: { alignItems: 'center', paddingVertical: 40, paddingHorizontal: 16, gap: 10 },
+  cargaTexto: { fontSize: 13, color: '#4B5563', textAlign: 'center' },
+  erroTitulo: { fontSize: 16, fontWeight: '700', color: '#111827', textAlign: 'center' },
+  erroDetalhe: { fontSize: 11, color: '#9CA3AF', textAlign: 'center' },
+  erroBotao: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#1F2937', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 10, marginTop: 6 },
+  erroBotaoTx: { color: '#fff', fontSize: 15, fontWeight: '700' },
   container: { flex: 1, backgroundColor: '#F3F4F6' },
   header: { backgroundColor: '#1F2937', paddingTop: 50, paddingBottom: 14, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
   headerTxts: { flex: 1, flexShrink: 1 },

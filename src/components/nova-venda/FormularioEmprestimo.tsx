@@ -11,6 +11,7 @@ import {
   type Textos
 } from '../../constants/novaVendaConstants';
 import { styles } from '../../styles/novaVendaStyles';
+import { moeda } from '../../utils/formato';
 
 interface Props {
   // Valores
@@ -44,6 +45,14 @@ interface Props {
    * parcelamento ao combinado com o cliente.
    */
   isVendaAprovadaTravada: boolean;
+  /**
+   * Renovação APROVADA: o valor aprovado vira TETO, não valor fixo. O campo
+   * abre para o vendedor emprestar MENOS (pedido do cliente, 19/11/2026); a
+   * taxa segue travada. `null` = sem teto, vale `isVendaAprovadaTravada`.
+   * O banco aceita até o aprovado desde
+   * sql/2026-11-19_renovacao_aprovada_vale_como_teto.sql.
+   */
+  tetoValor?: number | null;
   camposComErro: Set<string>;
   /**
    * `data_liquidacao` da liquidação em que a venda está sendo lançada — a data
@@ -78,11 +87,17 @@ export default function FormularioEmprestimo(props: Props) {
     valorPrincipal, taxaNum, parcelasNum,
     valorTotal, valorParcela, totalJuros,
     taxasPermitidas,
-    isRenegociacao, isVendaAprovadaTravada, camposComErro, dataOperacional, lang,
+    isRenegociacao, isVendaAprovadaTravada, tetoValor = null, camposComErro, dataOperacional, lang,
     handleValorEmprestimoChange, limparErroCampo,
     onOpenDatePicker, onOpenCarrosselFlexivel,
     t,
   } = props;
+
+  // Com teto (renovação aprovada) o valor abre, até o aprovado; sem teto,
+  // termos autorizados travam como sempre.
+  const temTeto = tetoValor != null && tetoValor > 0;
+  const valorTravado = isRenegociacao || (isVendaAprovadaTravada && !temTeto);
+  const acimaDoTeto = temTeto && valorPrincipal > (tetoValor as number) + 0.001;
 
   return (
     <>
@@ -109,22 +124,29 @@ export default function FormularioEmprestimo(props: Props) {
           <TextInput
             style={[
               styles.input,
-              camposComErro.has('valorEmprestimo') && styles.inputError,
-              (isRenegociacao || isVendaAprovadaTravada) && styles.inputDisabled,
+              (camposComErro.has('valorEmprestimo') || acimaDoTeto) && styles.inputError,
+              valorTravado && styles.inputDisabled,
             ]}
             value={valorEmprestimo}
             onChangeText={(text) => { handleValorEmprestimoChange(text); limparErroCampo('valorEmprestimo'); }}
             placeholder="500"
             placeholderTextColor="#9CA3AF"
             keyboardType="decimal-pad"
-            editable={!isRenegociacao && !isVendaAprovadaTravada}
+            editable={!valorTravado}
           />
           {isRenegociacao && (
             <Text style={styles.hintRenegociacao}>
               🔒 {lang === 'es' ? 'Saldo deudor (no editable)' : 'Saldo devedor (não editável)'}
             </Text>
           )}
-          {!isRenegociacao && isVendaAprovadaTravada && (
+          {!isRenegociacao && temTeto && (
+            <Text style={[styles.hintRenegociacao, acimaDoTeto && { color: '#DC2626' }]}>
+              {lang === 'es'
+                ? `Hasta ${moeda(tetoValor)} (valor autorizado)`
+                : `Até ${moeda(tetoValor)} (valor autorizado)`}
+            </Text>
+          )}
+          {!isRenegociacao && !temTeto && isVendaAprovadaTravada && (
             <Text style={styles.hintRenegociacao}>
               🔒 {lang === 'es' ? 'Valor autorizado por el administrador' : 'Valor autorizado pelo administrador'}
             </Text>

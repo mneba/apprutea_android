@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, Platform } from 'react-native';
 import type { Lang, Textos } from '../constants/novaVendaConstants';
 import { supabase } from '../services/supabase';
 import { registrarAcao } from '../services/auditoriaApp';
+import { moeda } from '../utils/formato';
 
 // ============================================================
 // HOOK: Submit (4 fluxos) + pedido alteração + fechar
@@ -53,14 +54,68 @@ interface SubmitContext {
   emprestimOrigemId: string | null;
   vendaPendenteId: string | null;
   isVendaAprovadaTravada: boolean;
+  /** Renovação aprovada: o valor não pode passar do aprovado. `null` = sem teto. */
+  tetoRenovacao?: number | null;
   validarMaxVendas: boolean;
   valorMaxVendas: number;
   validarCamposComFeedback: (clienteEncontradoIdExt?: string | null) => boolean;
   limparFormulario: () => void;
 }
 
+// Teto de espera pelo GPS NO CONFIRMAR, quando a posição ainda não chegou.
+// Era 5 s, em fila, antes de qualquer consulta — e cada venda e renovação
+// pagava isso inteiro em aparelho com GPS fraco (Julio, 07/11/2026). O banco
+// nunca foi o gargalo: medido em 19/11/2026, fn_nova_venda_completa 42 ms em
+// média (máx. 139) e fn_renovar_emprestimo 28 ms (máx. 75).
+const ESPERA_GPS_CONFIRMAR_MS = 1500;
+
+type PosicaoVenda = { latitude: number; longitude: number };
+
 export function useNovaVendaSubmit(ctx: SubmitContext) {
   const [submitting, setSubmitting] = useState(false);
+
+  // ── GPS pedido ao ABRIR a tela, não ao confirmar ──
+  // É o que o pagamento já faz (useGPSTracking, com a posição acompanhada
+  // desde a montagem): quando o vendedor aperta Confirmar, a posição já está
+  // na mão. Primeiro a última conhecida (instantânea), depois a atual por
+  // cima. O lugar é o mesmo — o vendedor preenche a venda parado na porta.
+  const posicaoRef = useRef<PosicaoVenda | null>(null);
+  const posicaoEmVooRef = useRef<Promise<PosicaoVenda | null> | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    posicaoEmVooRef.current = (async () => {
+      try {
+        const Location = require('expo-location');
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') return null;
+        try {
+          const ultima = await Location.getLastKnownPositionAsync();
+          if (vivo && ultima?.coords) {
+            posicaoRef.current = { latitude: ultima.coords.latitude, longitude: ultima.coords.longitude };
+          }
+        } catch { /* sem última posição: segue para a atual */ }
+        const atual = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        if (vivo && atual?.coords) {
+          posicaoRef.current = { latitude: atual.coords.latitude, longitude: atual.coords.longitude };
+        }
+        return posicaoRef.current;
+      } catch (e) {
+        console.log('GPS indisponível:', e);
+        return posicaoRef.current;
+      }
+    })();
+    return () => { vivo = false; };
+  }, []);
+
+  /** A posição para gravar na venda: a que já chegou, ou no máximo 1,5 s de espera. */
+  const posicaoParaVenda = async (): Promise<PosicaoVenda | null> => {
+    if (posicaoRef.current) return posicaoRef.current;
+    const emVoo = posicaoEmVooRef.current;
+    if (!emVoo) return null;
+    const limite = new Promise<null>(r => setTimeout(() => r(null), ESPERA_GPS_CONFIRMAR_MS));
+    const r = await Promise.race([emVoo, limite]);
+    return r || posicaoRef.current;
+  };
   const [resultado, setResultado] = useState<any>(null);
   const [showResultado, setShowResultado] = useState(false);
   const [modalAlterarVisible, setModalAlterarVisible] = useState(false);
@@ -90,6 +145,16 @@ export function useNovaVendaSubmit(ctx: SubmitContext) {
       return;
     }
 
+    // Renovação aprovada: até o valor aprovado, nunca acima. O banco também
+    // recusa (pediria nova autorização), mas aqui o vendedor lê o motivo.
+    if (ctx.tetoRenovacao != null && fv.valorPrincipal > ctx.tetoRenovacao + 0.001) {
+      const msg = ctx.lang === 'es'
+        ? `El valor autorizado es hasta ${moeda(ctx.tetoRenovacao)}. Ingrese un valor menor o igual.`
+        : `O valor autorizado é até ${moeda(ctx.tetoRenovacao)}. Informe um valor menor ou igual.`;
+      if (Platform.OS === 'web') window.alert(msg); else Alert.alert(ctx.lang === 'es' ? 'Valor' : 'Valor', msg);
+      return;
+    }
+
     if (!rotaId && vendedorId) {
       try {
         const { data: rotaData } = await supabase
@@ -107,21 +172,8 @@ export function useNovaVendaSubmit(ctx: SubmitContext) {
 
     setSubmitting(true);
     try {
-      // ETAPA 3 - GPS
-      let latitude: number | null = null;
-      let longitude: number | null = null;
-      try {
-        const Location = require('expo-location');
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const loc = await Promise.race([
-            Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
-            new Promise((_, reject) => setTimeout(() => reject('timeout'), 5000)),
-          ]) as any;
-          if (loc?.coords) { latitude = loc.coords.latitude; longitude = loc.coords.longitude; }
-        }
-      } catch (gpsErr) { console.log('GPS indisponível:', gpsErr); }
-
+      // ETAPA 3 + 4 - GPS e liquidação aberta, EM PARALELO.
+      // Antes iam em fila: até 5 s de GPS e só então a consulta.
       // ETAPA 4 - Liquidação aberta
       // Status válidos = os mesmos de temLiquidacaoAberta no contexto.
       // Uma liquidação REABERTA (reaberta pelo web) é uma liquidação de
@@ -130,14 +182,19 @@ export function useNovaVendaSubmit(ctx: SubmitContext) {
       // não encontrada" mesmo havendo liquidação válida.
       const STATUS_LIQ_ABERTA = ['ABERTO', 'ABERTA', 'REABERTO'];
 
-      const { data: liqData, error: liqError } = await supabase
-        .from('liquidacoes_diarias')
-        .select('id')
-        .eq('rota_id', rotaId)
-        .in('status', STATUS_LIQ_ABERTA)
-        .order('data_abertura', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const [{ data: liqData, error: liqError }, posicao] = await Promise.all([
+        supabase
+          .from('liquidacoes_diarias')
+          .select('id')
+          .eq('rota_id', rotaId)
+          .in('status', STATUS_LIQ_ABERTA)
+          .order('data_abertura', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        posicaoParaVenda(),
+      ]);
+      const latitude: number | null = posicao?.latitude ?? null;
+      const longitude: number | null = posicao?.longitude ?? null;
 
       if (liqError || !liqData) {
         Alert.alert('Liquidação não encontrada', 'Nenhuma liquidação aberta encontrada. Abra uma liquidação antes de registrar vendas.');
@@ -469,19 +526,22 @@ export function useNovaVendaSubmit(ctx: SubmitContext) {
         return;
       }
 
-      // Reset flags
+      // Reset flags — as duas escritas são independentes: vão JUNTAS, uma ida
+      // à rede em vez de duas em fila.
       const idParaReset = ctx.clienteEncontradoId || ctx.clienteExistente?.id || ctx.renegociacao?.cliente_id;
+      const posVenda: PromiseLike<any>[] = [];
       if (idParaReset) {
         if (ctx.tipoEmprestimoDetectado === 'ADICIONAL') {
-          await supabase.from('clientes').update({ permite_emprestimo_adicional: false }).eq('id', idParaReset);
+          posVenda.push(supabase.from('clientes').update({ permite_emprestimo_adicional: false }).eq('id', idParaReset));
         } else if (ctx.isRenegociacao || (ctx.tipoEmprestimoDetectado === 'RENOVACAO' && ctx.emprestimOrigemId)) {
-          await supabase.from('clientes').update({ permite_renegociacao: false }).eq('id', idParaReset);
+          posVenda.push(supabase.from('clientes').update({ permite_renegociacao: false }).eq('id', idParaReset));
         }
       }
 
       if (ctx.vendaPendenteId && ctx.isVendaAprovadaTravada) {
-        await supabase.from('vendas_pendentes').update({ status: 'CONCLUIDO' }).eq('id', ctx.vendaPendenteId);
+        posVenda.push(supabase.from('vendas_pendentes').update({ status: 'CONCLUIDO' }).eq('id', ctx.vendaPendenteId));
       }
+      if (posVenda.length > 0) await Promise.all(posVenda);
 
       ctx.liqCtx.recarregarLiquidacao();
       // `recarregarLiquidacao` relê só a linha de liquidacoes_diarias. A lista

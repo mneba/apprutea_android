@@ -106,7 +106,7 @@ export default function ReordenarModal({
                 <Text style={{ fontSize: 13, fontWeight: '600', color: '#111827' }} numberOfLines={1}>{cliente.nome}</Text>
                 <Text style={{ fontSize: 11, color: estaBuscando ? '#2563EB' : '#6B7280', marginTop: 2 }}>
                   {cliente.codigo_cliente ? `#${cliente.codigo_cliente}` : ''}
-                  {empAtivo ? ` • ${empAtivo.status === 'VENCIDO' ? '⚠️ Vencido' : '✅ Ativo'}` : ''}
+                  {empAtivo ? ` • ${cliente.tem_atraso ? '⚠️ Vencido' : '✅ Ativo'}` : ''}
                   {estaBuscando ? (lang === 'es' ? ' · Toque para definir posición' : ' · Toque para definir posição') : ''}
                 </Text>
               </TouchableOpacity>

@@ -104,6 +104,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     solicitacaoRenovacaoParam,
     lang,
     navigation,
+    dataOperacional,
     formSetters: {
       setNome: form.setNome,
       setDocumento: form.setDocumento,
@@ -133,6 +134,15 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     },
   });
 
+  // Renovação APROVADA: o valor aprovado é TETO (pedido do cliente,
+  // 19/11/2026). Chega por dois caminhos — o card do cliente (param) e a
+  // busca por documento —, e os dois carregam o aprovado em `valor_principal`.
+  const tetoRenovacao: number | null = form.isRenovacaoAprovada
+    ? (Number(solicitacaoRenovacaoParam?.valor_principal) || null)
+    : buscaDoc.renovacaoAprovadaTravada
+      ? (Number(buscaDoc.solicitacaoRenovacaoDetectada?.valor_principal) || null)
+      : null;
+
   const submit = useNovaVendaSubmit({
     vendedor,
     liqCtx,
@@ -148,6 +158,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
     emprestimOrigemId: buscaDoc.emprestimOrigemId,
     vendaPendenteId: buscaDoc.vendaPendenteId,
     isVendaAprovadaTravada: buscaDoc.isVendaAprovadaTravada || form.isRenovacaoTravada || !!(buscaDoc.solicitacaoRenovacaoDetectada),
+    tetoRenovacao,
     validarMaxVendas: config.validarMaxVendas,
     valorMaxVendas: config.valorMaxVendas,
     validarCamposComFeedback: form.validarCamposComFeedback,
@@ -396,6 +407,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
                   valorTotal={form.valorTotal} valorParcela={form.valorParcela} totalJuros={form.totalJuros}
                   taxasPermitidas={config.taxasPermitidas} taxasLivre={config.taxasLivre}
                   isRenegociacao={isRenegociacao} isVendaAprovadaTravada={termosAutorizados}
+                  tetoValor={tetoRenovacao}
                   camposComErro={form.camposComErro} lang={lang}
                   handleValorEmprestimoChange={form.handleValorEmprestimoChange}
                   limparErroCampo={form.limparErroCampo}

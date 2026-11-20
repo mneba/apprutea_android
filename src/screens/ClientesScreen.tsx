@@ -2730,7 +2730,7 @@ export default function ClientesScreen({ navigation, route }: any) {
   // por isso o badge dizia 14 enquanto a tela mostrava menos. Item pago, por
   // exemplo, é descartado por `montarItens` e nunca chegava a ser descontado
   // do número.
-  const funilItens = useCallback((venc: 'todos' | 'dia' | 'atrasados') => {
+  const funilItens = useCallback((venc: 'todos' | 'dia' | 'atrasados', dia: number | null = filtroDiaSemana) => {
     let r = [...grouped];
     // Escopo só faz sentido no braço da liquidação; a aba "Todos" é a carteira
     if (tab === 'liquidacao' && venc === 'dia') r = r.filter(ehDoDiaCli);
@@ -2763,9 +2763,9 @@ export default function ClientesScreen({ navigation, route }: any) {
       }));
     }
     // Mesmo corte por EMPRÉSTIMO do breadcrumb da aba Todos.
-    if (filtroDiaSemana != null) {
+    if (dia != null) {
       r = r
-        .map(c => ({ ...c, emprestimos: c.emprestimos.filter(e => (diasSemana[e.emprestimo_id] || []).includes(filtroDiaSemana as any)) }))
+        .map(c => ({ ...c, emprestimos: c.emprestimos.filter(e => (diasSemana[e.emprestimo_id] || []).includes(dia as any)) }))
         .filter(c => c.emprestimos.length > 0);
     }
 
@@ -3008,58 +3008,7 @@ export default function ClientesScreen({ navigation, route }: any) {
     return () => { vivo = false; };
   }, [idsSemanais]);
 
-  // Quantos clientes semanais por dia. Alimenta o breadcrumb: dia sem ninguém
-  // fica apagado, para o vendedor não tocar e achar lista vazia.
-  //
-  // Conta a fonte da ABA ATIVA — a contagem tem de descrever a lista que está
-  // na tela. As duas nomeiam a chave do empréstimo de formas diferentes.
-  const contagemPorDia = useMemo(() => {
-    const c = [0, 0, 0, 0, 0, 0, 0];
-    const fonte: { emprestimos: any[] }[] = tab === 'todos' ? todosList : grouped;
-    for (const cli of fonte) {
-      const dias = new Set<number>();
-      for (const e of cli.emprestimos) {
-        if (e.frequencia_pagamento !== 'SEMANAL') continue;
-        for (const d of (diasSemana[e.id ?? e.emprestimo_id] || [])) dias.add(d);
-      }
-      dias.forEach(d => { c[d] += 1; });
-    }
-    return c;
-  }, [tab, todosList, grouped, diasSemana]);
-
-  // Breadcrumb dos dias da semana, compartilhado pelas DUAS listas: os três
-  // braços do topo — Liquidação, Pagas e Todos — levam a uma delas, e filtrar
-  // por dia só num deles não faria sentido.
-  //
-  // Só existe com o filtro Semanal ligado: fora dele a fileira não filtraria
-  // nada e roubaria altura da lista.
-  //
-  // Iniciais em vez de nomes porque cabem sete numa linha; as letras repetidas
-  // (S-T-Q-Q-S-S) se desambiguam pela ordem do calendário, que é como qualquer
-  // agenda as apresenta.
-  const breadcrumbDias = filtroFrequencia !== 'SEMANAL' ? null : (
-    <View style={S.diasBc}>
-      {DIAS_SEMANA_CURTO.map((ini, d) => {
-        const qtd = contagemPorDia[d];
-        const on = filtroDiaSemana === d;
-        const off = qtd === 0 && !on;
-        return (
-          <TouchableOpacity
-            key={d}
-            style={[S.diaBc, on && S.diaBcOn, off && S.diaBcOff]}
-            onPress={() => setFiltroDiaSemana(on ? null : d)}
-            disabled={off}
-            activeOpacity={0.7}
-          >
-            <Text style={[S.diaBcTx, on && S.diaBcTxOn, off && S.diaBcTxOff]}>{ini}</Text>
-            {qtd > 0 && <Text style={[S.diaBcQtd, on && S.diaBcQtdOn]}>{qtd}</Text>}
-          </TouchableOpacity>
-        );
-      })}
-    </View>
-  );
-
-  const todosFilt = useMemo(() => {
+  const filtrarTodos = useCallback((dia: number | null) => {
     let r = [...todosList];
     // Ocultar clientes da liquidação atual
     if (ocultarLiquidacao && clientesLiqIds.size > 0) { r = r.filter(c => !clientesLiqIds.has(c.id)); }
@@ -3096,9 +3045,9 @@ export default function ClientesScreen({ navigation, route }: any) {
     // Breadcrumb dos dias: corta os EMPRÉSTIMOS, como os filtros acima, e não
     // só o cliente — senão um semanal de terça apareceria no filtro de quinta
     // porque o mesmo cliente tem outro empréstimo naquele dia.
-    if (filtroDiaSemana != null) {
+    if (dia != null) {
       r = r
-        .map(c => ({ ...c, emprestimos: c.emprestimos.filter(e => (diasSemana[e.id] || []).includes(filtroDiaSemana as any)) }))
+        .map(c => ({ ...c, emprestimos: c.emprestimos.filter(e => (diasSemana[e.id] || []).includes(dia as any)) }))
         .filter(c => c.emprestimos.length > 0);
     }
     // Filtro por SITUAÇÃO DO CLIENTE NA CARTEIRA, derivada do status dos
@@ -3130,7 +3079,15 @@ export default function ClientesScreen({ navigation, route }: any) {
       if (filtroStatus === 'ABERTO') {
         r = r.filter(temAberto);
       } else if (filtroStatus === 'ATRASO') {
-        r = r.filter(c => c.emprestimos.some(e => e.status === 'VENCIDO'));
+        // Pela DATA OPERACIONAL, nunca por `emprestimos.status`: o 'VENCIDO'
+        // dali nasce do gatilho que compara com CURRENT_DATE (UTC), então
+        // marca a parcela no PRÓPRIO dia do vencimento num dia retroativo ou
+        // depois das 21h, e esquece quem venceu sem a parcela ser tocada.
+        // Medido em 19/11/2026: 1.581 empréstimos atrasados de verdade e o
+        // filtro mostrava 326 — 5 deles sem atraso nenhum. `total_parcelas_vencidas`
+        // é a mesma conta do card ao lado (`useClientesTodos`, `venc < dataOperacional`).
+        r = r.filter(c => c.emprestimos.some(e =>
+          (e.status === 'ATIVO' || e.status === 'VENCIDO') && (e.total_parcelas_vencidas || 0) > 0));
       } else if (filtroStatus === 'QUITADO') {
         // Cliente quitado = tem empréstimo QUITADO e NÃO tem nenhum em aberto
         r = r.filter(c => c.emprestimos.some(e => e.status === 'QUITADO') && !temAberto(c));
@@ -3149,7 +3106,65 @@ export default function ClientesScreen({ navigation, route }: any) {
       return a.nome.localeCompare(b.nome);
     });
     return r;
-  }, [todosList, busca, filtroTipo, filtroStatus, filtroFrequencia, filtroDiaSemana, diasSemana, ocultarLiquidacao, clientesLiqIds, ordemRotaMap]);
+  }, [todosList, busca, filtroTipo, filtroStatus, filtroFrequencia, diasSemana, ocultarLiquidacao, clientesLiqIds, ordemRotaMap]);
+  const todosFilt = useMemo(() => filtrarTodos(filtroDiaSemana), [filtrarTodos, filtroDiaSemana]);
+
+  // Quantos clientes por dia no breadcrumb do Semanal.
+  //
+  // ⚠ Cada número sai da MESMA conta que monta a lista — o funil da aba
+  // ativa, com TODOS os filtros ligados —, trocando só o dia. Relato do Julio
+  // em 16/11/2026: com "Semanal" + "Em aberto" a lista caía de 13 para 9 e os
+  // dias seguiam contando os 13, porque a contagem lia a lista CRUA da aba.
+  // Contando pelo funil, o número de cada dia é exatamente o que aparece ao
+  // tocar nele — por construção, não por cuidado. É a regra "resumo e lista
+  // têm de usar a mesma função" (CLAUDE.md).
+  //
+  // Sete passadas no funil, e só com o Semanal ligado: a lista é de uma rota
+  // (centenas de clientes), e o custo só existe quando a fileira aparece.
+  const contagemPorDia = useMemo(() => {
+    const c = [0, 0, 0, 0, 0, 0, 0];
+    if (filtroFrequencia !== 'SEMANAL') return c;
+    for (let d = 0; d < 7; d++) {
+      const ids = tab === 'todos'
+        ? filtrarTodos(d).map(x => x.id)
+        : funilItens(filtroVencimento, d).map(x => x.cliente.cliente_id);
+      c[d] = new Set(ids).size;
+    }
+    return c;
+  }, [filtroFrequencia, tab, filtrarTodos, funilItens, filtroVencimento]);
+
+  // Breadcrumb dos dias da semana, compartilhado pelas DUAS listas: os três
+  // braços do topo — Liquidação, Pagas e Todos — levam a uma delas, e filtrar
+  // por dia só num deles não faria sentido.
+  //
+  // Só existe com o filtro Semanal ligado: fora dele a fileira não filtraria
+  // nada e roubaria altura da lista.
+  //
+  // Iniciais em vez de nomes porque cabem sete numa linha; as letras repetidas
+  // (S-T-Q-Q-S-S) se desambiguam pela ordem do calendário, que é como qualquer
+  // agenda as apresenta.
+  const breadcrumbDias = filtroFrequencia !== 'SEMANAL' ? null : (
+    <View style={S.diasBc}>
+      {DIAS_SEMANA_CURTO.map((ini, d) => {
+        const qtd = contagemPorDia[d];
+        const on = filtroDiaSemana === d;
+        const off = qtd === 0 && !on;
+        return (
+          <TouchableOpacity
+            key={d}
+            style={[S.diaBc, on && S.diaBcOn, off && S.diaBcOff]}
+            onPress={() => setFiltroDiaSemana(on ? null : d)}
+            disabled={off}
+            activeOpacity={0.7}
+          >
+            <Text style={[S.diaBcTx, on && S.diaBcTxOn, off && S.diaBcTxOff]}>{ini}</Text>
+            {qtd > 0 && <Text style={[S.diaBcQtd, on && S.diaBcQtdOn]}>{qtd}</Text>}
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+
 
   const renderTodos = (c: ClienteTodos) => {
     // Default: ativo/vencido primeiro; sem ativo, usa o último (mais recente)
@@ -3294,6 +3309,12 @@ export default function ClientesScreen({ navigation, route }: any) {
   // Com lista em tela, a recarga é reconciliação em segundo plano (ver o
   // comentário em useClientesLiquidacao) e a tela continua utilizável.
   if (loading && raw.length === 0) return (<View style={S.lW}><ActivityIndicator size="large" color="#3B82F6" /><Text style={S.lT}>{t.carregando}</Text></View>);
+  // Enquanto o banco não respondeu sobre o dia, carregamento NEUTRO — nunca a
+  // faixa "Nenhuma liquidação aberta". Relato do Julio, 09/11/2026: ao voltar
+  // de outro app a faixa piscava com o dia aberto. Ver `estadoLiquidacao`.
+  if (!liqId && !isViz && liqCtx.estadoLiquidacao === 'verificando') {
+    return (<View style={S.lW}><ActivityIndicator size="large" color="#3B82F6" /><Text style={S.lT}>{t.carregando}</Text></View>);
+  }
 
 return (
     <View style={S.c}>
@@ -3307,7 +3328,9 @@ return (
       {isViz && (<View style={S.vizBanner}><View style={S.vizBannerContent}><Ionicons name="alert-circle" size={20} color="#D97706" /><View style={S.vizBannerTexts}><Text style={S.vizBannerTitle}>{t.modoVisualizacao}</Text><Text style={S.vizBannerDesc}>{t.modoVisualizacaoDesc} {fmtData(dataLiq)}</Text></View></View></View>)}
       
       {/* Banner de liquidação fechada quando não há liqId */}
-      {!liqId && !isViz && (
+      {/* "Não há dia aberto" só quando o BANCO disse isso. Consulta que falhou
+          não é resposta: aí a faixa diz que não deu para verificar. */}
+      {!liqId && !isViz && liqCtx.estadoLiquidacao === 'ok' && (
         <View style={S.semLiqBanner}>
           <Text style={S.semLiqIcon}>🔒</Text>
           <View style={S.semLiqTexts}>
@@ -3315,6 +3338,15 @@ return (
             <Text style={S.semLiqDesc}>{t.abrirLiquidacao}</Text>
           </View>
         </View>
+      )}
+      {!liqId && !isViz && liqCtx.estadoLiquidacao === 'erro' && (
+        <TouchableOpacity style={S.semLiqBanner} onPress={() => { void liqCtx.recarregarTudo(); }} activeOpacity={0.8}>
+          <Text style={S.semLiqIcon}>📶</Text>
+          <View style={S.semLiqTexts}>
+            <Text style={S.semLiqTitle}>{lang === 'es' ? 'No fue posible verificar el día' : 'Não foi possível verificar o dia'}</Text>
+            <Text style={S.semLiqDesc}>{lang === 'es' ? 'Toque para intentar de nuevo' : 'Toque para tentar de novo'}</Text>
+          </View>
+        </TouchableOpacity>
       )}
       
       {/* ═══════════════════════════════════════════════════════════════════════

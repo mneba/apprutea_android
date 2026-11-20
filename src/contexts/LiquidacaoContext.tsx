@@ -21,6 +21,21 @@ interface LiquidacaoContextType {
   /** Retorna a liquidação encontrada — permite encadear sem esperar o state. */
   recarregarLiquidacao: () => Promise<LiquidacaoDiaria | null>;
   loadingLiquidacao: boolean;
+  /**
+   * O que se SABE sobre a liquidação da rota — e não o que ela é.
+   *
+   *   'verificando'  ainda não houve resposta para esta rota
+   *   'ok'           o banco respondeu (com ou sem dia aberto)
+   *   'erro'         a consulta falhou e nunca houve resposta boa
+   *
+   * ⚠ `liquidacaoAtual === null` sozinho NÃO quer dizer "não há dia aberto".
+   * Relato do Julio em 09/11/2026: ao voltar de outro app aparecia, por um
+   * instante, "Nenhuma liquidação aberta / Abra uma liquidação para operar" —
+   * o Android encerra o app em segundo plano, ele reabre direto na tela em
+   * que estava, e "ainda não sei" e "não tem" eram o mesmo `null`. Quem
+   * afirma que não há liquidação pergunta antes se o estado é 'ok'.
+   */
+  estadoLiquidacao: 'verificando' | 'ok' | 'erro';
 
   // ─── Clientes pré-carregados da liquidação (FASE 1) ───────────────────────
   clientesRaw: ClienteRotaDia[];
@@ -98,6 +113,7 @@ const LiquidacaoContext = createContext<LiquidacaoContextType>({
   temLiquidacaoAberta: false,
   recarregarLiquidacao: async () => null,
   loadingLiquidacao: false,
+  estadoLiquidacao: 'verificando',
 
   clientesRaw: [],
   pagasSet: new Set(),
@@ -135,6 +151,9 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
   // Liquidação atual
   const [liquidacaoAtual, setLiquidacaoAtual] = useState<LiquidacaoDiaria | null>(null);
   const [loadingLiquidacao, setLoadingLiquidacao] = useState(false);
+  const [estadoLiquidacao, setEstadoLiquidacao] = useState<'verificando' | 'ok' | 'erro'>('verificando');
+  // Rota trocada = outra pergunta: volta a "verificando" até a resposta dela.
+  const rotaVerificadaRef = useRef<string | null>(null);
 
   // Espelho em ref, atualizado no corpo do render (portanto ANTES de qualquer
   // efeito rodar). Permite que recarregarClientes leia sempre o valor atual
@@ -220,14 +239,24 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
         .limit(1)
         .maybeSingle();
 
-      if (error) return null;
+      // ⚠ Falha NÃO apaga a liquidação que já estava na tela. Ao voltar de
+      // segundo plano a primeira consulta costuma sair antes de a sessão
+      // renovar, e zerar aqui fazia a tela dizer que não há dia aberto.
+      // 'erro' só quando nunca houve resposta boa para esta rota.
+      if (error) {
+        setEstadoLiquidacao(prev => (prev === 'ok' ? 'ok' : 'erro'));
+        return liquidacaoAtualRef.current;
+      }
 
       const liq = (data || null) as LiquidacaoDiaria | null;
       setLiquidacaoAtual(liq);
+      rotaVerificadaRef.current = vendedor.rota_id;
+      setEstadoLiquidacao('ok');
       return liq;
     } catch (err) {
       console.error('Erro ao carregar liquidação:', err);
-      return null;
+      setEstadoLiquidacao(prev => (prev === 'ok' ? 'ok' : 'erro'));
+      return liquidacaoAtualRef.current;
     } finally {
       setLoadingLiquidacao(false);
     }
@@ -461,6 +490,9 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
   // Carregar liquidação ao montar e quando vendedor mudar
   useEffect(() => {
     if (vendedor?.rota_id) {
+      if (rotaVerificadaRef.current && rotaVerificadaRef.current !== vendedor.rota_id) {
+        setEstadoLiquidacao('verificando');
+      }
       recarregarLiquidacao();
     }
   }, [vendedor?.rota_id, recarregarLiquidacao]);
@@ -498,6 +530,7 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
     temLiquidacaoAberta,
     recarregarLiquidacao,
     loadingLiquidacao,
+    estadoLiquidacao,
 
     clientesRaw,
     pagasSet,
@@ -532,6 +565,7 @@ export function LiquidacaoProvider({ children }: { children: ReactNode }) {
     temLiquidacaoAberta,
     recarregarLiquidacao,
     loadingLiquidacao,
+    estadoLiquidacao,
     clientesRaw,
     pagasSet,
     pagMap,

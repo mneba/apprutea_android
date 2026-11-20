@@ -786,9 +786,20 @@ export default function ParcelasModal({
     );
     ordenadas.forEach((p, i) => fundoPorParcela.set(p.parcela_id, fr[i]));
   }
+  // "Vencido" sai das PARCELAS contra a data operacional, nunca do status do
+  // empréstimo — aquele é gravado pelo relógio (UTC) e marcava vencido no
+  // próprio dia da 1ª parcela (Julio, 11/11/2026). Mesma régua das linhas
+  // abaixo, com `<`: no dia do vencimento está no prazo. A parcial conta:
+  // aqui a pergunta é se ficou dinheiro para trás.
+  const temVencida = !!dataOperacional && ordenadas.some(p =>
+    p.status !== 'PAGO' && !!p.data_vencimento
+    && String(p.data_vencimento).substring(0, 10) < dataOperacional);
+  const rotuloStatus = (empStatus === 'ATIVO' || empStatus === 'VENCIDO')
+    ? (temVencida ? tx.status.VENCIDO : '')
+    : tx.status[empStatus];
   const subtitulo = [
     tx.tipo[String(emprestimo?.tipo_emprestimo || '').toUpperCase()],
-    tx.status[empStatus],
+    rotuloStatus,
   ].filter(Boolean).join(' · ');
 
   const mostrarRenovar = empStatus === 'QUITADO' && !!onRenovar;
