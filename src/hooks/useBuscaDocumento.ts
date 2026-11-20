@@ -147,6 +147,52 @@ export function useBuscaDocumento({
   // -----------------------------------------------------------
   // BUSCAR CLIENTE POR DOCUMENTO
   // -----------------------------------------------------------
+  // Cliente da empresa fora desta rota: aviso SEM dados do cliente e pedido
+  // de inclusão ao administrador. Pedido pendente → só avisa que espera.
+  const tratarClienteDeOutraRota = async (clienteId: string, rotaId: string) => {
+    const es = lang === 'es';
+    const avisar = (titulo: string, msg: string) => {
+      if (Platform.OS === 'web') window.alert(`${titulo}\n\n${msg}`);
+      else Alert.alert(titulo, msg, [{ text: 'OK' }]);
+    };
+    const { data: pend } = await supabase
+      .from('solicitacoes_autorizacao')
+      .select('id')
+      .eq('cliente_id', clienteId)
+      .eq('rota_id', rotaId)
+      .eq('tipo_solicitacao', 'CLIENTE_OUTRA_ROTA')
+      .eq('status', 'PENDENTE')
+      .limit(1);
+    if (pend && pend.length > 0) {
+      avisar(es ? 'Solicitud pendiente' : 'Pedido pendente',
+        es ? 'Ya se pidió incluir este cliente en su ruta. Espere la aprobación del administrador.'
+           : 'Já foi pedido incluir este cliente na sua rota. Aguarde a aprovação do administrador.');
+      return;
+    }
+    const titulo = es ? 'Cliente de otra ruta' : 'Cliente de outra rota';
+    const msg = es
+      ? 'Este cliente ya está registrado en la empresa, en otra ruta. Para atenderlo, solicite al administrador que lo incluya en su ruta.'
+      : 'Este cliente já está cadastrado na empresa, em outra rota. Para atendê-lo, peça ao administrador que o inclua na sua rota.';
+    const enviar = async () => {
+      const { data, error } = await supabase.rpc('fn_solicitar_cliente_outra_rota', {
+        p_cliente_id: clienteId, p_rota_id: rotaId,
+      });
+      const r = Array.isArray(data) ? data[0] : data;
+      if (error || !r?.sucesso) {
+        avisar('Erro', r?.mensagem || error?.message || (es ? 'No fue posible enviar' : 'Não foi possível enviar'));
+        return;
+      }
+      avisar(es ? 'Solicitud enviada' : 'Pedido enviado',
+        es ? 'Cuando el administrador apruebe, el cliente aparecerá en su ruta. Busque el documento de nuevo para hacer la venta.'
+           : 'Quando o administrador aprovar, o cliente passa a ser da sua rota. Busque o documento de novo para fazer a venda.');
+    };
+    if (Platform.OS === 'web') { if (window.confirm(`${titulo}\n\n${msg}\n\nOK = ${es ? 'Solicitar' : 'Solicitar'}`)) await enviar(); return; }
+    Alert.alert(titulo, msg, [
+      { text: es ? 'Volver' : 'Voltar', style: 'cancel' },
+      { text: es ? 'Solicitar' : 'Solicitar', onPress: () => { enviar(); } },
+    ]);
+  };
+
   const buscarClientePorDocumento = async () => {
     // ⭐ Sanitizar: apenas letras e números, máximo 20 caracteres
     const doc = docBusca.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20);
@@ -212,7 +258,7 @@ export function useBuscaDocumento({
       // clientes, então o filtro não esconde ninguém.
       let q = supabase
         .from('clientes')
-        .select('id, nome, documento, telefone_celular, endereco, codigo_cliente, status, permite_emprestimo_adicional, permite_renegociacao')
+        .select('id, nome, documento, telefone_celular, endereco, codigo_cliente, status, permite_emprestimo_adicional, permite_renegociacao, rotas_ids')
         .or(`documento.eq.${docSemMask},documento.eq.${docBusca}`);
       if (vendedor?.empresa_id) q = q.eq('empresa_id', vendedor.empresa_id);
       const { data: clientes } = await q.limit(1);
@@ -222,6 +268,34 @@ export function useBuscaDocumento({
         s.setDocumento(docBusca);
         setModalDocVisible(false);
         return;
+      }
+
+      // ⭐ CLIENTE DE OUTRA ROTA DA MESMA EMPRESA (decisão do Mauricio,
+      // 20/11/2026). A busca já é só da empresa do vendedor (14/11): de outra
+      // empresa ele é cliente novo e nem chega aqui. Da mesma empresa mas fora
+      // da rota, o vendedor NÃO vê dados dele — pede ao administrador que o
+      // inclua na rota (fn_solicitar_cliente_outra_rota). Aprovado, a rota
+      // entra em `rotas_ids` e a próxima busca segue o fluxo normal, olhando
+      // só os empréstimos DESTA rota.
+      //
+      // "É da rota" = `rotas_ids` tem a rota OU há empréstimo dele nela
+      // (defensivo: em 20/11/2026 os dois concordam em 100% depois do reparo).
+      const minhaRota: string | null = vendedor?.rota_id || null;
+      if (minhaRota) {
+        const rotasCli: string[] = Array.isArray((cli as any).rotas_ids) ? (cli as any).rotas_ids : [];
+        let daRota = rotasCli.includes(minhaRota);
+        if (!daRota) {
+          const { count } = await supabase
+            .from('emprestimos')
+            .select('id', { count: 'exact', head: true })
+            .eq('cliente_id', cli.id)
+            .eq('rota_id', minhaRota);
+          daRota = (count || 0) > 0;
+        }
+        if (!daRota) {
+          await tratarClienteDeOutraRota(cli.id, minhaRota);
+          return;
+        }
       }
 
       // ⭐ Cliente suspenso: barra AQUI, no primeiro contato com o cadastro.
@@ -252,35 +326,29 @@ ${msg}`);
         p_tipo_emprestimo: 'NOVO',
       });
 
-      // Buscar empréstimo ativo (incluindo rota_id para validar rota)
-      const { data: emps } = await supabase
+      // Empréstimo em aberto e histórico: SÓ DESTA ROTA (20/11/2026). O que o
+      // cliente tem em outra rota da empresa o admin já viu ao aprovar a
+      // inclusão; aqui vale a regra da rota de quem vende — e é a mesma régua
+      // de fn_renovar_emprestimo, que procura o anterior por `rota_id`.
+      // (O antigo "cliente de outra rota → BLOQUEAR" saiu: foi trocado pelo
+      // pedido de inclusão, acima.)
+      let qEmp = supabase
         .from('emprestimos')
         .select('id, status, valor_saldo, rota_id')
         .eq('cliente_id', cli.id)
-        .in('status', ['ATIVO', 'VENCIDO'])
-        .order('created_at', { ascending: false })
-        .limit(1);
+        .in('status', ['ATIVO', 'VENCIDO']);
+      if (minhaRota) qEmp = qEmp.eq('rota_id', minhaRota);
+      const { data: emps } = await qEmp.order('created_at', { ascending: false }).limit(1);
       const emp = emps?.[0];
 
-      // ⭐ Se cliente tem empréstimo ativo em OUTRA rota → BLOQUEAR
-      if (emp && emp.rota_id && vendedor?.rota_id && emp.rota_id !== vendedor.rota_id) {
-        setBuscandoDoc(false);
-        const titulo = lang === 'es' ? 'Cliente de otra ruta' : 'Cliente de outra rota';
-        const msg = lang === 'es'
-          ? `Este cliente tiene un préstamo activo en otra ruta. No es posible registrar venta.`
-          : `Este cliente possui empréstimo ativo em outra rota. Não é possível registrar venda.`;
-        if (Platform.OS === 'web') window.alert(`${titulo}\n\n${msg}`);
-        else Alert.alert(titulo, msg, [{ text: 'OK' }]);
-        return;
-      }
-
-      // Verificar histórico quitado
-      const { data: empsQuitados } = await supabase
+      // Verificar histórico quitado (desta rota)
+      let qQuit = supabase
         .from('emprestimos')
         .select('id')
         .eq('cliente_id', cli.id)
-        .eq('status', 'QUITADO')
-        .limit(1);
+        .eq('status', 'QUITADO');
+      if (minhaRota) qQuit = qQuit.eq('rota_id', minhaRota);
+      const { data: empsQuitados } = await qQuit.limit(1);
       const temHistoricoQuitado = !!(empsQuitados && empsQuitados.length > 0);
 
       const temEmprestimoAtivo = !!emp;
@@ -589,21 +657,23 @@ ${msg}`); navigation.goBack(); }
           return;
         }
 
-        const { data: emps } = await supabase
+        // Só desta rota, como na busca por documento (20/11/2026).
+        let qEmp = supabase
           .from('emprestimos')
           .select('id, status, valor_saldo')
           .eq('cliente_id', cli.id)
-          .in('status', ['ATIVO', 'VENCIDO'])
-          .order('created_at', { ascending: false })
-          .limit(1);
+          .in('status', ['ATIVO', 'VENCIDO']);
+        if (vendedor?.rota_id) qEmp = qEmp.eq('rota_id', vendedor.rota_id);
+        const { data: emps } = await qEmp.order('created_at', { ascending: false }).limit(1);
         const emp = emps?.[0];
 
-        const { data: empsQuitados } = await supabase
+        let qQuit = supabase
           .from('emprestimos')
           .select('id')
           .eq('cliente_id', cli.id)
-          .eq('status', 'QUITADO')
-          .limit(1);
+          .eq('status', 'QUITADO');
+        if (vendedor?.rota_id) qQuit = qQuit.eq('rota_id', vendedor.rota_id);
+        const { data: empsQuitados } = await qQuit.limit(1);
         const temHistoricoQuitado = !!(empsQuitados && empsQuitados.length > 0);
 
         const temEmprestimoAtivo = !!emp;

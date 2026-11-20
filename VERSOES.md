@@ -254,3 +254,5 @@ campo mostra nao mapeia para nada.
 - **1.4.13** - 2026-11-19 19:08 - `src/screens/NovaVendaScreen.tsx`
 - **1.4.14** - 2026-11-19 19:08 - `src/hooks/useNovaVendaSubmit.ts`
 - **1.4.15** - 2026-11-19 23:58 - `src/screens/LiquidacaoScreen.tsx`
+- **1.4.16** - 2026-11-20 01:06 - `src/hooks/useBuscaDocumento.ts`
+- **1.4.17** - 2026-11-20 01:07 - `src/components/ClienteDetalhesModal.tsx`

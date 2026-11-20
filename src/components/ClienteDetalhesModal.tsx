@@ -475,12 +475,16 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
       setClienteCompleto(cliData);
       setObsLocal(cliData?.observacoes || '');
 
-      // 2. Empréstimos via view completa
-      const { data: emps } = await supabase
+      // 2. Empréstimos via view completa — SÓ DESTA ROTA (20/11/2026).
+      // Desde o pedido "cliente de outra rota" um cliente pode estar em duas
+      // rotas da mesma empresa; sem o filtro, o vendedor veria (e poderia
+      // renegociar, pela liquidação DELE) o empréstimo da outra rota.
+      let qEmps = supabase
         .from('vw_emprestimos_completos')
         .select('*')
-        .eq('cliente_id', cliente.id)
-        .order('data_emprestimo', { ascending: false });
+        .eq('cliente_id', cliente.id);
+      if (vendedor?.rota_id) qEmps = qEmps.eq('rota_id', vendedor.rota_id);
+      const { data: emps } = await qEmps.order('data_emprestimo', { ascending: false });
 
       const all = (emps || []) as any[];
       const ativos = all.filter(e => e.status === 'ATIVO' || e.status === 'VENCIDO');
@@ -534,6 +538,7 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
         .from('solicitacoes_autorizacao')
         .select('id, tipo_solicitacao, emprestimo_id, status, data_resolucao, valor_solicitado, valor_limite')
         .eq('cliente_id', cliente.id)
+        .eq('rota_id', vendedor?.rota_id || '00000000-0000-0000-0000-000000000000')
         .in('status', ['PENDENTE', 'APROVADO'])
         .in('tipo_solicitacao', ['RENEGOCIACAO', 'EMPRESTIMO_ADICIONAL', 'RENOVACAO_EXCEDE_ANTERIOR'])
         .order('created_at', { ascending: false });
@@ -713,14 +718,15 @@ export default function ClienteDetalhesModal({ visible, onClose, cliente, lang =
     const rotasIds = clienteCompleto?.rotas_ids || (cliente as any).rotas_ids;
     let rotaId: string | null = null;
     
-    if (Array.isArray(rotasIds) && rotasIds.length > 0) {
-      rotaId = rotasIds[0];
-    } else if (typeof rotasIds === 'string') {
-      try {
-        const arr = JSON.parse(rotasIds);
-        if (Array.isArray(arr) && arr.length > 0) rotaId = arr[0];
-      } catch {}
+    let lista: string[] = [];
+    if (Array.isArray(rotasIds)) lista = rotasIds;
+    else if (typeof rotasIds === 'string') {
+      try { const arr = JSON.parse(rotasIds); if (Array.isArray(arr)) lista = arr; } catch {}
     }
+    // A rota de QUEM PEDE, quando o cliente é dela (20/11/2026). Com o
+    // cliente em duas rotas, `[0]` mandaria o pedido para o outro vendedor.
+    if (vendedor?.rota_id && lista.includes(vendedor.rota_id)) rotaId = vendedor.rota_id;
+    else if (lista.length > 0) rotaId = lista[0];
     
     if (!rotaId) {
       const msg = lang === 'es' ? 'Cliente sin ruta vinculada' : 'Cliente sem rota vinculada';
