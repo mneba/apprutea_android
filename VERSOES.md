@@ -256,3 +256,6 @@ campo mostra nao mapeia para nada.
 - **1.4.15** - 2026-11-19 23:58 - `src/screens/LiquidacaoScreen.tsx`
 - **1.4.16** - 2026-11-20 01:06 - `src/hooks/useBuscaDocumento.ts`
 - **1.4.17** - 2026-11-20 01:07 - `src/components/ClienteDetalhesModal.tsx`
+- **1.4.18** - 2026-11-22 14:35 - `src/components/LiquidacaoDetalhes.tsx`
+- **1.4.19** - 2026-11-22 14:40 - `src/components/NotasComponent.tsx`
+- **1.4.20** - 2026-11-22 14:40 - `src/screens/ClientesScreen.tsx`

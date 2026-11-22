@@ -762,6 +762,53 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial: cai
     key: string; nome: string; criado: string; sub: string; valor: number;
     quitacao: boolean; emprestimoId?: string;
     usado: number; gerado: number; nota: string; soCredito: number;
+    /** "parcela 5 parcial: faltam $ 100,00" / "completou a parcela 5 (…)". */
+    parcial: string;
+  };
+
+  /**
+   * PARCIAL E "COMPLETOU" (pedido do Julio, 01/11/2026). Por PARCELA, não por
+   * pagamento: o recebimento junta todos os pagamentos do mesmo empréstimo no
+   * dia, e "100 e depois mais 100" na mesma parcela tem de sair como uma coisa
+   * só. Vale o ÚLTIMO pagamento da parcela no grupo (`valor_pago_total` é o
+   * acumulado da parcela DEPOIS daquele pagamento — medido); o que ela já tinha
+   * sai do PRIMEIRO (acumulado − o que ele trouxe), e só quando ele não usou
+   * crédito, que embaralha a conta.
+   *
+   * O caso do relato (denilson, Barcelona 05/10) era "completou": os 100,00
+   * fecharam a parcela 5, que já tinha 100,00.
+   *
+   * Mesma regra nos dois extratos (web ModalExtratoLiquidacao e app
+   * LiquidacaoDetalhes) — mudou num, muda no outro.
+   */
+  const fraseParcial = (linhas: any[]): string => {
+    const porParcela = new Map<number, any[]>();
+    for (const p of linhas) {
+      const n = Number(p.numero_parcela || 0);
+      const arr = porParcela.get(n);
+      if (arr) arr.push(p); else porParcela.set(n, [p]);
+    }
+    const partes: string[] = [];
+    for (const [n, ps] of [...porParcela.entries()].sort((a, b) => a[0] - b[0])) {
+      ps.sort((a: any, b: any) => String(a.created_at).localeCompare(String(b.created_at)));
+      const ult = ps[ps.length - 1];
+      const pri = ps[0];
+      const valorParcela = parseFloat(ult.valor_parcela || 0);
+      if (valorParcela <= 0) continue;
+      const acumulado = parseFloat(ult.valor_pago_total || 0);
+      if (acumulado < valorParcela - 0.005) {
+        partes.push(L(`parcela ${n} parcial: faltam ${fmt(valorParcela - acumulado)}`,
+                      `cuota ${n} parcial: faltan ${fmt(valorParcela - acumulado)}`));
+        continue;
+      }
+      if (parseFloat(pri.valor_credito_usado || 0) > 0) continue;
+      const jaTinha = parseFloat(pri.valor_pago_total || 0) - parseFloat(pri.valor_pago_atual || 0);
+      if (jaTinha > 0.005) {
+        partes.push(L(`completou a parcela ${n} (já tinha ${fmt(jaTinha)})`,
+                      `completó la cuota ${n} (ya tenía ${fmt(jaTinha)})`));
+      }
+    }
+    return partes.join(' · ');
   };
   const linhasCobranca: LinhaCob[] = (() => {
     const subParcelas = (nums: number[]) =>
@@ -778,6 +825,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial: cai
       gerado: rec.linhas.reduce((s: number, p: any) => s + creditoLiquido(p).excedente, 0),
       nota: rec.linhas.map((p: any) => fraseCredito(creditoLiquido(p))).join('').replace(/^ · /, ''),
       soCredito: 0,
+      parcial: fraseParcial(rec.linhas),
     }));
     // Recebimento SÓ de crédito, de empréstimo que não teve linha em
     // dinheiro no dia: sem isto ele sumia do extrato (a nota de crédito só
@@ -801,7 +849,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial: cai
         valor: 0,
         quitacao: ls.some((p: any) => p.tipo_operacao === 'QUITACAO'),
         emprestimoId: ls[0].emprestimo_id,
-        usado: 0, gerado: 0, nota: '',
+        usado: 0, gerado: 0, nota: '', parcial: '',
         soCredito: ls.reduce((s: number, p: any) => s + parseFloat(p.valor_credito_usado || p.valor_pago_atual || 0), 0),
       });
     }
@@ -957,7 +1005,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial: cai
           ? `<div class="row"><span>${L('Crédito gerado', 'Crédito generado')}</span><span class="r">+${fmt(l.gerado)}</span></div>`
           : ''}</div>`
       : '';
-    const notas = [l.soCredito > 0 ? notaSoCredito(l.soCredito) : '', l.nota].filter(Boolean)
+    const notas = [l.parcial, l.soCredito > 0 ? notaSoCredito(l.soCredito) : '', l.nota].filter(Boolean)
       .map(n => `<div class="mov-sub">${esc(n)}</div>`).join('');
     return mov(l.nome, fmt(l.valor), `${fmtHora(l.criado)} · ${l.sub}`, {
       cor: l.soCredito > 0 ? '#9CA3AF' : l.quitacao ? '#6D28D9' : '#111827',
@@ -1193,6 +1241,7 @@ export function ModalExtrato({ visible, onClose, liquidacaoId, caixaInicial: cai
                         {fmt(l.valor)}
                       </Text>
                     </View>
+                    {!!l.parcial && <Text style={[ex.itemNota, { color: '#B45309' }]}>{l.parcial}</Text>}
                     {l.soCredito > 0 && <Text style={ex.itemNota}>{notaSoCredito(l.soCredito)}</Text>}
                     {mostrarCredito && (l.usado > 0 || l.gerado > 0) && (
                       <View style={ex.credBox}>

@@ -128,7 +128,14 @@ interface ModalNotasListaProps {
   autorTipo?: 'VENDEDOR' | 'MONITOR';
   liquidacaoId?: string | null;
   liquidacaoStatus?: string | null; // ⭐ NOVO: status da liquidação
-  dataReferencia?: string; // YYYY-MM-DD
+  dataReferencia?: string; // YYYY-MM-DD — FILTRA a lista (sem cliente)
+  /**
+   * Dia da liquidação com que a nota NOVA é gravada (22/11/2026). Separado de
+   * `dataReferencia` porque aquele filtra a lista: na lista do cliente ele
+   * esconderia as notas dos outros dias. Sem este, a nota caía na reserva
+   * "hoje" e nascia com a liquidação antiga e a data de hoje — 2 casos medidos.
+   */
+  dataNovaNota?: string;
   clienteId?: string | null;
   clienteNome?: string | null;
   lang?: Language;
@@ -142,7 +149,7 @@ interface ModalNotasListaProps {
 export function ModalNotasLista({
   visible, onClose, rotaId, empresaId, vendedorId, autorNome,
   autorTipo = 'VENDEDOR', liquidacaoId, liquidacaoStatus,
-  dataReferencia, clienteId, clienteNome, lang = 'pt-BR', coords,
+  dataReferencia, dataNovaNota, clienteId, clienteNome, lang = 'pt-BR', coords,
   permitirCriar = true, obsLocalPadrao = 'Geral',
 }: ModalNotasListaProps) {
   const t = textos[lang];
@@ -282,8 +289,8 @@ export function ModalNotasLista({
         // UTC: das 21h à meia-noite em São Paulo ela gravava AMANHÃ.
         // `chaveData` lê os campos LOCAIS da `Date` (utils/formato.ts).
         // Continua sendo relógio, e por isso é só reserva: quem manda é
-        // `dataReferencia`, que vem da liquidação.
-        p_data_referencia: dataReferencia || chaveData(new Date()),
+        // `dataNovaNota`/`dataReferencia`, que vêm da liquidação.
+        p_data_referencia: dataNovaNota || dataReferencia || chaveData(new Date()),
         p_latitude: coords?.lat || null,
         p_longitude: coords?.lng || null,
       });
@@ -304,7 +311,7 @@ export function ModalNotasLista({
     } finally {
       setSalvandoNovo(false);
     }
-  }, [novoTexto, podeCriarNota, empresaId, rotaId, vendedorId, autorNome, autorTipo, liquidacaoId, clienteId, dataReferencia, coords, obsLocalPadrao, carregarNotas, t]);
+  }, [novoTexto, podeCriarNota, empresaId, rotaId, vendedorId, autorNome, autorTipo, liquidacaoId, clienteId, dataReferencia, dataNovaNota, coords, obsLocalPadrao, carregarNotas, t]);
 
   // Formatar data/hora para exibição
   const fmtDataHora = (dt: string) => {
@@ -395,22 +402,24 @@ export function ModalNotasLista({
           </Text>
         )}
 
-        {/* Data/hora + autor */}
+        {/* Dia da liquidação + quando foi registrada + autor.
+            ⚠ Até 22/11/2026 aqui saía só `created_at`: numa nota lançada em
+            11/11 num dia reaberto de 22/10, a tela dizia 11/11 e o Julio leu
+            como data errada (o banco tinha 22/10). O dia que manda é o da
+            liquidação; o instante vem depois, como "registrada". */}
         <View style={S.notaMetaRow}>
-          <Text style={S.notaDataHora}>{fmtDataHora(n.created_at)}</Text>
+          <Text style={S.notaDataHora}>
+            {n.data_referencia ? `📅 ${fmtDataCurta(n.data_referencia)} · ` : ''}
+            {lang === 'es' ? 'registrada ' : 'registrada '}{fmtDataHora(n.created_at)}
+          </Text>
           <Text style={S.notaAutor}>
             {n.autor_tipo === 'MONITOR' ? '👁 ' : ''}{n.autor_nome}
           </Text>
         </View>
 
         {/* Info liquidação + parcela (quando aberto de cliente, mostra contexto) */}
-        {clienteId && (n.data_referencia || n.numero_parcela) && (
+        {clienteId && !!n.numero_parcela && (
           <View style={S.notaContextRow}>
-            {n.data_referencia && (
-              <View style={S.notaContextBadge}>
-                <Text style={S.notaContextTx}>📅 {fmtDataCurta(n.data_referencia)}</Text>
-              </View>
-            )}
             {n.numero_parcela && (
               <View style={S.notaContextBadge}>
                 <Text style={S.notaContextTx}>{t.parcela} {n.numero_parcela}</Text>

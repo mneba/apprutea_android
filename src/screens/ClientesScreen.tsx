@@ -548,6 +548,15 @@ export default function ClientesScreen({ navigation, route }: any) {
     dataLiq = hojeStr();
   }
 
+  // A NOTA leva liquidação e dia como um PAR (22/11/2026). As props usavam
+  // `liqId || liquidacaoAtual.id` para a liquidação e `dataLiq` (que cai em
+  // HOJE sem seleção coerente) para o dia — duas réguas, e a nota nascia com
+  // a liquidação de um dia e a data de outro.
+  const liqNotaId = liqId || liqCtx.liquidacaoAtual?.id || undefined;
+  const dataNota = liqId
+    ? dataLiq
+    : (liqCtx.liquidacaoAtual?.data_liquidacao?.substring(0, 10) || dataLiq);
+
   // Dia operacional da tela: a liquidação em foco. É contra ela que se decide
   // o que está vencido — não contra o status do banco, que o trigger
   // atualizar_saldo_parcela grava comparando com CURRENT_DATE. Numa liquidação
@@ -3938,7 +3947,7 @@ return (
         vendedorId={vendedor?.id || ''}
         autorNome={vendedor?.nome || ''}
         autorTipo="VENDEDOR"
-        liquidacaoId={liqId || liqCtx.liquidacaoAtual?.id || undefined}
+        liquidacaoId={liqNotaId}
         liquidacaoStatus={liqCtx.liquidacaoAtual?.status || null}
         clienteId={notaClienteId}
         clienteNome={notaClienteNome}
@@ -3949,8 +3958,10 @@ return (
            31 têm `data_referencia` POSTERIOR ao dia da liquidação, ZERO
            anterior, e ZERO posterior ao dia em UTC — a mesma identidade que
            entregou o bug da autorização de abertura em 04/11.
-           `dataLiq` é o dia operacional, que é a régua do sistema. */
-        dataReferencia={dataLiq}
+           `dataLiq` é o dia operacional, que é a régua do sistema.
+           Desde 22/11/2026 é `dataNota`, o dia da MESMA liquidação de
+           `liqNotaId`. */
+        dataReferencia={dataNota}
         obsLocal="Cliente"
         lang={lang}
         coords={coords}
@@ -3969,8 +3980,9 @@ return (
         vendedorId={vendedor?.id || ''}
         autorNome={vendedor?.nome || ''}
         autorTipo="VENDEDOR"
-        liquidacaoId={liqId || liqCtx.liquidacaoAtual?.id || undefined}
+        liquidacaoId={liqNotaId}
         liquidacaoStatus={liqCtx.liquidacaoAtual?.status || null}
+        dataNovaNota={dataNota}
         clienteId={notasClienteId}
         clienteNome={notasClienteNome}
         lang={lang}
