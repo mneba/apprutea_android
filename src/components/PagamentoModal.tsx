@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { moeda, data } from '../utils/formato';
+import { moeda, data, limitarCasas } from '../utils/formato';
 import { ActivityIndicator, Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Text, TextInput } from './texto';
 
@@ -265,7 +265,7 @@ export default function PagamentoModal({
                         <TextInput
                           style={S.pgInput}
                           value={valorPagamento}
-                          onChangeText={(v) => { setValorPagamento(v); if (erroValor) setErroValor(null); }}
+                          onChangeText={(v) => { setValorPagamento(limitarCasas(v)); if (erroValor) setErroValor(null); }}
                           keyboardType="decimal-pad"
                           placeholder="0,00"
                           editable={dadosPagamento?.permite_pagamento !== false}

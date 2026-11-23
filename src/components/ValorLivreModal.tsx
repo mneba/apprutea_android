@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { moeda } from '../utils/formato';
+import { moeda, limitarCasas } from '../utils/formato';
 import { Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Text, TextInput } from './texto';
 
@@ -87,7 +87,7 @@ export default function ValorLivreModal({
                 <TextInput
                   style={S.input}
                   value={valor}
-                  onChangeText={(v) => { setValor(v); if (erro) setErro(null); }}
+                  onChangeText={(v) => { setValor(limitarCasas(v)); if (erro) setErro(null); }}
                   keyboardType="decimal-pad"
                   placeholder="0,00"
                   placeholderTextColor="#9CA3AF"

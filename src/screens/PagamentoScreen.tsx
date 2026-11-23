@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
 import { ClienteRotaDia } from '../types';
 import { mensagemErro } from '../utils/mensagemErro';
-import { numeroBr } from '../utils/formato';
+import { numeroBr, limitarCasas } from '../utils/formato';
 
 interface Props {
   route: {
@@ -135,7 +135,7 @@ export default function PagamentoScreen({ route, navigation }: Props) {
             <TextInput
               style={styles.input}
               value={valor}
-              onChangeText={setValor}
+              onChangeText={(v) => setValor(limitarCasas(v))}
               keyboardType="decimal-pad"
               placeholder="0,00"
               editable={!loading}

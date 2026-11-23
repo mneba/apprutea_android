@@ -217,3 +217,17 @@ export function mesExtenso(
   const idioma = lang === 'es' ? 'es' : 'pt-BR';
   return `${dois(dt.getDate())} de ${MESES[idioma][dt.getMonth()]} de ${dt.getFullYear()}`;
 }
+
+/**
+ * Texto de um campo de valor, cortado em `casas` decimais (padrão 2).
+ * Relato do Julio (14/10/2026): 10,555 gravou 10,56 e o caixa do dia andou
+ * 10,55 — 1 centavo no extrato. O banco arredonda na entrada desde 22/11/2026;
+ * isto é a segunda defesa: o campo não aceita a 3ª casa. CORTA, não
+ * arredonda. Aceita ponto ou vírgula. Mesma regra de `limitarCasas` no web
+ * (apprutea/src/utils/moeda.ts) — mudou num, muda no outro.
+ */
+export function limitarCasas(texto: string, casas: number = 2): string {
+  const m = /^(-?\d*[.,])(\d*)$/.exec(texto);
+  if (!m || m[2].length <= casas) return texto;
+  return m[1] + m[2].slice(0, casas);
+}

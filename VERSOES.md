@@ -259,3 +259,15 @@ campo mostra nao mapeia para nada.
 - **1.4.18** - 2026-11-22 14:35 - `src/components/LiquidacaoDetalhes.tsx`
 - **1.4.19** - 2026-11-22 14:40 - `src/components/NotasComponent.tsx`
 - **1.4.20** - 2026-11-22 14:40 - `src/screens/ClientesScreen.tsx`
+- **1.4.21** - 2026-11-22 23:20 - `src/components/AvisoDiaAntigo.tsx`
+- **1.4.22** - 2026-11-22 23:20 - `src/navigation/AppNavigator.tsx`
+- **1.4.23** - 2026-11-22 23:20 - `src/navigation/AppNavigator.tsx`
+- **1.4.24** - 2026-11-22 23:21 - `src/screens/NovaMovimentacaoScreen.tsx`
+- **1.4.25** - 2026-11-22 23:21 - `src/screens/NovaVendaScreen.tsx`
+- **1.4.26** - 2026-11-23 00:12 - `src/utils/formato.ts`
+- **1.4.27** - 2026-11-23 00:12 - `src/screens/NovaMovimentacaoScreen.tsx`
+- **1.4.28** - 2026-11-23 00:12 - `src/hooks/useNovaVendaForm.ts`
+- **1.4.29** - 2026-11-23 00:12 - `src/components/MenuPagamento.tsx`
+- **1.4.30** - 2026-11-23 00:12 - `src/components/PagamentoModal.tsx`
+- **1.4.31** - 2026-11-23 00:12 - `src/components/ValorLivreModal.tsx`
+- **1.4.32** - 2026-11-23 00:12 - `src/screens/PagamentoScreen.tsx`

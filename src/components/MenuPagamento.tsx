@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { moeda, data } from '../utils/formato';
+import { moeda, data, limitarCasas } from '../utils/formato';
 import { ActivityIndicator, Modal, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Text, TextInput } from './texto';
 
@@ -358,7 +358,7 @@ export default function MenuPagamento({
                       <TextInput
                         style={S.input}
                         value={valorLivre}
-                        onChangeText={(v) => { setValorLivre(v); if (erro) setErro(null); }}
+                        onChangeText={(v) => { setValorLivre(limitarCasas(v)); if (erro) setErro(null); }}
                         keyboardType="decimal-pad"
                         placeholder="0,00"
                         placeholderTextColor="#9CA3AF"

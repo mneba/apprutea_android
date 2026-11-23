@@ -9,6 +9,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, AppState, Image, Modal, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Text } from '../components/texto';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AvisoDiaAntigo } from '../components/AvisoDiaAntigo';
 import { SolicitacoesWidget } from '../components/SolicitacoesWidget';
 import { useAuth } from '../contexts/AuthContext';
 import { LiquidacaoProvider, useLiquidacaoContext } from '../contexts/LiquidacaoContext';
@@ -243,10 +244,14 @@ function MainTabsContent({ navigation }: any) {
   const insets = useSafeAreaInsets();
   const BASE_PAD = 12;   // respiro visual acima da borda
   const BASE_H = 60;     // altura do conteúdo da tab bar (ícones + label)
+  const liqCtx = useLiquidacaoContext();
+  const liqAberta = liqCtx.estadoLiquidacao === 'ok' ? liqCtx.liquidacaoAtual : null;
 
   return (
     <>
       <SharedHeader navigation={navigation} />
+      {/* Dia aberto anterior ao hoje da rota: avisa em todas as abas (12/10/2026) */}
+      <AvisoDiaAntigo dia={liqAberta?.data_liquidacao ?? null} chave={liqAberta?.id ?? null} />
       <Tab.Navigator
         screenOptions={{
           headerShown: false,

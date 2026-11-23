@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, TouchableOpacity, View } from 'react-native';
 import { Text } from '../components/texto';
+import { AvisoDiaAntigo } from '../components/AvisoDiaAntigo';
 import { amanha, textos } from '../constants/novaVendaConstants';
 import { useAuth } from '../contexts/AuthContext';
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
@@ -487,6 +488,7 @@ export default function NovaVendaScreen({ navigation, route }: any) {
 
       {/* FOOTER - BOTÃO CONFIRMAR */}
       <View style={styles.footer}>
+        <AvisoDiaAntigo variante="linha" />
         <TouchableOpacity
           style={[
             styles.confirmButton,

@@ -15,6 +15,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { subirFotoCliente } from '../services/fotoCliente';
 import { supabase } from '../services/supabase';
 import { useRascunho } from './useRascunho';
+import { limitarCasas } from '../utils/formato';
 
 // ============================================================
 // HOOK: Estados do formulário + validação + handlers
@@ -288,11 +289,11 @@ export function useNovaVendaForm({
   // HANDLERS
   // -----------------------------------------------------------
   const handleValorEmprestimoChange = (text: string) => {
-    setValorEmprestimo(text.replace(/[^\d.,]/g, '').replace(',', '.'));
+    setValorEmprestimo(limitarCasas(text.replace(/[^\d.,]/g, '').replace(',', '.')));
   };
 
   const handleValorMicroseguroChange = (text: string) => {
-    setValorMicroseguro(text.replace(/[^\d.,]/g, '').replace(',', '.'));
+    setValorMicroseguro(limitarCasas(text.replace(/[^\d.,]/g, '').replace(',', '.')));
   };
 
   const handleSelectDdi = (ddi: DDIOption) => {

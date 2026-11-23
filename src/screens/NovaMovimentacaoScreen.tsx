@@ -2,13 +2,14 @@ import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Text, TextInput } from '../components/texto';
+import { AvisoDiaAntigo } from '../components/AvisoDiaAntigo';
 import { useAuth } from '../contexts/AuthContext';
 import { useLiquidacaoContext } from '../contexts/LiquidacaoContext';
 import { supabase } from '../services/supabase';
 import { prepararImagem } from '../services/anexos';
 
 import { mensagemErro } from '../utils/mensagemErro';
-import { numeroBr } from '../utils/formato';
+import { numeroBr, limitarCasas } from '../utils/formato';
 
 // ============================================================
 // TIPOS
@@ -205,7 +206,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
 
   // Entrada natural: digita 500 = $ 500, digita 0.5 = $ 0,50
   const handleValorChange = (text: string) => {
-    setValor(text.replace(/[^\d.,]/g, '').replace(',', '.'));
+    setValor(limitarCasas(text.replace(/[^\d.,]/g, '').replace(',', '.')));
   };
 
   const valorNumerico = parseFloat((valor || '').replace(',', '.')) || 0;
@@ -802,6 +803,7 @@ export default function NovaMovimentacaoScreen({ navigation }: any) {
 
       {/* Botão REGISTRAR */}
       <View style={styles.footer}>
+        <AvisoDiaAntigo variante="linha" />
         <TouchableOpacity
           style={[
             styles.submitBtn,
