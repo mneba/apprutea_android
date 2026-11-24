@@ -971,6 +971,16 @@ export default function ParcelasModal({
                     </View>
                   )}
 
+                  {/* A ficha logo abaixo do resumo (23/11/2026): no fim da
+                      lista o vendedor só a encontrava por acaso. */}
+                  {!!onAbrirFicha && (
+                    <TouchableOpacity style={R.linkFicha} onPress={onAbrirFicha}>
+                      <Ionicons name="document-text-outline" size={14} color="#4338CA" />
+                      <Text style={R.linkFichaTx}>{tx.verFicha}</Text>
+                      <Ionicons name="chevron-forward" size={13} color="#818CF8" />
+                    </TouchableOpacity>
+                  )}
+
                   {/* Faixa do dia */}
                   {(parcelasHoje.length > 0 || estornadosHoje.length > 0) && (
                     <View style={R.faixaHoje}>
@@ -1028,14 +1038,6 @@ export default function ParcelasModal({
                       onPress={() => onRenovar && onRenovar()}
                     >
                       <Text style={R.btnLargoTx}>{jaRenovado ? `✓ ${tx.renovado}` : `↻ ${tx.renovar}`}</Text>
-                    </TouchableOpacity>
-                  )}
-
-                  {!!onAbrirFicha && (
-                    <TouchableOpacity style={R.linkFicha} onPress={onAbrirFicha}>
-                      <Ionicons name="document-text-outline" size={14} color="#4338CA" />
-                      <Text style={R.linkFichaTx}>{tx.verFicha}</Text>
-                      <Ionicons name="chevron-forward" size={13} color="#818CF8" />
                     </TouchableOpacity>
                   )}
                 </>

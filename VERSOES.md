@@ -271,3 +271,13 @@ campo mostra nao mapeia para nada.
 - **1.4.30** - 2026-11-23 00:12 - `src/components/PagamentoModal.tsx`
 - **1.4.31** - 2026-11-23 00:12 - `src/components/ValorLivreModal.tsx`
 - **1.4.32** - 2026-11-23 00:12 - `src/screens/PagamentoScreen.tsx`
+- **1.4.33** - 2026-11-23 23:44 - `src/services/fichaEmprestimo.ts`
+- **1.4.34** - 2026-11-23 23:44 - `src/services/fichaEmprestimo.ts`
+- **1.4.35** - 2026-11-23 23:44 - `src/screens/FichaEmprestimoScreen.tsx`
+- **1.4.36** - 2026-11-23 23:44 - `src/screens/FichaEmprestimoScreen.tsx`
+- **1.4.37** - 2026-11-23 23:44 - `src/screens/FichaEmprestimoScreen.tsx`
+- **1.4.38** - 2026-11-23 23:44 - `src/screens/FichaEmprestimoScreen.tsx`
+- **1.4.39** - 2026-11-23 23:44 - `src/screens/FichaEmprestimoScreen.tsx`
+- **1.4.40** - 2026-11-23 23:44 - `src/screens/FichaEmprestimoScreen.tsx`
+- **1.4.41** - 2026-11-23 23:53 - `src/components/ParcelasModal.tsx`
+- **1.4.42** - 2026-11-23 23:53 - `src/components/ParcelasModal.tsx`

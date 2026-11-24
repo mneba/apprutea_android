@@ -57,6 +57,8 @@ const TX = {
     creditoCascata: 'Crédito aplicado',
     adiantamento: 'Adiantamento aplicado',
     importacao: 'Importação',
+    alteracao: 'Empréstimo alterado',
+    correcao: 'Correção',
     estornado: 'ESTORNADO',
     estornadoEm: 'Estornado em',
     por: 'por',
@@ -113,6 +115,8 @@ const TX = {
     creditoCascata: 'Crédito aplicado',
     adiantamento: 'Anticipo aplicado',
     importacao: 'Importación',
+    alteracao: 'Préstamo modificado',
+    correcao: 'Corrección',
     estornado: 'ANULADO',
     estornadoEm: 'Anulado el',
     por: 'por',
@@ -175,7 +179,12 @@ const CORES: Record<string, string> = {
   QUITACAO: '#059669',
   CREDITO_CASCATA: '#4F46E5',
   IMPORTACAO: '#6B7280',
+  ALTERACAO: '#B45309',
+  CORRECAO: '#0369A1',
 };
+
+/** Eventos de audit_logs (23/11/2026): sem valor nem saldo, só o texto. */
+const ehAjuste = (tipo: string) => tipo === 'ALTERACAO' || tipo === 'CORRECAO';
 
 const ICONES: Record<string, any> = {
   CONCESSAO: 'cash-outline',
@@ -183,6 +192,8 @@ const ICONES: Record<string, any> = {
   QUITACAO: 'checkmark-done-circle-outline',
   CREDITO_CASCATA: 'card-outline',
   IMPORTACAO: 'cloud-download-outline',
+  ALTERACAO: 'create-outline',
+  CORRECAO: 'construct-outline',
 };
 
 export default function FichaEmprestimoScreen({ route, navigation }: any) {
@@ -342,6 +353,8 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
     QUITACAO: t.quitacao,
     CREDITO_CASCATA: mostrarCredito ? t.creditoCascata : t.adiantamento,
     IMPORTACAO: t.importacao,
+    ALTERACAO: t.alteracao,
+    CORRECAO: t.correcao,
   }[ev.tipo] || ev.tipo);
 
   return (
@@ -511,7 +524,7 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
                           {ev.autor ? ` · ${ev.autor}` : ''}
                         </Text>
                       </View>
-                      {ev.tipo === 'CONCESSAO' ? (
+                      {ehAjuste(ev.tipo) ? null : ev.tipo === 'CONCESSAO' ? (
                         <Text style={[S.eventoValor, { color: cor }]}>{fmt(ev.valor_emprestado)}</Text>
                       ) : (
                         <Text style={[S.eventoValor, { color: cor }, ev.estornado && S.riscado]}>
@@ -520,10 +533,16 @@ export default function FichaEmprestimoScreen({ route, navigation }: any) {
                       )}
                     </View>
 
+                    {ehAjuste(ev.tipo) && !!ev.descricao && (
+                      <View style={S.eventoCorpo}>
+                        <Text style={S.obsTx}>{ev.descricao}</Text>
+                      </View>
+                    )}
+
                     {/* Composição: dinheiro e crédito separados. É exatamente o
                         que faltava no extrato — a quitação da Paloma mostrava
                         $360 sem dizer que outros $120 vieram de crédito. */}
-                    {ev.tipo !== 'CONCESSAO' && (
+                    {ev.tipo !== 'CONCESSAO' && !ehAjuste(ev.tipo) && (
                       <View style={S.eventoCorpo}>
                         {!!ev.parcelas?.length && (
                           <Text style={S.eventoInfo}>

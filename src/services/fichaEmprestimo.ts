@@ -19,7 +19,11 @@ export type TipoEvento =
   | 'PAGAMENTO'
   | 'QUITACAO'
   | 'CREDITO_CASCATA'
-  | 'IMPORTACAO';
+  | 'IMPORTACAO'
+  // De audit_logs (23/11/2026): mudança feita no empréstimo depois de nascer,
+  // e reparo feito por script. Sem valor nem saldo — só `descricao`.
+  | 'ALTERACAO'
+  | 'CORRECAO';
 
 export interface EventoFicha {
   tipo: TipoEvento;
@@ -58,6 +62,10 @@ export interface EventoFicha {
   saldo_credito: number;
   /** Só na CONCESSAO. */
   valor_emprestado?: number;
+  /** Só em ALTERACAO e CORRECAO: o que mudou, em texto. */
+  descricao?: string | null;
+  /** Crédito parado que a alteração incorporou às parcelas pagas. */
+  credito_absorvido?: number;
 }
 
 export interface EloCadeia {
