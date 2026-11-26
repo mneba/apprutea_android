@@ -81,12 +81,14 @@ export default function PerfilScreen({ navigation }: any) {
     try {
       const { data, error } = await supabase
         .from('vendedores')
-        .select('id, nome, apellidos, codigo_acesso, foto_url, email, telefone, documento, endereco, data_admissao, status, codigo_vendedor')
+        // Sem `codigo_acesso`: o banco vai fechar essa coluna (é a senha). O
+        // código que aparece aqui é o que o próprio vendedor digitou no login.
+        .select('id, nome, apellidos, foto_url, email, telefone, documento, endereco, data_admissao, status, codigo_vendedor')
         .eq('id', vendedor.id)
         .single();
 
       if (error) throw error;
-      setVendedorCompleto(data);
+      setVendedorCompleto({ ...data, codigo_acesso: vendedor.codigo });
     } catch (error) {
       console.error('Erro ao carregar perfil:', error);
       // Fallback: usa dados do AuthContext

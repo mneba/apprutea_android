@@ -281,3 +281,13 @@ campo mostra nao mapeia para nada.
 - **1.4.40** - 2026-11-23 23:44 - `src/screens/FichaEmprestimoScreen.tsx`
 - **1.4.41** - 2026-11-23 23:53 - `src/components/ParcelasModal.tsx`
 - **1.4.42** - 2026-11-23 23:53 - `src/components/ParcelasModal.tsx`
+- **1.4.43** - 2026-11-25 00:00 - `src/hooks/useNovaVendaConfig.ts`
+- **1.4.44** - 2026-11-25 00:00 - `src/hooks/useNovaVendaConfig.ts`
+- **1.4.45** - 2026-11-25 00:00 - `src/hooks/useNovaVendaConfig.ts`
+- **1.4.46** - 2026-11-25 00:00 - `src/components/nova-venda/FormularioEmprestimo.tsx`
+- **1.4.47** - 2026-11-25 00:00 - `src/components/nova-venda/FormularioEmprestimo.tsx`
+- **1.4.48** - 2026-11-25 00:00 - `src/components/nova-venda/FormularioEmprestimo.tsx`
+- **1.4.49** - 2026-11-25 00:00 - `src/components/nova-venda/FormularioEmprestimo.tsx`
+- **1.4.50** - 2026-11-25 00:00 - `src/screens/NovaVendaScreen.tsx`
+- **1.4.51** - 2026-11-25 00:41 - `src/contexts/AuthContext.tsx`
+- **1.4.52** - 2026-11-25 00:41 - `src/screens/PerfilScreen.tsx`

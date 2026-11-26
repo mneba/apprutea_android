@@ -29,6 +29,11 @@ export function useNovaVendaConfig({ vendedorId, rotaId }: UseNovaVendaConfigPar
   const [validarMaxVendas, setValidarMaxVendas] = useState<boolean>(false);
   const [valorMaxVendas, setValorMaxVendas] = useState<number>(0);
 
+  // --- "Só frequência diária" (cadastro do vendedor, web) ---
+  // Falha de leitura deixa `false`: o banco recusa do mesmo jeito
+  // (tr_emprestimo_frequencia_do_vendedor), aqui é só para não oferecer.
+  const [somenteDiario, setSomenteDiario] = useState<boolean>(false);
+
   // -----------------------------------------------------------
   // CARREGAR SEGMENTOS
   // -----------------------------------------------------------
@@ -152,6 +157,24 @@ export function useNovaVendaConfig({ vendedorId, rotaId }: UseNovaVendaConfigPar
     })();
   }, [vendedorId]);
 
+  // Carregar "só frequência diária". Relido a cada montagem da tela: a
+  // opção é ligada no web e o app tem de ver a troca sem novo login.
+  useEffect(() => {
+    if (!vendedorId) return;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('configuracoes_vendedor')
+          .select('somente_frequencia_diaria')
+          .eq('vendedor_id', vendedorId)
+          .maybeSingle();
+        setSomenteDiario(data?.somente_frequencia_diaria === true);
+      } catch (e) {
+        console.error('Erro ao carregar restrição de frequência:', e);
+      }
+    })();
+  }, [vendedorId]);
+
   return {
     // Segmentos
     segmentos,
@@ -165,5 +188,7 @@ export function useNovaVendaConfig({ vendedorId, rotaId }: UseNovaVendaConfigPar
     // Restrição vendas
     validarMaxVendas,
     valorMaxVendas,
+    // Frequência
+    somenteDiario,
   };
 }

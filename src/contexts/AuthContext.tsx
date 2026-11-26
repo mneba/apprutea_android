@@ -240,20 +240,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       // 1. Fazer login no Supabase primeiro (email = codigo@apprutea.internal)
       const authEmail = `${codigo}@apprutea.internal`;
-      const { error: authError } = await supabase.auth.signInWithPassword({
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: authEmail,
         password: codigo,
       });
 
-      if (authError) {
+      if (authError || !authData?.user) {
         return { success: false, error: t.invalidCode };
       }
 
-      // 2. Agora autenticado — buscar dados do vendedor
+      // 2. Agora autenticado — buscar dados do vendedor PELO LOGIN, não pelo
+      // código, e sem a coluna do código (25/11/2026). O código é a senha:
+      // o banco vai fechar `vendedores.codigo_acesso` para quem está logado,
+      // e um `select('*')` ou um filtro por ela derrubaria este login.
       const { data: vendedorData, error: vendedorError } = await supabase
         .from('vendedores')
-        .select('*')
-        .eq('codigo_acesso', codigo)
+        .select('id, nome, email, empresa_id, user_id, foto_url, status')
+        .eq('user_id', authData.user.id)
         .single();
 
       if (vendedorError || !vendedorData) {

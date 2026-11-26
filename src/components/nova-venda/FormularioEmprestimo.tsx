@@ -36,6 +36,13 @@ interface Props {
   // Config
   taxasPermitidas: number[];
   taxasLivre: boolean;
+  /**
+   * "Só frequência diária", do cadastro do vendedor. Ligado, a frequência é
+   * Diário — EXCETO sob termos aprovados pelo admin (`isVendaAprovadaTravada`):
+   * o admin tem precedência sobre o vendedor (Mauricio, 24/11/2026). O banco
+   * aplica a mesma regra em tr_emprestimo_frequencia_do_vendedor.
+   */
+  somenteDiario?: boolean;
   // Flags
   isRenegociacao: boolean;
   /**
@@ -86,7 +93,7 @@ export default function FormularioEmprestimo(props: Props) {
     observacoesEmprestimo, setObservacoesEmprestimo,
     valorPrincipal, taxaNum, parcelasNum,
     valorTotal, valorParcela, totalJuros,
-    taxasPermitidas,
+    taxasPermitidas, somenteDiario = false,
     isRenegociacao, isVendaAprovadaTravada, tetoValor = null, camposComErro, dataOperacional, lang,
     handleValorEmprestimoChange, limparErroCampo,
     onOpenDatePicker, onOpenCarrosselFlexivel,
@@ -98,6 +105,20 @@ export default function FormularioEmprestimo(props: Props) {
   const temTeto = tetoValor != null && tetoValor > 0;
   const valorTravado = isRenegociacao || (isVendaAprovadaTravada && !temTeto);
   const acimaDoTeto = temTeto && valorPrincipal > (tetoValor as number) + 0.001;
+
+  // Só Diário, salvo termos aprovados pelo admin.
+  const soDiario = somenteDiario && !isVendaAprovadaTravada;
+
+  // A renovação puxa a frequência do empréstimo anterior, e a venda pode ter
+  // começado antes de a configuração chegar: o que não for Diário volta para
+  // Diário, com a data sugerida de sempre (liquidação + 1).
+  React.useEffect(() => {
+    if (soDiario && frequencia !== 'DIARIO') {
+      setFrequencia('DIARIO');
+      setDataPrimeiroVencimento(amanha(dataOperacional));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [soDiario, frequencia]);
 
   return (
     <>
@@ -253,7 +274,7 @@ export default function FormularioEmprestimo(props: Props) {
             { value: 'QUINZENAL', label: 'Quinzenal' },
             { value: 'MENSAL', label: 'Mensal' },
             { value: 'FLEXIVEL', label: 'Flexível' },
-          ].map((freq) => (
+          ].filter((freq) => !soDiario || freq.value === 'DIARIO').map((freq) => (
             <TouchableOpacity
               key={freq.value}
               style={[
